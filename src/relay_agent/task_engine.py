@@ -110,15 +110,27 @@ class DeterministicTaskEngine:
         if task["contexts"]:
             names = ", ".join(context.get("filename", "PDF context") for context in task["contexts"])
             self._append(task, "status", text=f"Local PDF context attached · {names}")
-            self._append(
-                task,
-                "message",
-                speaker="relay_private",
-                text=(
-                    "I attached the PDF to this task. Before I finalize the quote plan, please confirm the rented "
-                    "property address so I do not rely on an ambiguous document value."
-                ),
+            candidate = next(
+                (context.get("address_candidate") for context in task["contexts"] if context.get("address_candidate")),
+                None,
             )
+            if candidate:
+                task["address_candidate"] = candidate
+                task["stage"] = "confirm_address"
+                task["prompt"] = self._address_confirmation_prompt(candidate)
+                self._append(
+                    task,
+                    "message",
+                    speaker="relay_private",
+                    text=f"I found this possible property address in the PDF: {candidate}. Please confirm it before I use it.",
+                )
+            else:
+                self._append(
+                    task,
+                    "message",
+                    speaker="relay_private",
+                    text="I read the PDF but could not identify a reliable property address. Please type the full address below.",
+                )
         else:
             self._append(
                 task,
@@ -141,6 +153,37 @@ class DeterministicTaskEngine:
             if task is None:
                 raise TaskNotFound(task_id)
             return self._snapshot(task)
+
+    def attach_context(self, task_id: str, context: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                raise TaskNotFound(task_id)
+            if task["phase"] != "planning":
+                raise InvalidAction("Supporting documents can be added during the planning stage.")
+            task["contexts"].append(deepcopy(context))
+            self._append(task, "status", text=f"Local PDF context attached · {context['filename']}")
+            candidate = context.get("address_candidate")
+            if candidate and task["stage"] in {"plan_address", "confirm_address"}:
+                task["address_candidate"] = candidate
+                task["stage"] = "confirm_address"
+                task["prompt"] = self._address_confirmation_prompt(candidate)
+                self._append(
+                    task,
+                    "message",
+                    speaker="relay_private",
+                    text=f"I found this possible property address in the PDF: {candidate}. Please confirm it before I use it.",
+                )
+            elif task["stage"] == "plan_address":
+                self._append(
+                    task,
+                    "message",
+                    speaker="relay_private",
+                    text="I read the PDF but could not identify a reliable property address. Please type the full address below.",
+                )
+            snapshot = self._snapshot(task)
+        self._events.append("task.context_attached", {"task_id": task_id, **context})
+        return snapshot
 
     def act(self, task_id: str, action: str, value: str = "") -> dict[str, Any]:
         with self._lock:
@@ -185,6 +228,17 @@ class DeterministicTaskEngine:
     def _planning_message(self, task: dict[str, Any], instruction: str) -> None:
         self._append(task, "message", speaker="user_private", text=instruction)
         if task["stage"] == "plan_address":
+            if not self._looks_like_address(instruction):
+                self._append(
+                    task,
+                    "message",
+                    speaker="relay_private",
+                    text=(
+                        "That does not look like a complete property address, so I will not use it. "
+                        "Type the street address or attach the lease PDF here."
+                    ),
+                )
+                return
             task["address"] = instruction
             self._append(
                 task,
@@ -193,6 +247,33 @@ class DeterministicTaskEngine:
                 text="Thanks. I’ll use that address for this simulated quote task. Here is the proposed call plan.",
             )
             self._present_plan(task)
+            return
+
+        if task["stage"] == "confirm_address":
+            if self._looks_like_address(instruction):
+                task.pop("address_candidate", None)
+                task["address"] = instruction
+                self._append(task, "message", speaker="relay_private", text="Thanks. I’ll use the address you typed and prepare the call plan.")
+                self._present_plan(task)
+                return
+            self._append(
+                task,
+                "message",
+                speaker="relay_private",
+                text="Please use the confirmation buttons, type a complete street address, or attach another PDF.",
+            )
+            return
+
+        if task["stage"] in {"select_insurer", "approve_callback"}:
+            self._append(
+                task,
+                "message",
+                speaker="relay_private",
+                text=(
+                    "I’ve noted that in our decision conversation. Review the factual table and choose a carrier "
+                    "when ready; I will not place the callback without your approval."
+                ),
+            )
             return
 
         if task["stage"] != "plan_review":
@@ -258,6 +339,7 @@ class DeterministicTaskEngine:
     def _answer(self, task: dict[str, Any], value: str) -> None:
         handlers = {
             "plan_review": self._handle_plan_decision,
+            "confirm_address": self._handle_address_confirmation,
             "claims_history": self._handle_claims,
             "select_insurer": self._handle_selection,
             "approve_callback": self._handle_callback_approval,
@@ -271,6 +353,25 @@ class DeterministicTaskEngine:
         if handler is None:
             raise InvalidAction("Relay is not waiting for that answer right now.")
         handler(task, value)
+
+    def _handle_address_confirmation(self, task: dict[str, Any], value: str) -> None:
+        if value == "use_address":
+            task["address"] = task.pop("address_candidate")
+            self._append(task, "message", speaker="user_private", text=f"Use {task['address']}.")
+            self._append(task, "message", speaker="relay_private", text="Confirmed. Here is the proposed call plan.")
+            self._present_plan(task)
+            return
+        if value != "type_address":
+            raise InvalidAction("Confirm the extracted address or choose to type another one.")
+        task.pop("address_candidate", None)
+        task["stage"] = "plan_address"
+        task["prompt"] = {
+            "kind": "text_reply",
+            "question": "Type the full rented property address below or attach another PDF.",
+            "options": [],
+        }
+        self._append(task, "message", speaker="user_private", text="That is not the correct address.")
+        self._append(task, "message", speaker="relay_private", text="Understood. Please type the correct full address or attach another PDF.")
 
     def _handle_plan_decision(self, task: dict[str, Any], value: str) -> None:
         if value == "hold":
@@ -359,13 +460,7 @@ class DeterministicTaskEngine:
                 ]
             )
         task["quotes"] = deepcopy(carriers)
-        events.append(queued("comparison", text=f"{len(carriers)} simulated quotes collected. Relay has not ranked or recommended them."))
-        prompt = {
-            "kind": "insurer_selection",
-            "question": "Review the factual comparison and choose which insurer Relay should call back.",
-            "options": [{"value": quote["id"], "label": quote["insurer"]} for quote in carriers],
-        }
-        self._schedule(task, events, prompt, "select_insurer")
+        self._schedule(task, events, None, "quote_calls_complete")
 
     def _call_interruption(self, task: dict[str, Any], instruction: str) -> None:
         if task["stage"] == "takeover":
@@ -417,6 +512,8 @@ class DeterministicTaskEngine:
             raise InvalidAction("Approve the callback or stop the task.")
         insurer = task["selected_insurer"]
         self._append(task, "message", speaker="user_private", text="Approved. Place the callback.")
+        self._append(task, "message", speaker="relay_private", text="Approved. I’m returning to the live-call panel for the application callback.")
+        task["phase"] = "calling"
         events = [
             queued("status", text=f"Calling {insurer} · continuing simulated application", company=insurer),
             queued("message", speaker="representative", company=insurer, text="Welcome back. I found the quote. Are you ready to continue with the application?"),
@@ -427,7 +524,7 @@ class DeterministicTaskEngine:
             "question": "The simulated representative asks you to confirm that the sample application details are accurate.",
             "options": [
                 {"value": "confirm", "label": "I confirm"},
-                {"value": "takeover", "label": "Take over"},
+                {"value": "takeover", "label": "Simulate takeover · no audio"},
             ],
         }
         self._schedule(task, events, prompt, "confirm_application")
@@ -447,7 +544,7 @@ class DeterministicTaskEngine:
             "kind": "payment_method",
             "question": "Choose how to handle the simulated payment segment. Use fake card data only.",
             "options": [
-                {"value": "takeover", "label": "Take over (recommended)"},
+                {"value": "takeover", "label": "Simulate takeover · no audio"},
                 {"value": "local_tts", "label": "Use local device voice"},
                 {"value": "risky", "label": "Let Relay speak it · risky"},
             ],
@@ -482,7 +579,7 @@ class DeterministicTaskEngine:
 
     def _enter_secure_mode(self, task: dict[str, Any], method: str) -> None:
         task["secure_mode"] = True
-        labels = {"takeover": "User takeover", "local_tts": "Local device voice", "risky": "Relay voice simulation"}
+        labels = {"takeover": "Simulated takeover (no audio)", "local_tts": "Local device voice", "risky": "Relay voice simulation"}
         self._append(task, "message", speaker="relay", text="One moment—Alex will handle the payment details through a protected channel.")
         self._append(task, "status", text=f"Secure mode active · {labels[method]} · cloud transcription paused")
         self._append(task, "secure_gap", text="Sensitive payment segment is neither transcribed nor logged.")
@@ -524,15 +621,15 @@ class DeterministicTaskEngine:
         }
         task["_pending"] = []
         task["auto_advance"] = False
-        self._append(task, "message", speaker="user_private", text="Take over the active call now.")
-        self._append(task, "message", speaker="relay", text="Can you give me just one moment? Alex is taking over the call now.")
-        self._append(task, "status", text="User takeover active · Relay microphone paused")
+        self._append(task, "message", speaker="user_private", text="Simulate taking over the active call.")
+        self._append(task, "message", speaker="relay", text="Can you give me just one moment? Alex would take over the live audio here.")
+        self._append(task, "status", text="Takeover simulation active · no microphone or telephone audio is connected in this build")
         task["stage"] = "takeover"
         task["status"] = "waiting_for_user"
         task["prompt"] = {
             "kind": "approval",
-            "question": "You have the simulated call. Return control to Relay when ready.",
-            "options": [{"value": "resume", "label": "Return control to Relay"}],
+            "question": "This deterministic preview only pauses the script; it does not connect your microphone. Resume when ready.",
+            "options": [{"value": "resume", "label": "Resume simulated Relay"}],
         }
 
     def _handle_resume(self, task: dict[str, Any], value: str) -> None:
@@ -576,6 +673,29 @@ class DeterministicTaskEngine:
 
     def _finish_schedule(self, task: dict[str, Any]) -> None:
         task["auto_advance"] = False
+        if task["_pending_stage"] == "quote_calls_complete":
+            task["_pending_prompt"] = None
+            task["_pending_stage"] = None
+            task["phase"] = "planning"
+            task["stage"] = "select_insurer"
+            task["status"] = "waiting_for_user"
+            self._append(
+                task,
+                "message",
+                speaker="relay_private",
+                text="I finished the quote calls. We’re back in our planning conversation; here is the factual comparison.",
+            )
+            self._append(
+                task,
+                "comparison",
+                text=f"{len(task['quotes'])} simulated quotes collected. Relay has not ranked or recommended them.",
+            )
+            task["prompt"] = {
+                "kind": "insurer_selection",
+                "question": "Review the comparison and choose an insurer, or type questions and instructions below.",
+                "options": [{"value": quote["id"], "label": quote["insurer"]} for quote in task["quotes"]],
+            }
+            return
         task["stage"] = task["_pending_stage"]
         task["prompt"] = task["_pending_prompt"]
         task["status"] = "waiting_for_user" if task["prompt"] else "running"
@@ -596,11 +716,32 @@ class DeterministicTaskEngine:
             "kind": "payment_method",
             "question": "Choose a safer simulated payment method.",
             "options": [
-                {"value": "takeover", "label": "Take over (recommended)"},
+                {"value": "takeover", "label": "Simulate takeover · no audio"},
                 {"value": "local_tts", "label": "Use local device voice"},
                 {"value": "risky", "label": "Let Relay speak it · risky"},
             ],
         }
+
+    def _address_confirmation_prompt(self, candidate: str) -> dict[str, Any]:
+        return {
+            "kind": "approval",
+            "question": f"Use {candidate} as the rented property address?",
+            "options": [
+                {"value": "use_address", "label": "Use this address"},
+                {"value": "type_address", "label": "Type another address"},
+            ],
+        }
+
+    def _looks_like_address(self, value: str) -> bool:
+        if not re.search(r"\d", value):
+            return False
+        return bool(
+            re.search(
+                r"\b(street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|lane|ln\.?|drive|dr\.?|court|ct\.?)\b",
+                value,
+                re.IGNORECASE,
+            )
+        )
 
     def _append(self, task: dict[str, Any], event_type: str, **payload: Any) -> None:
         event = {

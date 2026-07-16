@@ -43,12 +43,12 @@ No other CLI commands are required in P0.
 1. In the private planning stage, the user gives Relay the goal and optional supporting documents.
 2. Relay asks for missing facts, proposes companies and verified contact details, and lets the user revise the plan over multiple rounds.
 3. Relay starts no call until the user explicitly approves the finalized plan.
-4. The UI then switches to the live-call stage; each call appears as a paced chat conversation.
+4. The UI then switches to the persistent live-call panel; each call appears as a paced chat conversation.
 5. When Relay lacks an answer, it asks the representative for a moment and renders a quick-reply control.
 6. The user may barge in at any time; Relay reformulates the private instruction and inserts it before the next call turn.
-7. Relay gathers the quotes and shows a factual comparison table without ranking or recommending.
-8. The user selects an insurer and explicitly instructs Relay to proceed.
-9. Relay calls the selected simulated insurer and continues the application.
+7. After quote calls finish, Relay returns to the persistent planning panel and shows a factual comparison without ranking or recommending.
+8. The user selects an insurer and explicitly approves the callback in that planning conversation.
+9. Relay switches back to the live-call panel, calls the selected simulated insurer, and continues the application.
 10. The user personally confirms material representations and approves purchase.
 11. Relay enters secure mode for a fake payment: cloud AI muted, transcription paused, macOS on-device TTS or user takeover available.
 12. Relay resumes and records the non-sensitive policy outcome.
@@ -60,6 +60,8 @@ No other CLI commands are required in P0.
 - Accept a goal.
 - Accept supporting text and local files; PDF/image extraction may be limited to the demo fixtures in P0.
 - Show the facts Relay plans to use and allow correction.
+- Do not treat arbitrary clarification text as a required fact. Validate typed addresses and ask for confirmation before using PDF-extracted candidates.
+- Keep PDF attachment available inside the planning conversation, not only on the initial form.
 
 ### Planning boundary
 
@@ -97,8 +99,9 @@ Free text always uses the persistent chat input; it is not a generated component
 
 - Unknown facts generate an immediate user request.
 - Financial, contractual, legal, and final purchase actions require approval.
-- A permanent Take Over control is visible during an active call.
+- A permanent Take Over control is visible during an active call only after real audio bridging exists.
 - The user can return control to Relay after takeover when supported.
+- Until then, the deterministic UI must say `Simulate takeover · no audio` and must not imply the microphone is connected.
 
 ### AI disclosure
 

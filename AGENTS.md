@@ -26,7 +26,8 @@ The renters-insurance workflow is the hackathon demo, not the product boundary.
 
 ## Implemented now
 
-- The deterministic preview is runnable end to end: private clarification and editable planning, explicit start approval, paced synthetic quote calls, interruptible barge-in, transcript bubbles, quick replies, factual comparison, later approval gates, takeover/resume, secure payment simulation, and local JSONL logs.
+- The deterministic preview is runnable end to end: validated address/PDF clarification, editable planning, explicit start approval, paced synthetic quote calls, interruptible barge-in, persistent planning/call panels, factual comparison back in planning, later approval gates, simulated takeover/resume, secure payment simulation, and local JSONL logs.
+- Takeover does not connect microphone or phone audio yet. UI and documentation must call it simulated until a real media bridge exists.
 - It does not yet contain model-driven planning, Realtime voice, telephony, or general task execution. Do not describe those as working.
 
 ## Explicit non-goals

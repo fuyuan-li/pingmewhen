@@ -18,6 +18,8 @@ Exit: `uv run relay` and `uv run relay demo` open a local application; tests pas
 - [x] Implement quick-reply schema validation and renderers.
 - [x] Separate private planning from the live-call monitor with an explicit approval boundary.
 - [x] Pace simulated turns from a backend queue and support barge-in ahead of the next turn.
+- [x] Preserve separate planning and live-call histories and return to planning for quote comparison.
+- [x] Validate typed addresses and allow PDF attachment during planning.
 - Implement local WebSocket event stream.
 - [x] Persist transcript and workflow events to the local JSONL log.
 - Persist and reload active task state after a restart.
@@ -37,6 +39,8 @@ Exit: `relay demo` completes three distinct dynamic quote conversations and wait
 ## Milestone 3 — Realtime voice and demo gateway
 
 - Connect the simulated representative and Relay through real audio.
+- Add a browser WebRTC microphone leg and shared media conference for genuine takeover.
+- Route the simulated representative as a separate audio participant before attempting real PSTN calls.
 - Stream transcripts and speaker identity into the local UI.
 - Implement AI disclosure at call start.
 - Send private user responses back into the active conversation.
@@ -48,7 +52,8 @@ Exit: the demo is driven by actual voice runtime events rather than scripted UI 
 ## Milestone 4 — approvals, takeover, and secure mode
 
 - [x] Block the final selection/purchase step on explicit approval in the simulator.
-- [x] Add permanent Take Over control and simulated pause/resume state.
+- [x] Add truthfully labeled simulated takeover/pause state.
+- Replace simulated takeover with a real audio-track switch only after the shared media bridge is operational.
 - [x] Add simulated secure-mode transition and a deliberate transcript gap.
 - [x] Use the browser/OS local speech facility for fake card data in the deterministic preview.
 - Route repetition or unexpected payment questions to takeover.

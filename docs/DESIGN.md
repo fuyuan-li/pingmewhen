@@ -54,10 +54,12 @@ It must bind to `127.0.0.1` by default.
 
 ### Dashboard
 
-The production dashboard is split across two explicit surfaces:
+The production dashboard is split across two persistent surfaces:
 
 1. **Private planning:** goal/context intake, clarification dialogue, editable call plan, contact details, and approve/hold/decline controls.
-2. **Live call monitor:** entered only after plan approval, with paced transcript turns and controls for intervention.
+2. **Live call monitor:** entered only for external execution, with paced transcript turns and controls for intervention.
+
+The normal insurance sequence is `planning → quote calls → planning comparison/decision → application callback`. Each panel retains its own history, and the active panel changes automatically; the user may inspect the inactive history panel without sending input to it.
 
 The primary active-call layout is:
 
@@ -71,6 +73,24 @@ The primary active-call layout is:
 The transcript is the primary live representation. Summaries are produced between calls and at task completion, not continuously on every turn.
 
 The deterministic simulator keeps future turns in a backend queue. The UI requests one turn at a time. A user barge-in is placed at the front of that queue as a private user message, a contextually reformulated Relay utterance, and a simulated representative response. The pending script then resumes.
+
+### Real takeover media path
+
+The deterministic preview does not connect audio. Its takeover control only pauses the scripted state machine and is labeled accordingly.
+
+A real takeover requires three live participants sharing one media bridge:
+
+```text
+representative PSTN/SIP leg ─┐
+Relay Realtime audio leg ────┼─ media conference / gateway
+user browser WebRTC leg ─────┘
+```
+
+The browser obtains microphone audio with WebRTC. The phone leg enters through a SIP trunk or telephony provider. During Relay mode, the gateway publishes Relay audio and keeps the user microphone muted. During takeover, it cancels/pauses Relay output, unmutes the browser track into the same conference, and continues routing representative audio to the browser. Returning control reverses that switch. Ephemeral browser credentials and standard API credentials must remain server-side responsibilities.
+
+OpenAI recommends WebRTC for browser Realtime clients and documents browser microphone tracks and ephemeral credentials: https://developers.openai.com/api/docs/guides/realtime-webrtc. OpenAI also documents SIP phone connectivity and call monitoring: https://developers.openai.com/api/docs/guides/realtime-sip. Combining both legs in a shared conference is Relay architecture, not a capability that the current deterministic app already provides.
+
+For the safe hackathon demo, the representative can be a simulated voice participant rather than a real insurer, but the user and simulated representative should still exchange actual audio through the same conference. That proves takeover without calling a real business.
 
 ### Task orchestrator
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -11,6 +12,10 @@ from relay_agent.event_log import EventLog, default_data_dir
 
 
 MAX_PDF_BYTES = 10 * 1024 * 1024
+ADDRESS_PATTERN = re.compile(
+    r"\b\d{1,6}\s+[A-Za-z0-9 .'-]{2,60}\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct)\b[^\n]{0,60}",
+    re.IGNORECASE,
+)
 
 
 class InvalidContext(ValueError):
@@ -48,6 +53,13 @@ class ContextStore:
             "filename": safe_name,
             "pages": len(reader.pages),
             "characters": len(extracted),
+            "address_candidate": self._find_address(extracted),
         }
         self._events.append("context.saved", metadata)
         return metadata
+
+    def _find_address(self, extracted: str) -> str | None:
+        match = ADDRESS_PATTERN.search(extracted)
+        if not match:
+            return None
+        return " ".join(match.group(0).strip(" ,.;").split())

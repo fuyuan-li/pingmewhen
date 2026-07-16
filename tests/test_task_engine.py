@@ -51,6 +51,40 @@ def test_planning_requires_clarification_and_explicit_approval(tmp_path):
     assert all("phone" in carrier for carrier in plan["carriers"])
 
 
+def test_non_address_reply_is_not_silently_accepted(tmp_path):
+    engine = make_engine(tmp_path)
+    task = engine.create("Get renters insurance quotes.")
+
+    task = act(engine, task, "instruction", "oh I don't have it")
+
+    assert task["stage"] == "plan_address"
+    assert task["address"] is None
+    assert not any(event["type"] == "plan" for event in task["events"])
+    assert "does not look like" in task["events"][-1]["text"]
+
+
+def test_pdf_attached_during_planning_requires_address_confirmation(tmp_path):
+    engine = make_engine(tmp_path)
+    task = engine.create("Get renters insurance quotes.")
+
+    task = engine.attach_context(
+        task["id"],
+        {
+            "id": "context-1",
+            "filename": "lease.pdf",
+            "pages": 2,
+            "characters": 300,
+            "address_candidate": "123 Main Street, Washington, DC 20001",
+        },
+    )
+
+    assert task["stage"] == "confirm_address"
+    assert task["prompt"]["options"][0]["value"] == "use_address"
+    task = answer(engine, task, "use_address")
+    assert task["stage"] == "plan_review"
+    assert task["address"] == "123 Main Street, Washington, DC 20001"
+
+
 def test_plan_can_be_revised_for_multiple_rounds(tmp_path):
     engine = make_engine(tmp_path)
     task = engine.create("Collect three quotes.")
@@ -75,11 +109,13 @@ def test_complete_deterministic_insurance_workflow(tmp_path):
     task = reach_comparison(engine, task)
 
     assert task["stage"] == "select_insurer"
+    assert task["phase"] == "planning"
     assert len(task["quotes"]) == 3
     assert any(event["type"] == "comparison" for event in task["events"])
 
     task = answer(engine, task, "cedar")
     task = answer(engine, task, "approve")
+    assert task["phase"] == "calling"
     task = advance_until_waiting(engine, task)
     assert task["stage"] == "confirm_application"
 
@@ -112,6 +148,7 @@ def test_takeover_can_interrupt_script_and_resume(tmp_path):
     task = act(engine, task, "takeover")
     assert task["stage"] == "takeover"
     assert task["auto_advance"] is False
+    assert "no microphone or telephone audio" in task["events"][-1]["text"]
 
     task = answer(engine, task, "resume")
     assert task["auto_advance"] is True

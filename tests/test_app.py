@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 from pypdf import PdfWriter
 
 from relay_agent.app import create_app
+from relay_agent.context_store import ContextStore
+from relay_agent.event_log import EventLog
 
 
 def test_task_api_reaches_comparison(monkeypatch, tmp_path):
@@ -74,3 +76,11 @@ def test_pdf_context_upload_is_stored_locally(monkeypatch, tmp_path):
     assert metadata["pages"] == 1
     assert (tmp_path / "contexts" / metadata["id"] / "source.pdf").exists()
     assert (tmp_path / "contexts" / metadata["id"] / "extracted.txt").exists()
+
+
+def test_pdf_address_extractor_finds_street_address(monkeypatch, tmp_path):
+    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
+    contexts = ContextStore(EventLog(tmp_path / "events.jsonl"), tmp_path / "contexts")
+    assert contexts._find_address("Premises: 123 Main Street, Washington, DC 20001") == (
+        "123 Main Street, Washington, DC 20001"
+    )

@@ -66,6 +66,18 @@ def create_app() -> FastAPI:
         except InvalidContext as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
+    @app.post("/api/tasks/{task_id}/contexts")
+    async def attach_task_context(task_id: str, file: UploadFile = File(...)) -> dict:
+        try:
+            metadata = contexts.save_pdf(file.filename or "context.pdf", await file.read())
+            return engine.attach_context(task_id, metadata)
+        except TaskNotFound as error:
+            raise HTTPException(status_code=404, detail="Task not found.") from error
+        except InvalidContext as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except InvalidAction as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     @app.get("/api/tasks/{task_id}")
     async def get_task(task_id: str) -> dict:
         try:
