@@ -1,0 +1,186 @@
+# Relay technical design
+
+## Architecture
+
+```text
+relay CLI
+   |
+   v
+Local FastAPI service ------ local JSONL events/transcripts
+   |
+   +------ localhost dashboard
+   |
+   +------ task orchestrator
+   |          |
+   |          +-- context and approvals
+   |          +-- call plan and outcomes
+   |
+   +------ limited demo gateway
+              |
+              +-- OpenAI Realtime voice session
+              +-- telephony / simulated insurer
+
+Secure mode:
+dashboard -> macOS on-device TTS or user takeover -> call
+cloud AI disconnected; transcript paused
+```
+
+The local service owns user state, task state, presentation, approvals, and durable logs. The hosted demo gateway protects hackathon credentials and restricts usage to the simulated workflow.
+
+## Components
+
+### CLI
+
+- Distribution name: `relay-agent`
+- Python import package: `relay_agent`
+- Executable: `relay`
+- `relay` opens the standard dashboard.
+- `relay demo` opens the single demo workflow.
+
+### Local API
+
+FastAPI exposes localhost-only HTTP/WebSocket endpoints for:
+
+- runtime health and configuration
+- task creation and state
+- live transcript events
+- private user instructions
+- structured interaction responses
+- approvals
+- takeover and secure-mode transitions
+- local event/history queries
+
+It must bind to `127.0.0.1` by default.
+
+### Dashboard
+
+The production dashboard will be a bundled web frontend served by the local API. Its primary active-call layout is:
+
+- compact call header
+- left/right conversation bubbles
+- distinct private user bubbles
+- optional quick-reply row
+- persistent instruction box
+- permanent Take Over button
+
+The transcript is the primary live representation. Summaries are produced between calls and at task completion, not continuously on every turn.
+
+### Task orchestrator
+
+The orchestrator owns the goal and may schedule zero, one, or several calls. The insurance demo is a task recipe, not a special product mode in the core domain.
+
+Core state:
+
+```text
+Task
+  id
+  goal
+  context references
+  status
+  planned actions
+  active call
+  pending interaction
+  pending approval
+  outcomes
+```
+
+### Call state machine
+
+```text
+PREPARING
+  -> DIALING
+  -> CONNECTED
+  -> WAITING_FOR_USER (call may continue if question is non-blocking)
+  -> APPROVAL_REQUIRED
+  -> SECURE_HANDOFF_PENDING
+  -> SECURE_LOCAL | HUMAN_TAKEOVER
+  -> CONNECTED
+  -> COMPLETED | FAILED
+```
+
+Only explicit events may change state. Every transition is logged.
+
+### Structured interactions
+
+The voice agent emits data, never frontend code:
+
+```json
+{
+  "type": "single_choice",
+  "call_id": "call_demo_1",
+  "question": "Do you operate a business from this address?",
+  "why_it_matters": "The representative requires this underwriting fact.",
+  "blocking": true,
+  "sensitivity": "normal",
+  "options": [
+    {"value": "no", "label": "No"},
+    {"value": "yes", "label": "Yes"},
+    {"value": "occasional", "label": "Occasionally"},
+    {"value": "unsure", "label": "Not sure"}
+  ]
+}
+```
+
+Schemas are validated before rendering and before their responses reach the call agent.
+
+### Secure local voice
+
+P0 supports macOS built-in speech synthesis only. There are no downloaded or bundled voice models.
+
+Secure-mode invariants:
+
+1. Cloud AI receives no inbound or outbound payment audio.
+2. Transcript and call-content logging are paused.
+3. Sensitive form values remain in local process memory only.
+4. Values are cleared after use.
+5. The user can take over at any time.
+6. P0 accepts fake values only.
+
+The simulated representative will not intentionally repeat fake card data. A repeat or unexpected verification request routes to human takeover.
+
+## Authentication and model access
+
+ChatGPT/Codex login cannot be treated as authorization for arbitrary OpenAI Realtime API calls. P0 therefore does not request an OpenAI API key from demo users and does not route the voice loop through Codex.
+
+The limited demo gateway owns the OpenAI and telephony credentials, issues only short-lived/restricted access, permits only the simulated workflow, and enforces a small call-minute quota.
+
+If OpenAI publishes an official third-party ChatGPT authentication and Realtime entitlement flow, it can replace the gateway later. Do not implement undocumented token reuse.
+
+## Logging model
+
+Events are append-only JSON objects:
+
+```json
+{
+  "timestamp": "2026-07-16T18:00:00Z",
+  "event": "transcript.turn",
+  "task_id": "task_123",
+  "call_id": "call_456",
+  "payload": {
+    "speaker": "representative",
+    "visibility": "shared",
+    "text": "Do you operate a business from the home?"
+  }
+}
+```
+
+Required event families:
+
+- `runtime.*`
+- `task.*`
+- `call.*`
+- `transcript.*`
+- `interaction.*`
+- `approval.*`
+- `takeover.*`
+- `secure_mode.*`
+- `tool.*`
+- `error.*`
+- `latency.*`
+
+The log writer recursively redacts known sensitive keys. Secure mode additionally blocks all content-bearing transcript events.
+
+## Simulator
+
+The simulator is a real conversational endpoint backed by scenario state, not a fixed transcript animation. Three insurer profiles vary rates, questions, and follow-ups. Sanitized observations from disclosed/consented research calls may inform synthetic fixtures, but raw third-party conversations and PII are not shipped.
+

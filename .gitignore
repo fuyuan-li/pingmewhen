@@ -1,0 +1,14 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.relay/
+.relay-data/
+.venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+node_modules/
+

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "relay-agent"
+version = "0.1.0"
+description = "A local-first, human-supervised task agent that can use phone calls as an action channel."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+]
+
+[project.scripts]
+relay = "relay_agent.cli:main"
+
+[dependency-groups]
+dev = [
+  "httpx",
+  "pytest",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/relay_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
