@@ -35,8 +35,9 @@
       .file-name { color: #6b727c; font-size: 12px; }
       .hint { color: #767d87; font-size: 12px; }
       .primary { padding: 11px 17px; border-radius: 11px; background: #17191c; color: white; font-weight: 700; }
-      .workspace { display: none; width: 100%; max-width: 100%; height: min(760px, calc(100vh - 70px)); grid-template-rows: auto auto minmax(0, 1fr) auto; }
-      .taskbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 15px 18px; border-bottom: 1px solid #e6e8ed; background: #fbfbfc; }
+      .workspace { display: none; width: 100%; max-width: 100%; height: min(760px, calc(100vh - 70px)); grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+      .workspace > * { width: 100%; max-width: 100%; min-width: 0; }
+      .taskbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; overflow: hidden; padding: 15px 18px; border-bottom: 1px solid #e6e8ed; background: #fbfbfc; }
       .task-title { min-width: 0; }
       .task-title strong { display: flex; align-items: center; gap: 8px; font-size: 14px; }
       .task-title > span { display: block; overflow: hidden; color: #747b85; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -87,7 +88,7 @@
       .instruction-row input { width: 100%; min-width: 0; padding: 11px 13px; border: 1px solid #cbd1da; border-radius: 11px; outline: none; }
       .send { padding: 10px 15px; border-radius: 10px; background: #17191c; color: white; font-weight: 700; }
       .attach-inline { display: none; flex: 0 0 auto; align-items: center; margin: 0; padding: 10px 12px; border: 1px solid #cbd1da; border-radius: 10px; color: #4f5660; background: #f9fafb; font-size: 12px; cursor: pointer; }
-      .task-context-input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+      .instruction-row .task-context-input { position: absolute; width: 1px; min-width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; }
       .secure-form { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; margin: 10px 0; }
       .secure-form input { min-width: 0; padding: 10px; border: 1px solid #cbd1da; border-radius: 9px; }
       .error { display: none; margin: 0 0 10px; padding: 9px 11px; border-radius: 9px; color: #9b342d; background: #fff0ef; font-size: 12px; }
