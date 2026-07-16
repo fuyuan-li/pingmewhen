@@ -10,6 +10,7 @@ from relay_agent.event_log import EventLog
 
 def test_task_api_reaches_comparison(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RELAY_MODE", "demo")
     client = TestClient(create_app())
 
     created = client.post("/api/tasks", json={"goal": "Gather three quotes."})
@@ -49,6 +50,7 @@ def test_task_api_reaches_comparison(monkeypatch, tmp_path):
 
 def test_api_rejects_empty_goal(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RELAY_MODE", "demo")
     client = TestClient(create_app())
 
     response = client.post("/api/tasks", json={"goal": "   "})

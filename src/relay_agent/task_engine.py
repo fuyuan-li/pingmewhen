@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from relay_agent.event_log import EventLog
+from relay_agent.task_store import SQLiteTaskStore
 
 
 QUOTES = [
@@ -69,8 +70,15 @@ def queued(event_type: str, **payload: Any) -> dict[str, Any]:
 class DeterministicTaskEngine:
     """An interruptible deterministic workflow for validating Relay's UX."""
 
-    def __init__(self, events: EventLog) -> None:
-        self._tasks: dict[str, dict[str, Any]] = {}
+    def __init__(
+        self,
+        events: EventLog,
+        store: SQLiteTaskStore | None = None,
+        namespace: str = "demo",
+    ) -> None:
+        self._store = store
+        self._namespace = namespace
+        self._tasks = store.load_all(namespace) if store else {}
         self._events = events
         self._lock = Lock()
 
@@ -144,6 +152,7 @@ class DeterministicTaskEngine:
 
         with self._lock:
             self._tasks[task_id] = task
+            self._persist(task)
         self._events.append("task.created", {"task_id": task_id, "goal": cleaned_goal, "phase": "planning"})
         return self._snapshot(task)
 
@@ -181,6 +190,7 @@ class DeterministicTaskEngine:
                     speaker="relay_private",
                     text="I read the PDF but could not identify a reliable property address. Please type the full address below.",
                 )
+            self._persist(task)
             snapshot = self._snapshot(task)
         self._events.append("task.context_attached", {"task_id": task_id, **context})
         return snapshot
@@ -201,6 +211,7 @@ class DeterministicTaskEngine:
                 self._advance(task)
             else:
                 raise InvalidAction("Unsupported task action.")
+            self._persist(task)
             snapshot = self._snapshot(task)
 
         if action != "advance":
@@ -212,6 +223,10 @@ class DeterministicTaskEngine:
 
     def _snapshot(self, task: dict[str, Any]) -> dict[str, Any]:
         return deepcopy({key: value for key, value in task.items() if not key.startswith("_")})
+
+    def _persist(self, task: dict[str, Any]) -> None:
+        if self._store:
+            self._store.save(self._namespace, task)
 
     def _instruct(self, task: dict[str, Any], value: str) -> None:
         instruction = value.strip()

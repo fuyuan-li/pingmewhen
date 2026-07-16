@@ -63,3 +63,9 @@ class ContextStore:
         if not match:
             return None
         return " ".join(match.group(0).strip(" ,.;").split())
+
+    def read_text(self, context_id: str, limit: int = 20_000) -> str:
+        path = self._root / context_id / "extracted.txt"
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")[:limit]

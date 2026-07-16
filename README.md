@@ -8,7 +8,9 @@ The OpenAI Build Week demo asks several simulated insurers for renters-insurance
 
 ## Current state
 
-This repository contains a testable deterministic product preview. The **Private Workspace** holds the task’s internal memory. While a call is active it gradually narrows and greys out as the **Call Console** widens beside it. Every external connection gets a separate transcript tab and a fresh representative-facing introduction. After a call sequence, the Call Console collapses into a vertical history bookmark on the right while the Private Workspace expands for comparison and decisions. Users can reopen any call tab, barge into a live call, and approve consequential steps. It does not yet place real calls, route browser audio into a call, connect microphone audio, or use an AI model for planning or conversation.
+The standard `relay` mode now has a model-driven private planning loop backed by the OpenAI Responses API and Structured Outputs. It reads the goal and locally extracted PDF text, asks blocking questions, produces a structured action plan, and waits for explicit approval. Complete task state is stored in repo-local SQLite and reloads after restart. Approved external actions stop at an honest connector boundary: real calls, Realtime audio, and microphone takeover are not connected yet.
+
+`relay demo` remains the deterministic end-to-end insurance preview. The **Private Workspace** holds task memory; the **Call Console** presents paced simulated calls, barge-in, approval gates, per-call history, and the field-by-field fake payment handoff.
 
 ## Commands
 
@@ -23,9 +25,15 @@ Open the single demo mode with:
 uv run relay demo
 ```
 
-Use `relay demo` to test the current end-to-end simulated workflow. The normal `relay` command currently exposes the same deterministic preview under a local-mode label; general agentic task execution is not implemented yet.
+Use `relay demo` to test the complete simulated workflow without credentials. Standard `relay` uses a server-side OpenAI API credential for planning:
 
-By default, Relay opens `http://127.0.0.1:8765` and writes redacted structured events under this repository’s `.relay/logs/` directory. Set `RELAY_DATA_DIR` or `RELAY_PORT` to override those defaults.
+```bash
+OPENAI_API_KEY=... uv run relay
+```
+
+This is an operator/development credential, not a user-facing login design. The planned hosted demo gateway will own it for judges and end users. `OPENAI_MODEL` can override the default `gpt-5.6` planner model.
+
+By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `.relay/logs/`, and stores durable task state in `.relay/state/relay.db`. Set `RELAY_DATA_DIR` or `RELAY_PORT` to override those defaults.
 
 ## Repository map
 
@@ -43,7 +51,10 @@ By default, Relay opens `http://127.0.0.1:8765` and writes redacted structured e
 ├── src/relay_agent/
 │   ├── app.py
 │   ├── cli.py
+│   ├── agentic_engine.py
 │   ├── event_log.py
+│   ├── planner.py
+│   ├── task_store.py
 │   └── static/
 └── tests/
 ```
@@ -56,5 +67,5 @@ By default, Relay opens `http://127.0.0.1:8765` and writes redacted structured e
 - Secure mode removes the cloud AI from the media path and pauses transcription. The fake payment demo requests and speaks card number, expiration, and CVV separately, returning control to Relay between fields.
 - Browser TTS currently plays on the user device. Injecting local TTS only into the representative’s phone leg requires the planned shared media gateway.
 - Only fake card and identity data are used in the demo.
-- PDF context is stored locally under this repository’s `.relay/contexts/`; its contents are not sent to a model in this deterministic build.
+- PDF context is stored locally under `.relay/contexts/`. Standard production planning sends bounded extracted text to the configured model; deterministic demo mode does not.
 - ChatGPT/Codex authentication does not currently authorize third-party Realtime API use. The hackathon demo uses a limited hosted backend for Realtime and telephony.

@@ -98,6 +98,8 @@
       .plan-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 9px 0; border-top: 1px solid #eceef2; font-size: 12px; }
       .plan-phone { color: #68707b; font-variant-numeric: tabular-nums; }
       .plan-questions { margin: 10px 0 0; padding-left: 18px; color: #4f5660; font-size: 12px; }
+      .agent-plan-summary { margin-bottom: 10px; color: #343a43; font-size: 13px; line-height: 1.45; }
+      .agent-plan-target { color: #68707b; font-size: 11px; }
       .comparison-caption { padding: 13px 14px; color: #4d5560; font-size: 12px; font-weight: 700; }
       table { width: 100%; border-collapse: collapse; min-width: 700px; font-size: 12px; }
       th, td { padding: 11px 13px; border-top: 1px solid #e8eaee; text-align: left; }
@@ -147,13 +149,14 @@
         <section class="panel intake">
           <label for="goal">What should Relay accomplish?</label>
           <textarea id="goal" placeholder="Describe your goal and constraints…"></textarea>
+          <div id="intake-error" class="error"></div>
           <div class="file-row">
             <label class="file-button" for="context-file">Attach PDF context</label>
             <input id="context-file" type="file" accept="application/pdf,.pdf" />
             <span id="file-name" class="file-name">Optional · PDF up to 10 MB</span>
           </div>
           <div class="intake-row">
-            <span class="hint">This build runs a deterministic, fully simulated renters-insurance workflow.</span>
+            <span id="runtime-hint" class="hint">Loading Relay runtime…</span>
             <button id="start" class="primary" disabled>Start task</button>
           </div>
         </section>
@@ -232,7 +235,12 @@
       fetch('/api/runtime').then(r => r.json()).then(runtime => {
         document.querySelector('#mode').textContent = runtime.mode === 'demo'
           ? 'Simulated insurance demo'
-          : 'Local deterministic preview';
+          : `Agentic production preview · ${runtime.planner_model}`;
+        document.querySelector('#runtime-hint').textContent = runtime.mode === 'demo'
+          ? 'Deterministic, fully simulated renters-insurance workflow.'
+          : runtime.planner_ready
+            ? 'Model-driven planning is ready. External execution still stops at the approved connector boundary.'
+            : 'Production planner is offline until the backend has an OpenAI API credential.';
       });
 
       goalInput.addEventListener('input', () => {
@@ -245,6 +253,7 @@
       startButton.addEventListener('click', async () => {
         startButton.disabled = true;
         startButton.textContent = 'Starting…';
+        document.querySelector('#intake-error').style.display = 'none';
         try {
           const contexts = [];
           if (contextFile.files[0]) {
@@ -264,7 +273,9 @@
           workspace.style.display = 'block';
           renderTask();
         } catch (error) {
-          showError(error.message);
+          const intakeError = document.querySelector('#intake-error');
+          intakeError.textContent = error.message;
+          intakeError.style.display = 'block';
           startButton.disabled = false;
           startButton.textContent = 'Start task';
         }
@@ -491,6 +502,9 @@
         } else if (event.type === 'plan') {
           wrapper.className = 'plan-card';
           wrapper.innerHTML = planMarkup(event);
+        } else if (event.type === 'agent_plan') {
+          wrapper.className = 'plan-card';
+          wrapper.innerHTML = agentPlanMarkup(event);
         } else {
           const block = document.createElement('div');
           block.className = event.type === 'secure_gap' ? 'secure-gap' : event.type;
@@ -508,6 +522,22 @@
           <div class="plan-address"><strong>Property:</strong> ${escapeHtml(event.address)}</div>
           ${event.carriers.map(carrier => `<div class="plan-row"><strong>${escapeHtml(carrier.insurer)}</strong><span class="plan-phone">${escapeHtml(carrier.phone)} · simulated</span></div>`).join('')}
           ${questions}
+        </div>`;
+      }
+
+      function agentPlanMarkup(event) {
+        const actions = (event.actions || []).map(action => `<div class="plan-row">
+          <div><strong>${escapeHtml(action.label)}</strong><div class="agent-plan-target">${escapeHtml(action.purpose)}</div></div>
+          <span class="plan-phone">${escapeHtml(action.target)}${action.needs_lookup ? ' · lookup required' : ''}</span>
+        </div>`).join('');
+        const assumptions = event.assumptions?.length
+          ? `<div class="agent-plan-target"><strong>Assumptions</strong></div><ul class="plan-questions">${event.assumptions.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+          : '';
+        const questions = event.questions?.length
+          ? `<div class="agent-plan-target"><strong>Open questions</strong></div><ul class="plan-questions">${event.questions.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+          : '';
+        return `<div class="plan-head">${escapeHtml(event.text)}</div><div class="plan-body">
+          <div class="agent-plan-summary">${escapeHtml(event.summary)}</div>${actions}${assumptions}${questions}
         </div>`;
       }
 
@@ -604,7 +634,7 @@
       }
 
       function escapeHtml(value) {
-        return value.replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+        return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
       }
     </script>
   </body>

@@ -22,7 +22,10 @@ Exit: `uv run relay` and `uv run relay demo` open a local application; tests pas
 - [x] Validate typed addresses and allow PDF attachment during planning.
 - Implement local WebSocket event stream.
 - [x] Persist transcript and workflow events to the local JSONL log.
-- Persist and reload active task state after a restart.
+- [x] Persist and reload active task state after a restart with repo-local SQLite.
+- [x] Add a Responses API planner for standard `relay` mode with schema-validated plans and hard approval boundaries.
+- [x] Render general action plans independently of the insurance demo schema.
+- Connect approved production actions to bounded research/contact lookup tools.
 
 Exit: a simulated event source drives the real UI, and private instructions change subsequent Relay output.
 
@@ -68,7 +71,7 @@ Exit: a fake end-to-end policy purchase completes without sensitive values appea
 ## Milestone 5 — demo hardening
 
 - Add deterministic reset and seed controls.
-- Add reconnect/state restoration.
+- Add browser reconnect to an existing persisted task.
 - Add redaction, state-machine, approval, and simulator tests.
 - Verify a clean-machine `uvx`/`uv` installation path.
 - Prepare a short demo script and fallback recording.

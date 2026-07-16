@@ -7,6 +7,7 @@ relay CLI
    |
    v
 Local FastAPI service ------ local JSONL events/transcripts
+   |                         repo-local SQLite task snapshots
    |
    +------ localhost dashboard
    |
@@ -26,6 +27,8 @@ cloud AI disconnected; transcript paused
 ```
 
 The local service owns user state, task state, presentation, approvals, and durable logs. The hosted demo gateway protects hackathon credentials and restricts usage to the simulated workflow.
+
+Standard `relay` uses the Responses API with a Pydantic Structured Output schema for private planning. The model may ask for missing context and propose typed actions, but application code owns approval transitions and execution permissions. `relay demo` selects the deterministic insurance engine instead. Both engines persist complete namespaced task snapshots in SQLite.
 
 ## Components
 
@@ -99,6 +102,8 @@ For the safe hackathon demo, the representative can be a simulated voice partici
 ### Task orchestrator
 
 The orchestrator owns the goal and may schedule zero, one, or several calls. The insurance demo is a task recipe, not a special product mode in the core domain.
+
+The first production slice ends at `execution_ready`: approval is durably recorded, but no external tool is called until a bounded research or telephony connector is installed. This prevents the planning model from turning an unimplemented action into a fake success.
 
 Core state:
 
@@ -174,6 +179,8 @@ The simulated representative will not intentionally repeat fake card data. A rep
 ## Authentication and model access
 
 ChatGPT/Codex login cannot be treated as authorization for arbitrary OpenAI Realtime API calls. P0 therefore does not request an OpenAI API key from demo users and does not route the voice loop through Codex.
+
+Local development of standard model planning reads `OPENAI_API_KEY` only in the backend process. The browser never receives or asks for it. This developer setup does not replace the hosted gateway design.
 
 The limited demo gateway owns the OpenAI and telephony credentials, issues only short-lived/restricted access, permits only the simulated workflow, and enforces a small call-minute quota.
 

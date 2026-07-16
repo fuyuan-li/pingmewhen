@@ -26,10 +26,13 @@ The renters-insurance workflow is the hackathon demo, not the product boundary.
 
 ## Implemented now
 
+- Standard `relay` uses an OpenAI Responses API planner with Pydantic Structured Outputs. It can clarify a general goal, incorporate extracted PDF text, render a structured action plan, and enforce application-owned approve/hold/decline boundaries.
+- Standard planning requires a server-side `OPENAI_API_KEY`; never request it in the dashboard or imply ChatGPT login supplies it. The hosted demo gateway remains the intended end-user credential boundary.
+- Full task snapshots persist in repo-local SQLite at `.relay/state/relay.db` and reload after restart. Redacted append-only events remain in `.relay/logs/`.
 - The deterministic preview is runnable end to end: validated address/PDF clarification, editable planning, explicit start approval, paced synthetic quote calls with a fresh introduction for each representative, interruptible barge-in, an animated Private Workspace and Call Console, per-call transcript tabs with a vertical history bookmark, factual comparison back in planning, later approval gates, simulated takeover/resume, field-by-field secure payment simulation, and local JSONL logs.
 - Takeover does not connect microphone or phone audio yet. UI and documentation must call it simulated until a real media bridge exists.
 - Browser speech in the preview plays on the user device; it is not injected into a phone call. Outbound-only local audio requires the shared media bridge.
-- It does not yet contain model-driven planning, Realtime voice, telephony, or general task execution. Do not describe those as working.
+- Approved production plans stop at `execution_ready`; Realtime voice, telephony, research/contact lookup, microphone takeover, and general external execution do not work yet. Do not imply otherwise.
 
 ## Explicit non-goals
 

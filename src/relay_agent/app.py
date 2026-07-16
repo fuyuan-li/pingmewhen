@@ -8,9 +8,12 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from relay_agent.event_log import EventLog
+from relay_agent.agentic_engine import AgenticTaskEngine
 from relay_agent.context_store import ContextStore, InvalidContext
+from relay_agent.event_log import EventLog, default_data_dir
+from relay_agent.planner import Planner, PlannerError, planner_from_environment
 from relay_agent.task_engine import DeterministicTaskEngine, InvalidAction, TaskNotFound
+from relay_agent.task_store import SQLiteTaskStore
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -26,11 +29,17 @@ class TaskActionRequest(BaseModel):
     value: str = ""
 
 
-def create_app() -> FastAPI:
+def create_app(planner: Planner | None = None) -> FastAPI:
     mode = os.environ.get("RELAY_MODE", "standard")
     events = EventLog()
-    engine = DeterministicTaskEngine(events)
     contexts = ContextStore(events)
+    store = SQLiteTaskStore(default_data_dir() / "state" / "relay.db")
+    active_planner = planner or planner_from_environment()
+    engine = (
+        DeterministicTaskEngine(events, store, namespace="demo")
+        if mode == "demo"
+        else AgenticTaskEngine(events, active_planner, store, contexts.read_text)
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -45,17 +54,22 @@ def create_app() -> FastAPI:
         return {"status": "ok", "mode": mode}
 
     @app.get("/api/runtime")
-    async def runtime() -> dict[str, str]:
+    async def runtime() -> dict[str, str | bool]:
         return {
             "mode": mode,
             "event_log": str(events.path),
-            "workflow": "deterministic-insurance-preview",
+            "state_db": str(store.path),
+            "workflow": "deterministic-insurance-preview" if mode == "demo" else "agentic-private-planning",
+            "planner_ready": True if mode == "demo" else active_planner.ready,
+            "planner_model": "deterministic" if mode == "demo" else active_planner.model,
         }
 
     @app.post("/api/tasks")
     async def create_task(request: CreateTaskRequest) -> dict:
         try:
             return engine.create(request.goal, request.contexts)
+        except PlannerError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
         except InvalidAction as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -77,6 +91,8 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=422, detail=str(error)) from error
         except InvalidAction as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+        except PlannerError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
 
     @app.get("/api/tasks/{task_id}")
     async def get_task(task_id: str) -> dict:
@@ -93,6 +109,8 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Task not found.") from error
         except InvalidAction as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+        except PlannerError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
 
     @app.get("/")
     async def dashboard() -> FileResponse:
