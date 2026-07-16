@@ -8,7 +8,7 @@ The OpenAI Build Week demo asks several simulated insurers for renters-insurance
 
 ## Current state
 
-This repository contains the agreed product documentation and a minimal local application scaffold. The calling workflow and dashboard are the next implementation steps.
+This repository contains a testable deterministic product preview. It accepts a goal and optional local PDF context, runs three simulated insurance conversations, requests live user input, renders a factual comparison, gates the callback and application confirmation on approval, and demonstrates takeover and protected payment handling. It does not yet place real calls or use an AI model for planning or conversation.
 
 ## Commands
 
@@ -22,6 +22,8 @@ Open the single demo mode with:
 ```bash
 uv run relay demo
 ```
+
+Use `relay demo` to test the current end-to-end simulated workflow. The normal `relay` command currently exposes the same deterministic preview under a local-mode label; general agentic task execution is not implemented yet.
 
 By default, Relay opens `http://127.0.0.1:8765` and writes redacted structured events under `~/.relay/logs/`. Set `RELAY_DATA_DIR` or `RELAY_PORT` to override those defaults.
 
@@ -53,5 +55,5 @@ By default, Relay opens `http://127.0.0.1:8765` and writes redacted structured e
 - The user selects the insurer and approves consequential actions.
 - Secure mode removes the cloud AI from the media path and pauses transcription.
 - Only fake card and identity data are used in the demo.
+- PDF context is stored locally under `~/.relay/contexts/`; its contents are not sent to a model in this deterministic build.
 - ChatGPT/Codex authentication does not currently authorize third-party Realtime API use. The hackathon demo uses a limited hosted backend for Realtime and telephony.
-

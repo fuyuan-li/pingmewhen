@@ -12,44 +12,315 @@
         color: #17191c;
       }
       * { box-sizing: border-box; }
-      body { margin: 0; min-height: 100vh; }
-      main { width: min(760px, calc(100% - 32px)); margin: 0 auto; padding: 72px 0; }
-      .brand { color: #5865f2; font-size: 14px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-      h1 { max-width: 690px; margin: 14px 0; font-size: clamp(36px, 6vw, 58px); line-height: 1.03; letter-spacing: -.04em; }
-      .lede { max-width: 650px; color: #5a6069; font-size: 19px; line-height: 1.55; }
-      .card { margin-top: 42px; padding: 28px; border: 1px solid #e0e3e8; border-radius: 22px; background: white; box-shadow: 0 20px 60px rgba(30, 35, 50, .08); }
-      label { display: block; margin-bottom: 10px; font-size: 14px; font-weight: 650; }
-      textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px solid #ccd1d9; border-radius: 14px; padding: 16px; font: inherit; }
-      .row { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 18px; }
-      .status { color: #707780; font-size: 13px; }
-      button { border: 0; border-radius: 12px; padding: 12px 18px; background: #17191c; color: white; font: inherit; font-weight: 650; cursor: not-allowed; opacity: .55; }
-      .mode { display: inline-flex; margin-top: 22px; padding: 7px 11px; border-radius: 999px; background: #eceefe; color: #4853c8; font-size: 13px; font-weight: 650; }
+      body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, #f8f9fb, #eef1f5); }
+      button, textarea, input { font: inherit; }
+      button { border: 0; cursor: pointer; }
+      button:disabled { cursor: not-allowed; opacity: .42; }
+      .shell { width: min(1120px, calc(100% - 28px)); margin: 0 auto; padding: 28px 0; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
+      .brand { color: #5865f2; font-size: 15px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+      .mode { padding: 7px 11px; border-radius: 999px; background: #eceefe; color: #4853c8; font-size: 12px; font-weight: 700; }
+      .hero { margin: 22px 0 28px; }
+      h1 { max-width: 850px; margin: 0 0 10px; font-size: clamp(32px, 5vw, 50px); line-height: 1.04; letter-spacing: -.04em; }
+      .lede { max-width: 800px; margin: 0; color: #606772; font-size: 17px; line-height: 1.55; }
+      .panel { overflow: hidden; border: 1px solid #dde1e7; border-radius: 22px; background: white; box-shadow: 0 20px 60px rgba(30, 35, 50, .09); }
+      .intake { padding: 24px; }
+      label { display: block; margin-bottom: 9px; font-size: 13px; font-weight: 750; }
+      textarea { width: 100%; min-height: 112px; resize: vertical; border: 1px solid #cbd1da; border-radius: 14px; padding: 14px; color: #17191c; background: #fff; outline: none; }
+      textarea:focus, input:focus { border-color: #5966ef; box-shadow: 0 0 0 3px rgba(89, 102, 239, .12); }
+      .intake-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; }
+      .file-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+      .file-button { display: inline-block; margin: 0; padding: 9px 12px; border: 1px solid #cbd1da; border-radius: 10px; background: #f9fafb; font-size: 12px; cursor: pointer; }
+      .file-row input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+      .file-name { color: #6b727c; font-size: 12px; }
+      .hint { color: #767d87; font-size: 12px; }
+      .primary { padding: 11px 17px; border-radius: 11px; background: #17191c; color: white; font-weight: 700; }
+      .workspace { display: none; height: min(760px, calc(100vh - 70px)); grid-template-rows: auto 1fr auto; }
+      .taskbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 15px 18px; border-bottom: 1px solid #e6e8ed; background: #fbfbfc; }
+      .task-title { min-width: 0; }
+      .task-title strong { display: block; font-size: 14px; }
+      .task-title span { display: block; overflow: hidden; color: #747b85; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+      .takeover { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #df9b96; border-radius: 10px; background: #fff6f5; color: #a23d35; font-size: 12px; font-weight: 750; }
+      .timeline { overflow-y: auto; padding: 22px clamp(16px, 4vw, 54px); background: #f7f8fa; }
+      .event { margin: 0 0 13px; animation: rise .22s ease-out; }
+      @keyframes rise { from { transform: translateY(4px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+      .bubble { width: fit-content; max-width: min(76%, 650px); padding: 11px 14px; border-radius: 16px; line-height: 1.42; font-size: 14px; white-space: pre-wrap; }
+      .representative { margin-right: auto; border-bottom-left-radius: 5px; background: white; border: 1px solid #e1e4e9; }
+      .relay { margin-left: auto; border-bottom-right-radius: 5px; background: #5865f2; color: white; }
+      .user_private { margin-left: auto; border: 1px solid #abd8c4; border-bottom-right-radius: 5px; background: #e6f7ef; color: #14533b; }
+      .relay_private { margin-left: auto; border: 1px dashed #9ca6f5; border-bottom-right-radius: 5px; background: #f0f1ff; color: #3540a1; }
+      .speaker { margin: 0 4px 4px; color: #7a818c; font-size: 10px; font-weight: 750; text-transform: uppercase; }
+      .align-right { text-align: right; }
+      .status, .notice, .secure-gap { max-width: 760px; margin: 11px auto; padding: 8px 12px; border-radius: 10px; text-align: center; font-size: 12px; }
+      .status { color: #626a75; background: #e9ecf0; }
+      .notice { color: #755515; background: #fff4d7; }
+      .secure-gap { padding: 18px; border: 1px dashed #8c929b; color: #4f5660; background: #eef0f3; font-weight: 700; }
+      .comparison { margin: 20px auto; overflow-x: auto; border: 1px solid #dce0e6; border-radius: 14px; background: white; }
+      .comparison-caption { padding: 13px 14px; color: #4d5560; font-size: 12px; font-weight: 700; }
+      table { width: 100%; border-collapse: collapse; min-width: 700px; font-size: 12px; }
+      th, td { padding: 11px 13px; border-top: 1px solid #e8eaee; text-align: left; }
+      th { color: #68707b; background: #fafbfc; }
+      .composer { padding: 14px 18px 18px; border-top: 1px solid #e1e4e9; background: white; }
+      .prompt { margin-bottom: 12px; padding: 13px; border-radius: 13px; background: #f3f4f7; }
+      .prompt-question { margin-bottom: 10px; font-size: 13px; font-weight: 700; }
+      .choices { display: flex; flex-wrap: wrap; gap: 8px; }
+      .choice { padding: 9px 12px; border: 1px solid #cbd1da; border-radius: 10px; background: white; color: #24282e; font-size: 12px; font-weight: 700; }
+      .choice:hover { border-color: #5966ef; color: #4652d0; }
+      .choice.risky { border-color: #e0a19b; color: #a33c34; background: #fff7f6; }
+      .instruction-row { display: flex; gap: 9px; }
+      .instruction-row input { width: 100%; min-width: 0; padding: 11px 13px; border: 1px solid #cbd1da; border-radius: 11px; outline: none; }
+      .send { padding: 10px 15px; border-radius: 10px; background: #17191c; color: white; font-weight: 700; }
+      .secure-form { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; margin: 10px 0; }
+      .secure-form input { min-width: 0; padding: 10px; border: 1px solid #cbd1da; border-radius: 9px; }
+      .error { display: none; margin: 0 0 10px; padding: 9px 11px; border-radius: 9px; color: #9b342d; background: #fff0ef; font-size: 12px; }
+      @media (max-width: 650px) {
+        .shell { width: min(100% - 16px, 1120px); padding: 12px 0; }
+        .hero { margin: 15px 5px 20px; }
+        .workspace { height: calc(100vh - 24px); }
+        .bubble { max-width: 88%; }
+        .secure-form { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
-    <main>
-      <div class="brand">Relay</div>
-      <h1>Delegate the call. Keep the control.</h1>
-      <p class="lede">Give Relay a goal and the relevant context. It handles the phone calls, keeps you informed visually, and brings you in only when your knowledge, approval, or voice is needed.</p>
-      <div id="mode" class="mode">Loading runtime…</div>
-      <section class="card">
-        <label for="goal">What should Relay accomplish?</label>
-        <textarea id="goal" placeholder="Describe your goal and constraints…"></textarea>
-        <div class="row">
-          <span class="status">Project scaffold running. Task execution is the next milestone.</span>
-          <button disabled>Start task</button>
+    <div class="shell">
+      <header><div class="brand">Relay</div><div id="mode" class="mode">Loading runtime…</div></header>
+      <section id="landing">
+        <div class="hero">
+          <h1>Delegate the call. Keep the control.</h1>
+          <p class="lede">Give Relay a goal and the relevant context. It handles the phone calls, keeps you informed visually, and brings you in only when your knowledge, approval, or voice is needed.</p>
+        </div>
+        <section class="panel intake">
+          <label for="goal">What should Relay accomplish?</label>
+          <textarea id="goal" placeholder="Describe your goal and constraints…"></textarea>
+          <div class="file-row">
+            <label class="file-button" for="context-file">Attach PDF context</label>
+            <input id="context-file" type="file" accept="application/pdf,.pdf" />
+            <span id="file-name" class="file-name">Optional · PDF up to 10 MB</span>
+          </div>
+          <div class="intake-row">
+            <span class="hint">This build runs a deterministic, fully simulated renters-insurance workflow.</span>
+            <button id="start" class="primary" disabled>Start task</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="workspace" class="panel workspace">
+        <div class="taskbar">
+          <div class="task-title"><strong>Renters insurance task</strong><span id="goal-summary"></span></div>
+          <button id="takeover" class="takeover">Take over call</button>
+        </div>
+        <div id="timeline" class="timeline" aria-live="polite"></div>
+        <div class="composer">
+          <div id="error" class="error"></div>
+          <div id="prompt" class="prompt"></div>
+          <div class="instruction-row">
+            <input id="instruction" type="text" placeholder="Instruct Relay at any time…" />
+            <button id="send" class="send">Send</button>
+          </div>
         </div>
       </section>
-    </main>
+    </div>
+
     <script>
-      fetch('/api/runtime')
-        .then((response) => response.json())
-        .then((runtime) => {
-          document.querySelector('#mode').textContent = runtime.mode === 'demo'
-            ? 'Insurance demo mode'
-            : 'Local task mode';
+      const landing = document.querySelector('#landing');
+      const workspace = document.querySelector('#workspace');
+      const goalInput = document.querySelector('#goal');
+      const startButton = document.querySelector('#start');
+      const contextFile = document.querySelector('#context-file');
+      const timeline = document.querySelector('#timeline');
+      const promptBox = document.querySelector('#prompt');
+      const errorBox = document.querySelector('#error');
+      const instruction = document.querySelector('#instruction');
+      let task = null;
+      let renderedEventCount = 0;
+
+      fetch('/api/runtime').then(r => r.json()).then(runtime => {
+        document.querySelector('#mode').textContent = runtime.mode === 'demo'
+          ? 'Simulated insurance demo'
+          : 'Local deterministic preview';
+      });
+
+      goalInput.addEventListener('input', () => {
+        startButton.disabled = !goalInput.value.trim();
+      });
+      contextFile.addEventListener('change', () => {
+        document.querySelector('#file-name').textContent = contextFile.files[0]?.name || 'Optional · PDF up to 10 MB';
+      });
+
+      startButton.addEventListener('click', async () => {
+        startButton.disabled = true;
+        startButton.textContent = 'Starting…';
+        try {
+          const contexts = [];
+          if (contextFile.files[0]) {
+            const form = new FormData();
+            form.append('file', contextFile.files[0]);
+            const upload = await fetch('/api/contexts', {method: 'POST', body: form});
+            contexts.push(await readResponse(upload));
+          }
+          const response = await fetch('/api/tasks', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({goal: goalInput.value, contexts})
+          });
+          task = await readResponse(response);
+          document.querySelector('#goal-summary').textContent = task.goal;
+          landing.style.display = 'none';
+          workspace.style.display = 'grid';
+          renderTask();
+        } catch (error) {
+          showError(error.message);
+          startButton.disabled = false;
+          startButton.textContent = 'Start task';
+        }
+      });
+
+      document.querySelector('#send').addEventListener('click', sendInstruction);
+      instruction.addEventListener('keydown', event => {
+        if (event.key === 'Enter') sendInstruction();
+      });
+      document.querySelector('#takeover').addEventListener('click', () => act('takeover'));
+
+      async function sendInstruction() {
+        const value = instruction.value.trim();
+        if (!value) return;
+        instruction.value = '';
+        await act('instruction', value);
+      }
+
+      async function act(action, value = '') {
+        if (!task) return;
+        setControlsDisabled(true);
+        try {
+          const response = await fetch(`/api/tasks/${task.id}/actions`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action, value})
+          });
+          task = await readResponse(response);
+          renderTask();
+        } catch (error) {
+          showError(error.message);
+        } finally {
+          setControlsDisabled(false);
+        }
+      }
+
+      async function readResponse(response) {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Relay could not complete that action.');
+        return data;
+      }
+
+      function renderTask() {
+        errorBox.style.display = 'none';
+        const newEvents = task.events.slice(renderedEventCount);
+        newEvents.forEach(event => timeline.appendChild(renderEvent(event)));
+        renderedEventCount = task.events.length;
+        renderPrompt(task.prompt);
+        document.querySelector('#takeover').disabled = task.status === 'complete' || task.stage === 'takeover';
+        instruction.disabled = task.status === 'complete';
+        document.querySelector('#send').disabled = task.status === 'complete';
+        requestAnimationFrame(() => { timeline.scrollTop = timeline.scrollHeight; });
+      }
+
+      function renderEvent(event) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'event';
+        if (event.type === 'message') {
+          const isRight = event.speaker !== 'representative';
+          const labels = {
+            representative: event.company || 'Representative',
+            relay: 'Relay · spoken to representative',
+            user_private: 'You · private to Relay',
+            relay_private: 'Relay · private to you'
+          };
+          const speaker = document.createElement('div');
+          speaker.className = `speaker ${isRight ? 'align-right' : ''}`;
+          speaker.textContent = labels[event.speaker];
+          const bubble = document.createElement('div');
+          bubble.className = `bubble ${event.speaker}`;
+          bubble.textContent = event.text;
+          wrapper.append(speaker, bubble);
+        } else if (event.type === 'comparison') {
+          wrapper.className = 'comparison';
+          wrapper.innerHTML = comparisonMarkup(event.text, task.quotes);
+        } else {
+          const block = document.createElement('div');
+          block.className = event.type === 'secure_gap' ? 'secure-gap' : event.type;
+          block.textContent = event.text;
+          wrapper.appendChild(block);
+        }
+        return wrapper;
+      }
+
+      function comparisonMarkup(caption, quotes) {
+        const money = value => value;
+        return `<div class="comparison-caption">${escapeHtml(caption)}</div><table>
+          <thead><tr><th>Insurer</th><th>Monthly</th><th>Property</th><th>Liability</th><th>Deductible</th><th>Loss of use</th></tr></thead>
+          <tbody>${quotes.map(q => `<tr><td><strong>${escapeHtml(q.insurer)}</strong></td><td>${money(q.monthly_premium)}</td><td>${money(q.personal_property)}</td><td>${money(q.liability)}</td><td>${money(q.deductible)}</td><td>${money(q.loss_of_use)}</td></tr>`).join('')}</tbody>
+        </table>`;
+      }
+
+      function renderPrompt(prompt) {
+        promptBox.innerHTML = '';
+        promptBox.style.display = prompt ? 'block' : 'none';
+        if (!prompt) return;
+        const question = document.createElement('div');
+        question.className = 'prompt-question';
+        question.textContent = prompt.question;
+        promptBox.appendChild(question);
+
+        if (prompt.kind === 'secure_entry') {
+          const warning = document.createElement('div');
+          warning.className = 'hint';
+          warning.textContent = 'Fake data only. These fields remain in this browser and are never sent to Relay’s server.';
+          const form = document.createElement('div');
+          form.className = 'secure-form';
+          form.innerHTML = '<input id="local-card" autocomplete="off" placeholder="Fake card: 4242 4242 4242 4242"><input id="local-expiry" autocomplete="off" placeholder="12/34"><input id="local-cvv" autocomplete="off" placeholder="123">';
+          const speak = document.createElement('button');
+          speak.className = 'choice';
+          speak.textContent = 'Speak fake data locally';
+          speak.onclick = () => {
+            const card = document.querySelector('#local-card').value.trim();
+            const expiry = document.querySelector('#local-expiry').value.trim();
+            const cvv = document.querySelector('#local-cvv').value.trim();
+            if (!card || !expiry || !cvv) return showError('Fill all three fake test fields first.');
+            if (!window.speechSynthesis) return showError('Local browser speech is unavailable. Use Take Over instead.');
+            const spacedCard = card.replace(/\D/g, '').split('').join(' ');
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(`Card number ${spacedCard}. Expiration ${expiry}. Security code ${cvv}.`));
+            document.querySelector('#local-card').value = '';
+            document.querySelector('#local-expiry').value = '';
+            document.querySelector('#local-cvv').value = '';
+          };
+          promptBox.append(warning, form, speak);
+        }
+
+        const choices = document.createElement('div');
+        choices.className = 'choices';
+        (prompt.options || []).forEach(option => {
+          const button = document.createElement('button');
+          button.className = `choice ${option.value === 'risky' ? 'risky' : ''}`;
+          button.textContent = option.label;
+          button.onclick = () => act('answer', option.value);
+          choices.appendChild(button);
         });
+        promptBox.appendChild(choices);
+      }
+
+      function setControlsDisabled(disabled) {
+        document.querySelectorAll('.choice, #send, #takeover').forEach(control => control.disabled = disabled);
+      }
+
+      function showError(message) {
+        errorBox.textContent = message;
+        errorBox.style.display = 'block';
+      }
+
+      function escapeHtml(value) {
+        return value.replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+      }
     </script>
   </body>
 </html>
-

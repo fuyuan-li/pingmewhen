@@ -24,6 +24,11 @@ The renters-insurance workflow is the hackathon demo, not the product boundary.
 - Save structured event logs and transcripts locally. Never log secure-mode values, card data, full SSNs, secrets, or auth tokens.
 - The demo uses a simulated insurer and fake payment data.
 
+## Implemented now
+
+- The deterministic preview is runnable end to end: goal and optional PDF intake, three synthetic quote calls, transcript bubbles, quick replies, factual comparison, selection and approval gates, takeover/resume, secure payment simulation, and local JSONL logs.
+- It does not yet contain model-driven planning, Realtime voice, telephony, or general task execution. Do not describe those as working.
+
 ## Explicit non-goals
 
 - No Piper, voice-model downloads, or cross-platform local TTS in P0.
@@ -50,4 +55,3 @@ uv run pytest
 uv run relay
 uv run relay demo
 ```
-

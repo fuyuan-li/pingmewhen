@@ -10,6 +10,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi",
+  "pypdf",
+  "python-multipart",
   "uvicorn[standard]",
 ]
 
@@ -27,4 +29,3 @@ packages = ["src/relay_agent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

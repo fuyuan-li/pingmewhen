@@ -6,27 +6,28 @@ The plan is deliberately narrow. Finish each vertical slice before expanding sco
 
 - [x] Record final P0 product and architecture decisions.
 - [x] Create Python package, `relay` entry point, localhost service, local event log, and initial test.
-- [ ] Replace the placeholder dashboard with the live conversation shell.
+- [x] Replace the placeholder dashboard with the live conversation shell.
 
 Exit: `uv run relay` and `uv run relay demo` open a local application; tests pass.
 
 ## Milestone 1 — task and conversation UI
 
-- Implement goal/context intake.
-- Implement active-call bubble layout.
-- Implement persistent private instruction input.
-- Implement quick-reply schema validation and renderers.
+- [x] Implement goal/local-PDF context intake.
+- [x] Implement active-call bubble layout.
+- [x] Implement persistent private instruction input.
+- [x] Implement quick-reply schema validation and renderers.
 - Implement local WebSocket event stream.
-- Persist and reload transcript/event history.
+- [x] Persist transcript and workflow events to the local JSONL log.
+- Persist and reload active task state after a restart.
 
 Exit: a simulated event source drives the real UI, and private instructions change subsequent Relay output.
 
 ## Milestone 2 — insurer simulator
 
-- Implement three synthetic insurer profiles.
-- Implement quote questions, branching follow-ups, and factual results.
-- Add at least one blocking unknown question.
-- Add factual comparison table with no ranking or recommendation.
+- [x] Implement three synthetic insurer profiles.
+- [x] Implement quote questions, branching follow-ups, and factual results.
+- [x] Add at least one blocking unknown question.
+- [x] Add factual comparison table with no ranking or recommendation.
 - Build conversation fixtures from sanitized patterns, not raw copied transcripts.
 
 Exit: `relay demo` completes three distinct dynamic quote conversations and waits for the user’s carrier selection.
@@ -44,10 +45,10 @@ Exit: the demo is driven by actual voice runtime events rather than scripted UI 
 
 ## Milestone 4 — approvals, takeover, and secure mode
 
-- Block the final selection/purchase step on explicit approval.
-- Add permanent Take Over control and conference state.
-- Add secure-mode transition that disconnects cloud AI and pauses transcript logging.
-- Use macOS built-in on-device TTS for fake card data.
+- [x] Block the final selection/purchase step on explicit approval in the simulator.
+- [x] Add permanent Take Over control and simulated pause/resume state.
+- [x] Add simulated secure-mode transition and a deliberate transcript gap.
+- [x] Use the browser/OS local speech facility for fake card data in the deterministic preview.
 - Route repetition or unexpected payment questions to takeover.
 - Resume Relay and capture only non-sensitive confirmation.
 
@@ -73,4 +74,3 @@ Exit: a judge can run the complete flow reliably without source edits or private
 - Billing and subscriptions
 - Arbitrary calling
 - General ChatGPT login for Realtime unless officially supported
-
