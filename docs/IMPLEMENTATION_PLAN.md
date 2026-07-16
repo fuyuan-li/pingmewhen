@@ -34,7 +34,7 @@ Exit: a simulated event source drives the real UI, and private instructions chan
 - [x] Add factual comparison table with no ranking or recommendation.
 - [x] Restart representative-facing context with a fresh introduction and task brief on every call.
 - [x] Render each external connection in a persistent transcript tab, including a separate application-callback tab.
-- [x] Animate Stage 2 between hidden, live parallel, expanded-history, and collapsed-history states.
+- [x] Animate the Call Console width between hidden, live parallel, expanded-history, and vertical-bookmark states while the Private Workspace resizes inversely.
 - Build conversation fixtures from sanitized patterns, not raw copied transcripts.
 
 Exit: `relay demo` completes three distinct dynamic quote conversations and waits for the user’s carrier selection.

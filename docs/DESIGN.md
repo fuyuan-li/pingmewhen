@@ -56,12 +56,12 @@ It must bind to `127.0.0.1` by default.
 
 The production dashboard uses two coordinated surfaces:
 
-1. **Private planning:** goal/context intake, clarification dialogue, editable call plan, contact details, and approve/hold/decline controls.
-2. **Live call monitor:** entered only for external execution, with paced transcript turns and controls for intervention.
+1. **Private Workspace:** goal/context intake, clarification dialogue, editable call plan, contact details, and approve/hold/decline controls.
+2. **Call Console:** external execution, paced transcript turns, per-call tabs, and intervention controls.
 
-The normal insurance sequence is `planning → quote calls → planning comparison/decision → application callback → planning outcome`. With no active call, planning fills the workspace and Stage 2 is hidden or animated into a clickable history bar. Expanding the bar opens read-only call history beside the active planning board. During a call, Stage 2 animates open beside planning; planning narrows, greys out, and becomes review-only. Each board retains its history and only the active board accepts input.
+The normal insurance sequence is `planning → quote calls → planning comparison/decision → application callback → planning outcome`. With no call history, the Private Workspace fills the dashboard. During a call, the Call Console gradually widens on the right while the Private Workspace narrows, greys out, and becomes review-only. When calls end, the console collapses in place into a vertical right-edge history bookmark and the Private Workspace gradually reclaims the width. Opening the bookmark reverses that animation and shows read-only call history beside the active Private Workspace.
 
-Stage 2 contains one persistent tab per external connection. The three quote calls therefore produce three tabs, and the later application callback produces a fourth—even when it targets the same insurer. Relay retains goal and user context across tabs, while every tab starts a new representative-facing conversation from disclosure and purpose because the representative may be different.
+The Call Console contains one persistent tab per external connection. The three quote calls therefore produce three tabs, and the later application callback produces a fourth—even when it targets the same insurer. Relay retains goal and user context across tabs, while every tab starts a new representative-facing conversation from disclosure and purpose because the representative may be different.
 
 The primary active-call layout is:
 

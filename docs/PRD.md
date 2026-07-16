@@ -43,10 +43,10 @@ No other CLI commands are required in P0.
 1. In the private planning stage, the user gives Relay the goal and optional supporting documents.
 2. Relay asks for missing facts, proposes companies and verified contact details, and lets the user revise the plan over multiple rounds.
 3. Relay starts no call until the user explicitly approves the finalized plan.
-4. The live-call board animates open beside the persistent planning board; planning becomes greyed, narrow, and review-only while each call appears as a paced chat conversation in its own tab.
+4. The Call Console gradually widens beside the Private Workspace; the Private Workspace narrows, greys out, and becomes review-only while each call appears as a paced chat conversation in its own tab.
 5. When Relay lacks an answer, it asks the representative for a moment and renders a quick-reply control.
 6. The user may barge in at any time; Relay reformulates the private instruction and inserts it before the next call turn.
-7. After quote calls finish, Relay returns to the persistent planning panel and shows a factual comparison without ranking or recommending. Stage 2 animates into a clickable history bar that can reopen the per-call tabs.
+7. After quote calls finish, Relay returns to the Private Workspace and shows a factual comparison without ranking or recommending. The Call Console collapses into a vertical right-edge history bookmark that can reopen the per-call tabs.
 8. The user selects an insurer and explicitly approves the callback in that planning conversation.
 9. Relay switches back to the live-call panel, calls the selected simulated insurer, and continues the application.
 10. The user personally confirms material representations and approves purchase.

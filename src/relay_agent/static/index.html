@@ -36,23 +36,25 @@
       .hint { color: #767d87; font-size: 12px; }
       .primary { padding: 11px 17px; border-radius: 11px; background: #17191c; color: white; font-weight: 700; }
       .workspace { display: none; width: 100%; max-width: 100%; height: min(760px, calc(100vh - 70px)); }
-      .boards { display: grid; width: 100%; height: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 0; gap: 0; transition: grid-template-columns .42s cubic-bezier(.2,.8,.2,1), grid-template-rows .42s cubic-bezier(.2,.8,.2,1), gap .3s ease; }
-      .workspace.calling-active .boards,
-      .workspace.call-history-open .boards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 12px; }
-      .workspace.planning-active.has-call-history:not(.call-history-open) .boards { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 52px; gap: 12px; }
-      .board { display: grid; width: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; border: 1px solid #dde1e7; border-radius: 20px; background: white; box-shadow: 0 14px 45px rgba(30, 35, 50, .07); transition: opacity .38s ease, filter .38s ease, box-shadow .38s ease, transform .42s cubic-bezier(.2,.8,.2,1), height .42s cubic-bezier(.2,.8,.2,1); }
+      .boards { display: flex; width: 100%; height: 100%; min-width: 0; align-items: stretch; overflow: visible; }
+      .board { display: grid; width: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; border: 1px solid #dde1e7; border-radius: 20px; background: white; box-shadow: 0 14px 45px rgba(30, 35, 50, .07); transition: opacity .42s ease, filter .42s ease, box-shadow .42s ease; }
+      .planning-board { flex: 1 1 auto; }
       .board.active { border-color: #9ca6f5; box-shadow: 0 0 0 3px rgba(89, 102, 239, .13), 0 18px 55px rgba(30, 35, 50, .1); }
       .board.inactive { opacity: .5; filter: grayscale(.25); }
-      .calling-board { height: 0; visibility: hidden; opacity: 0; transform: translateX(28px) scale(.985); pointer-events: none; }
-      .calling-board { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+      .calling-board { position: relative; flex: 0 0 0; width: 0; height: 100%; margin-left: 0; align-self: stretch; visibility: hidden; opacity: 0; transform: translateX(16px); pointer-events: none; transition: flex-basis .68s cubic-bezier(.16,1,.3,1), width .68s cubic-bezier(.16,1,.3,1), height .58s cubic-bezier(.16,1,.3,1), margin-left .68s cubic-bezier(.16,1,.3,1), opacity .28s ease, transform .52s cubic-bezier(.16,1,.3,1), border-radius .48s ease; }
       .workspace.calling-active .calling-board,
-      .workspace.planning-active.has-call-history .calling-board { height: auto; visibility: visible; opacity: 1; transform: translate(0) scale(1); pointer-events: auto; }
-      .workspace.planning-active.has-call-history:not(.call-history-open) .calling-board { height: 52px; grid-template-rows: 52px; opacity: .78; transform-origin: bottom center; }
-      .workspace.planning-active.has-call-history:not(.call-history-open) .calling-board .call-tabs,
-      .workspace.planning-active.has-call-history:not(.call-history-open) .calling-board .call-timeline-shell,
+      .workspace.call-history-open .calling-board { flex-basis: calc(50% - 6px); width: calc(50% - 6px); height: 100%; margin-left: 12px; align-self: stretch; visibility: visible; opacity: 1; transform: translateX(0); pointer-events: auto; }
+      .workspace.planning-active.has-call-history:not(.call-history-open) .calling-board { flex-basis: 48px; width: 48px; height: 210px; margin-left: 10px; align-self: flex-start; visibility: visible; opacity: 1; transform: translateX(0); border-radius: 16px 0 0 16px; pointer-events: auto; }
       .workspace.planning-active .calling-board .composer { display: none; }
-      .workspace.call-history-open .calling-board { grid-template-rows: auto auto minmax(0, 1fr); }
       .workspace.call-history-open .calling-board.inactive { opacity: 1; filter: none; border-color: #cbd1da; box-shadow: 0 14px 45px rgba(30, 35, 50, .07); }
+      .workspace.planning-active.has-call-history:not(.call-history-open) .calling-board.inactive { opacity: 1; filter: none; border-color: #8f99ef; box-shadow: -6px 12px 30px rgba(53, 64, 161, .16); }
+      .call-content { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; opacity: 0; transform: translateX(18px); visibility: hidden; pointer-events: none; transition: opacity .18s ease, transform .32s ease, visibility 0s linear .32s; }
+      .workspace.calling-active .call-content,
+      .workspace.call-history-open .call-content { opacity: 1; transform: translateX(0); visibility: visible; pointer-events: auto; transition: opacity .3s ease .22s, transform .48s cubic-bezier(.16,1,.3,1) .12s, visibility 0s linear 0s; }
+      .call-bookmark { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; width: 100%; padding: 12px 0; border-radius: inherit; color: #3540a1; background: linear-gradient(180deg, #f4f5ff, #e8eaff); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .2s ease, visibility 0s linear .25s; }
+      .workspace.planning-active.has-call-history:not(.call-history-open) .call-bookmark { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity .28s ease .28s, visibility 0s linear 0s; }
+      .bookmark-label { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+      .bookmark-count { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 999px; color: white; background: #5865f2; font-size: 10px; font-weight: 800; }
       .board-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; overflow: hidden; padding: 14px 16px; border-bottom: 1px solid #e6e8ed; background: #fbfbfc; }
       .workspace.planning-active.has-call-history .call-board-header { cursor: pointer; }
       .task-title { min-width: 0; }
@@ -120,9 +122,11 @@
         .hero { margin: 15px 5px 20px; }
         .workspace { height: calc(100vh - 24px); }
         .workspace.calling-active .boards,
-        .workspace.call-history-open .boards { grid-template-columns: minmax(0, 1fr); grid-template-rows: 120px minmax(0, 1fr); }
+        .workspace.call-history-open .boards { flex-direction: column; }
         .workspace.calling-active .planning-board,
-        .workspace.call-history-open .planning-board { overflow: hidden; opacity: .48; }
+        .workspace.call-history-open .planning-board { flex: 0 0 120px; overflow: hidden; opacity: .48; }
+        .workspace.calling-active .calling-board,
+        .workspace.call-history-open .calling-board { flex: 1 1 auto; width: 100%; height: auto; margin: 10px 0 0; }
         .workspace.calling-active .planning-board .timeline,
         .workspace.calling-active .planning-board .composer,
         .workspace.call-history-open .planning-board .timeline,
@@ -159,7 +163,7 @@
         <div class="boards">
           <section id="planning-board" class="board planning-board active">
             <div class="board-header">
-              <div class="task-title"><strong><span>Stage 1 · Work with Relay</span><span id="planning-badge" class="phase-badge">Active</span></strong><span id="goal-summary"></span></div>
+              <div class="task-title"><strong><span>Private Workspace</span><span id="planning-badge" class="phase-badge">Active</span></strong><span id="goal-summary"></span></div>
             </div>
             <div id="planning-timeline" class="timeline" aria-live="polite"></div>
             <div id="planning-composer" class="composer">
@@ -174,21 +178,27 @@
             </div>
           </section>
           <section id="calling-board" class="board calling-board">
-            <div id="call-board-header" class="board-header call-board-header" aria-expanded="false">
-              <div class="task-title"><strong><span>Stage 2 · External calls</span><span id="calling-badge" class="phase-badge live">Live</span></strong><span>Representative transcript and call controls</span></div>
-              <div class="call-controls">
-                <button id="history-toggle" class="history-toggle">Review calls</button>
-                <button id="takeover" class="takeover">Simulate takeover · no audio</button>
+            <button id="call-bookmark" class="call-bookmark" aria-label="Open Call Console history">
+              <span class="bookmark-label">Call history</span>
+              <span id="bookmark-count" class="bookmark-count">0</span>
+            </button>
+            <div class="call-content">
+              <div id="call-board-header" class="board-header call-board-header" aria-expanded="false">
+                <div class="task-title"><strong><span>Call Console</span><span id="calling-badge" class="phase-badge live">Live</span></strong><span>Representative transcript and call controls</span></div>
+                <div class="call-controls">
+                  <button id="history-toggle" class="history-toggle">Minimize</button>
+                  <button id="takeover" class="takeover">Simulate takeover · no audio</button>
+                </div>
               </div>
-            </div>
-            <nav id="call-tabs" class="call-tabs" aria-label="External call transcripts"></nav>
-            <div id="calling-timeline" class="call-timeline-shell" aria-live="polite"></div>
-            <div id="calling-composer" class="composer">
-              <div id="calling-error" class="error"></div>
-              <div id="calling-prompt" class="prompt"></div>
-              <div class="instruction-row">
-                <input id="calling-instruction" type="text" placeholder="Instruct Relay or barge in at any time…" />
-                <button id="calling-send" class="send">Send</button>
+              <nav id="call-tabs" class="call-tabs" aria-label="External call transcripts"></nav>
+              <div id="calling-timeline" class="call-timeline-shell" aria-live="polite"></div>
+              <div id="calling-composer" class="composer">
+                <div id="calling-error" class="error"></div>
+                <div id="calling-prompt" class="prompt"></div>
+                <div class="instruction-row">
+                  <input id="calling-instruction" type="text" placeholder="Instruct Relay or barge in at any time…" />
+                  <button id="calling-send" class="send">Send</button>
+                </div>
               </div>
             </div>
           </section>
@@ -273,6 +283,7 @@
         event.stopPropagation();
         toggleCallHistory();
       });
+      document.querySelector('#call-bookmark').addEventListener('click', toggleCallHistory);
       document.querySelector('#call-board-header').addEventListener('click', () => {
         if (workflowPhase === 'planning') toggleCallHistory();
       });
@@ -388,6 +399,7 @@
 
       function renderCallHistory(events, activePhase) {
         const groups = groupCallingEvents(events);
+        document.querySelector('#bookmark-count').textContent = groups.length;
         let createdCall = false;
         groups.forEach((group, index) => {
           let view = callViews.get(group.id);
