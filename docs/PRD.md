@@ -40,17 +40,18 @@ No other CLI commands are required in P0.
 
 ## Demo journey
 
-1. The user gives Relay the goal of obtaining renters insurance and supplies fake supporting information.
-2. Relay plans calls to three simulated insurers.
-3. Each call appears as a live chat conversation.
-4. When Relay lacks an answer, it asks the representative for a moment and renders a quick-reply control.
-5. The user may type a private instruction at any time.
-6. Relay gathers the quotes and shows a factual comparison table without ranking or recommending.
-7. The user selects an insurer and explicitly instructs Relay to proceed.
-8. Relay calls the selected simulated insurer and continues the application.
-9. The user personally confirms material representations and approves purchase.
-10. Relay enters secure mode for a fake payment: cloud AI muted, transcription paused, macOS on-device TTS or user takeover available.
-11. Relay resumes and records the non-sensitive policy outcome.
+1. In the private planning stage, the user gives Relay the goal and optional supporting documents.
+2. Relay asks for missing facts, proposes companies and verified contact details, and lets the user revise the plan over multiple rounds.
+3. Relay starts no call until the user explicitly approves the finalized plan.
+4. The UI then switches to the live-call stage; each call appears as a paced chat conversation.
+5. When Relay lacks an answer, it asks the representative for a moment and renders a quick-reply control.
+6. The user may barge in at any time; Relay reformulates the private instruction and inserts it before the next call turn.
+7. Relay gathers the quotes and shows a factual comparison table without ranking or recommending.
+8. The user selects an insurer and explicitly instructs Relay to proceed.
+9. Relay calls the selected simulated insurer and continues the application.
+10. The user personally confirms material representations and approves purchase.
+11. Relay enters secure mode for a fake payment: cloud AI muted, transcription paused, macOS on-device TTS or user takeover available.
+12. Relay resumes and records the non-sensitive policy outcome.
 
 ## Functional requirements
 
@@ -60,6 +61,14 @@ No other CLI commands are required in P0.
 - Accept supporting text and local files; PDF/image extraction may be limited to the demo fixtures in P0.
 - Show the facts Relay plans to use and allow correction.
 
+### Planning boundary
+
+- Planning is a private conversation between the user and Relay; representative transcript UI is not shown yet.
+- Relay may request missing facts or documents before proposing external actions.
+- The user can revise companies, questions, constraints, and ordering over multiple rounds.
+- The plan shows intended calls and contact details before execution.
+- An explicit approval closes planning and opens the live-call interface.
+
 ### Live conversation
 
 - Representative utterances appear on the left.
@@ -67,6 +76,8 @@ No other CLI commands are required in P0.
 - Private user instructions appear on the right with a distinct color and `Private to Relay` label.
 - The user input box remains visible throughout the call.
 - Private instructions are not spoken verbatim by default; Relay reformulates them in context.
+- Call turns appear incrementally rather than being dumped as a completed transcript.
+- A barge-in is inserted ahead of the next queued call turn so it changes the visible conversation naturally.
 
 ### Structured user input
 
@@ -141,4 +152,3 @@ Relay begins calls with a concise disclosure such as:
 - Production billing
 - Additional demo scenarios
 - Additional CLI commands
-

@@ -54,7 +54,12 @@ It must bind to `127.0.0.1` by default.
 
 ### Dashboard
 
-The production dashboard will be a bundled web frontend served by the local API. Its primary active-call layout is:
+The production dashboard is split across two explicit surfaces:
+
+1. **Private planning:** goal/context intake, clarification dialogue, editable call plan, contact details, and approve/hold/decline controls.
+2. **Live call monitor:** entered only after plan approval, with paced transcript turns and controls for intervention.
+
+The primary active-call layout is:
 
 - compact call header
 - left/right conversation bubbles
@@ -64,6 +69,8 @@ The production dashboard will be a bundled web frontend served by the local API.
 - permanent Take Over button
 
 The transcript is the primary live representation. Summaries are produced between calls and at task completion, not continuously on every turn.
+
+The deterministic simulator keeps future turns in a backend queue. The UI requests one turn at a time. A user barge-in is placed at the front of that queue as a private user message, a contextually reformulated Relay utterance, and a simulated representative response. The pending script then resumes.
 
 ### Task orchestrator
 
@@ -183,4 +190,3 @@ The log writer recursively redacts known sensitive keys. Secure mode additionall
 ## Simulator
 
 The simulator is a real conversational endpoint backed by scenario state, not a fixed transcript animation. Three insurer profiles vary rates, questions, and follow-ups. Sanitized observations from disclosed/consented research calls may inform synthetic fixtures, but raw third-party conversations and PII are not shipped.
-

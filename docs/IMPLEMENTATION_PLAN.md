@@ -16,6 +16,8 @@ Exit: `uv run relay` and `uv run relay demo` open a local application; tests pas
 - [x] Implement active-call bubble layout.
 - [x] Implement persistent private instruction input.
 - [x] Implement quick-reply schema validation and renderers.
+- [x] Separate private planning from the live-call monitor with an explicit approval boundary.
+- [x] Pace simulated turns from a backend queue and support barge-in ahead of the next turn.
 - Implement local WebSocket event stream.
 - [x] Persist transcript and workflow events to the local JSONL log.
 - Persist and reload active task state after a restart.

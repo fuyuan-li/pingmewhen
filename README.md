@@ -8,7 +8,7 @@ The OpenAI Build Week demo asks several simulated insurers for renters-insurance
 
 ## Current state
 
-This repository contains a testable deterministic product preview. It accepts a goal and optional local PDF context, runs three simulated insurance conversations, requests live user input, renders a factual comparison, gates the callback and application confirmation on approval, and demonstrates takeover and protected payment handling. It does not yet place real calls or use an AI model for planning or conversation.
+This repository contains a testable deterministic product preview. It separates private goal clarification and editable planning from the approved live-call stage, paces simulated call turns one at a time, supports user barge-in, renders a factual comparison, gates consequential steps on approval, and demonstrates takeover and protected payment handling. It does not yet place real calls or use an AI model for planning or conversation.
 
 ## Commands
 

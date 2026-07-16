@@ -14,13 +14,35 @@ def test_task_api_reaches_comparison(monkeypatch, tmp_path):
     assert created.status_code == 200
     task = created.json()
 
-    advanced = client.post(
+    planned = client.post(
+        f"/api/tasks/{task['id']}/actions",
+        json={"action": "instruction", "value": "123 Demo Street"},
+    )
+    assert planned.status_code == 200
+    task = planned.json()
+    task = client.post(
+        f"/api/tasks/{task['id']}/actions",
+        json={"action": "answer", "value": "approve"},
+    ).json()
+    while task["auto_advance"]:
+        task = client.post(
+            f"/api/tasks/{task['id']}/actions",
+            json={"action": "advance", "value": ""},
+        ).json()
+    assert task["stage"] == "claims_history"
+
+    task = client.post(
         f"/api/tasks/{task['id']}/actions",
         json={"action": "answer", "value": "no"},
-    )
-    assert advanced.status_code == 200
-    assert advanced.json()["stage"] == "select_insurer"
-    assert len(advanced.json()["quotes"]) == 3
+    ).json()
+    while task["auto_advance"]:
+        task = client.post(
+            f"/api/tasks/{task['id']}/actions",
+            json={"action": "advance", "value": ""},
+        ).json()
+
+    assert task["stage"] == "select_insurer"
+    assert len(task["quotes"]) == 3
 
 
 def test_api_rejects_empty_goal(monkeypatch, tmp_path):

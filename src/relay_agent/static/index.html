@@ -38,17 +38,20 @@
       .workspace { display: none; height: min(760px, calc(100vh - 70px)); grid-template-rows: auto 1fr auto; }
       .taskbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 15px 18px; border-bottom: 1px solid #e6e8ed; background: #fbfbfc; }
       .task-title { min-width: 0; }
-      .task-title strong { display: block; font-size: 14px; }
-      .task-title span { display: block; overflow: hidden; color: #747b85; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+      .task-title strong { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+      .task-title > span { display: block; overflow: hidden; color: #747b85; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+      .phase-badge { padding: 4px 7px; border-radius: 999px; color: #4a55c7; background: #e9ebff; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+      .phase-badge.live { color: #9a342d; background: #ffebe9; }
       .takeover { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #df9b96; border-radius: 10px; background: #fff6f5; color: #a23d35; font-size: 12px; font-weight: 750; }
-      .timeline { overflow-y: auto; padding: 22px clamp(16px, 4vw, 54px); background: #f7f8fa; }
+      .timeline { min-width: 0; overflow-x: hidden; overflow-y: auto; padding: 22px clamp(16px, 4vw, 54px); background: #f7f8fa; }
       .event { margin: 0 0 13px; animation: rise .22s ease-out; }
       @keyframes rise { from { transform: translateY(4px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-      .bubble { width: fit-content; max-width: min(76%, 650px); padding: 11px 14px; border-radius: 16px; line-height: 1.42; font-size: 14px; white-space: pre-wrap; }
+      .bubble { width: fit-content; max-width: min(82%, 680px); padding: 11px 14px; border-radius: 16px; line-height: 1.42; font-size: 14px; overflow-wrap: anywhere; white-space: pre-wrap; }
       .representative { margin-right: auto; border-bottom-left-radius: 5px; background: white; border: 1px solid #e1e4e9; }
       .relay { margin-left: auto; border-bottom-right-radius: 5px; background: #5865f2; color: white; }
       .user_private { margin-left: auto; border: 1px solid #abd8c4; border-bottom-right-radius: 5px; background: #e6f7ef; color: #14533b; }
       .relay_private { margin-left: auto; border: 1px dashed #9ca6f5; border-bottom-right-radius: 5px; background: #f0f1ff; color: #3540a1; }
+      .phase-planning .relay_private { margin-left: 0; border-bottom-right-radius: 16px; border-bottom-left-radius: 5px; }
       .speaker { margin: 0 4px 4px; color: #7a818c; font-size: 10px; font-weight: 750; text-transform: uppercase; }
       .align-right { text-align: right; }
       .status, .notice, .secure-gap { max-width: 760px; margin: 11px auto; padding: 8px 12px; border-radius: 10px; text-align: center; font-size: 12px; }
@@ -56,6 +59,13 @@
       .notice { color: #755515; background: #fff4d7; }
       .secure-gap { padding: 18px; border: 1px dashed #8c929b; color: #4f5660; background: #eef0f3; font-weight: 700; }
       .comparison { margin: 20px auto; overflow-x: auto; border: 1px solid #dce0e6; border-radius: 14px; background: white; }
+      .plan-card { max-width: 760px; margin: 18px auto; overflow: hidden; border: 1px solid #dce0e6; border-radius: 14px; background: white; }
+      .plan-head { padding: 13px 15px; background: #f0f1ff; color: #3540a1; font-size: 13px; font-weight: 800; }
+      .plan-body { padding: 14px 15px; }
+      .plan-address { margin-bottom: 10px; color: #4f5660; font-size: 12px; }
+      .plan-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 9px 0; border-top: 1px solid #eceef2; font-size: 12px; }
+      .plan-phone { color: #68707b; font-variant-numeric: tabular-nums; }
+      .plan-questions { margin: 10px 0 0; padding-left: 18px; color: #4f5660; font-size: 12px; }
       .comparison-caption { padding: 13px 14px; color: #4d5560; font-size: 12px; font-weight: 700; }
       table { width: 100%; border-collapse: collapse; min-width: 700px; font-size: 12px; }
       th, td { padding: 11px 13px; border-top: 1px solid #e8eaee; text-align: left; }
@@ -107,7 +117,7 @@
 
       <section id="workspace" class="panel workspace">
         <div class="taskbar">
-          <div class="task-title"><strong>Renters insurance task</strong><span id="goal-summary"></span></div>
+          <div class="task-title"><strong><span id="phase-title">Plan with Relay</span><span id="phase-badge" class="phase-badge">Planning</span></strong><span id="goal-summary"></span></div>
           <button id="takeover" class="takeover">Take over call</button>
         </div>
         <div id="timeline" class="timeline" aria-live="polite"></div>
@@ -133,7 +143,10 @@
       const errorBox = document.querySelector('#error');
       const instruction = document.querySelector('#instruction');
       let task = null;
-      let renderedEventCount = 0;
+      let visiblePhase = 'planning';
+      let seenEventIds = new Set();
+      let advanceTimer = null;
+      let actionInFlight = false;
 
       fetch('/api/runtime').then(r => r.json()).then(runtime => {
         document.querySelector('#mode').textContent = runtime.mode === 'demo'
@@ -190,8 +203,11 @@
       }
 
       async function act(action, value = '') {
-        if (!task) return;
-        setControlsDisabled(true);
+        if (!task || actionInFlight) return;
+        actionInFlight = true;
+        clearTimeout(advanceTimer);
+        const userAction = action !== 'advance';
+        if (userAction) setControlsDisabled(true);
         try {
           const response = await fetch(`/api/tasks/${task.id}/actions`, {
             method: 'POST',
@@ -203,7 +219,8 @@
         } catch (error) {
           showError(error.message);
         } finally {
-          setControlsDisabled(false);
+          actionInFlight = false;
+          if (userAction) setControlsDisabled(task?.status === 'complete');
         }
       }
 
@@ -215,21 +232,39 @@
 
       function renderTask() {
         errorBox.style.display = 'none';
-        const newEvents = task.events.slice(renderedEventCount);
+        const nextVisiblePhase = task.phase === 'complete' ? visiblePhase : task.phase;
+        if (nextVisiblePhase !== visiblePhase) {
+          visiblePhase = nextVisiblePhase;
+          timeline.innerHTML = '';
+          seenEventIds = new Set(task.events.filter(event => event.phase !== visiblePhase).map(event => event.id));
+        }
+        workspace.classList.toggle('phase-planning', visiblePhase === 'planning');
+        document.querySelector('#phase-title').textContent = visiblePhase === 'planning' ? 'Plan with Relay' : 'Live call monitor';
+        const phaseBadge = document.querySelector('#phase-badge');
+        phaseBadge.textContent = visiblePhase === 'planning' ? 'Planning' : (task.status === 'complete' ? 'Complete' : 'Live');
+        phaseBadge.classList.toggle('live', visiblePhase === 'calling' && task.status !== 'complete');
+        const newEvents = task.events.filter(event => event.phase === visiblePhase && !seenEventIds.has(event.id));
         newEvents.forEach(event => timeline.appendChild(renderEvent(event)));
-        renderedEventCount = task.events.length;
+        newEvents.forEach(event => seenEventIds.add(event.id));
         renderPrompt(task.prompt);
-        document.querySelector('#takeover').disabled = task.status === 'complete' || task.stage === 'takeover';
+        const takeover = document.querySelector('#takeover');
+        takeover.style.display = visiblePhase === 'calling' ? 'block' : 'none';
+        takeover.disabled = task.status === 'complete' || task.stage === 'takeover';
         instruction.disabled = task.status === 'complete';
+        instruction.placeholder = visiblePhase === 'planning' ? 'Reply to Relay or revise the plan…' : 'Instruct Relay or barge in at any time…';
         document.querySelector('#send').disabled = task.status === 'complete';
         requestAnimationFrame(() => { timeline.scrollTop = timeline.scrollHeight; });
+        if (task.auto_advance) {
+          advanceTimer = setTimeout(() => act('advance'), 850);
+        }
       }
 
       function renderEvent(event) {
         const wrapper = document.createElement('div');
         wrapper.className = 'event';
         if (event.type === 'message') {
-          const isRight = event.speaker !== 'representative';
+          const isPlanningRelay = event.phase === 'planning' && event.speaker === 'relay_private';
+          const isRight = event.speaker !== 'representative' && !isPlanningRelay;
           const labels = {
             representative: event.company || 'Representative',
             relay: 'Relay · spoken to representative',
@@ -246,6 +281,9 @@
         } else if (event.type === 'comparison') {
           wrapper.className = 'comparison';
           wrapper.innerHTML = comparisonMarkup(event.text, task.quotes);
+        } else if (event.type === 'plan') {
+          wrapper.className = 'plan-card';
+          wrapper.innerHTML = planMarkup(event);
         } else {
           const block = document.createElement('div');
           block.className = event.type === 'secure_gap' ? 'secure-gap' : event.type;
@@ -253,6 +291,17 @@
           wrapper.appendChild(block);
         }
         return wrapper;
+      }
+
+      function planMarkup(event) {
+        const questions = event.questions?.length
+          ? `<ul class="plan-questions">${event.questions.map(question => `<li>${escapeHtml(question)}</li>`).join('')}</ul>`
+          : '<div class="hint">Standardized premium, limits, deductible, and loss-of-use questions.</div>';
+        return `<div class="plan-head">${escapeHtml(event.text)}</div><div class="plan-body">
+          <div class="plan-address"><strong>Property:</strong> ${escapeHtml(event.address)}</div>
+          ${event.carriers.map(carrier => `<div class="plan-row"><strong>${escapeHtml(carrier.insurer)}</strong><span class="plan-phone">${escapeHtml(carrier.phone)} · simulated</span></div>`).join('')}
+          ${questions}
+        </div>`;
       }
 
       function comparisonMarkup(caption, quotes) {
