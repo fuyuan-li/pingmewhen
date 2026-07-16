@@ -25,7 +25,7 @@ uv run relay demo
 
 Use `relay demo` to test the current end-to-end simulated workflow. The normal `relay` command currently exposes the same deterministic preview under a local-mode label; general agentic task execution is not implemented yet.
 
-By default, Relay opens `http://127.0.0.1:8765` and writes redacted structured events under `~/.relay/logs/`. Set `RELAY_DATA_DIR` or `RELAY_PORT` to override those defaults.
+By default, Relay opens `http://127.0.0.1:8765` and writes redacted structured events under this repository’s `.relay/logs/` directory. Set `RELAY_DATA_DIR` or `RELAY_PORT` to override those defaults.
 
 ## Repository map
 
@@ -56,5 +56,5 @@ By default, Relay opens `http://127.0.0.1:8765` and writes redacted structured e
 - Secure mode removes the cloud AI from the media path and pauses transcription. The fake payment demo requests and speaks card number, expiration, and CVV separately, returning control to Relay between fields.
 - Browser TTS currently plays on the user device. Injecting local TTS only into the representative’s phone leg requires the planned shared media gateway.
 - Only fake card and identity data are used in the demo.
-- PDF context is stored locally under `~/.relay/contexts/`; its contents are not sent to a model in this deterministic build.
+- PDF context is stored locally under this repository’s `.relay/contexts/`; its contents are not sent to a model in this deterministic build.
 - ChatGPT/Codex authentication does not currently authorize third-party Realtime API use. The hackathon demo uses a limited hosted backend for Realtime and telephony.

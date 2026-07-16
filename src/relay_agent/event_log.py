@@ -25,7 +25,7 @@ SENSITIVE_KEYS = {
 
 def default_data_dir() -> Path:
     configured = os.environ.get("RELAY_DATA_DIR")
-    return Path(configured).expanduser() if configured else Path.home() / ".relay"
+    return Path(configured).expanduser() if configured else Path.cwd() / ".relay"
 
 
 def redact(value: Any) -> Any:
@@ -56,4 +56,3 @@ class EventLog:
         encoded = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
         with self._lock, self.path.open("a", encoding="utf-8") as output:
             output.write(encoded + "\n")
-

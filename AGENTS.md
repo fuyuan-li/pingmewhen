@@ -21,7 +21,7 @@ The renters-insurance workflow is the hackathon demo, not the product boundary.
 - Consequential actions require explicit approval.
 - A permanent Take Over control lets the user join the call.
 - Secure mode mutes/disconnects the cloud AI and pauses transcription. Each requested payment field gets its own Relay → local TTS → Relay cycle; the user can take over instead.
-- Save structured event logs and transcripts locally. Never log secure-mode values, card data, full SSNs, secrets, or auth tokens.
+- Save structured event logs and transcripts under the ignored repo-local `.relay/` directory by default. Never log secure-mode values, card data, full SSNs, secrets, or auth tokens.
 - The demo uses a simulated insurer and fake payment data.
 
 ## Implemented now
