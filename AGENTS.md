@@ -20,14 +20,15 @@ The renters-insurance workflow is the hackathon demo, not the product boundary.
 - Relay renders structured quick replies using prebuilt components.
 - Consequential actions require explicit approval.
 - A permanent Take Over control lets the user join the call.
-- Secure mode mutes/disconnects the cloud AI and pauses transcription. On macOS, built-in on-device TTS may speak fake/demo sensitive values; the user can take over instead.
+- Secure mode mutes/disconnects the cloud AI and pauses transcription. Each requested payment field gets its own Relay → local TTS → Relay cycle; the user can take over instead.
 - Save structured event logs and transcripts locally. Never log secure-mode values, card data, full SSNs, secrets, or auth tokens.
 - The demo uses a simulated insurer and fake payment data.
 
 ## Implemented now
 
-- The deterministic preview is runnable end to end: validated address/PDF clarification, editable planning, explicit start approval, paced synthetic quote calls, interruptible barge-in, persistent planning/call panels, factual comparison back in planning, later approval gates, simulated takeover/resume, secure payment simulation, and local JSONL logs.
+- The deterministic preview is runnable end to end: validated address/PDF clarification, editable planning, explicit start approval, paced synthetic quote calls with a fresh introduction for each representative, interruptible barge-in, responsive parallel planning/call boards, factual comparison back in planning, later approval gates, simulated takeover/resume, field-by-field secure payment simulation, and local JSONL logs.
 - Takeover does not connect microphone or phone audio yet. UI and documentation must call it simulated until a real media bridge exists.
+- Browser speech in the preview plays on the user device; it is not injected into a phone call. Outbound-only local audio requires the shared media bridge.
 - It does not yet contain model-driven planning, Realtime voice, telephony, or general task execution. Do not describe those as working.
 
 ## Explicit non-goals

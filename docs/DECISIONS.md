@@ -28,7 +28,7 @@ Relay follows OpenAI policy by disclosing that it is an AI voice assistant actin
 
 ## 7. Sensitive-data air gap
 
-For fake card data and fake full SSNs, secure mode removes the cloud AI from both directions of the media path and pauses transcription. macOS built-in on-device TTS or human takeover handles the exchange. No unsafe real-data cloud option is part of P0.
+For fake card data and fake full SSNs, secure mode removes the cloud AI from both directions of the media path and pauses transcription. Each field is requested and spoken separately, with Relay resuming between fields. macOS built-in on-device TTS or human takeover handles the exchange. Browser playback is only a deterministic preview; production must inject local audio into the representative leg through the media gateway. No unsafe real-data cloud option is part of P0.
 
 ## 8. Local-first delivery
 
@@ -45,4 +45,3 @@ Relay saves structured lifecycle events and transcripts locally for the live UI,
 ## 11. P0 discipline
 
 No Piper, downloaded voices, cross-platform local TTS, real insurance, real payment data, extra demo scenarios, extra CLI commands, or speculative authentication work.
-

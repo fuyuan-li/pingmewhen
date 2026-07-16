@@ -346,6 +346,9 @@ class DeterministicTaskEngine:
             "confirm_application": self._handle_application_confirmation,
             "payment_method": self._handle_payment_method,
             "risky_confirmation": self._handle_risky_confirmation,
+            "secure_card_number": self._handle_local_tts_field,
+            "secure_expiration": self._handle_local_tts_field,
+            "secure_cvv": self._handle_local_tts_field,
             "secure_complete": self._handle_secure_complete,
             "takeover": self._handle_resume,
         }
@@ -454,7 +457,25 @@ class DeterministicTaskEngine:
             events.extend(
                 [
                     queued("status", text=f"Calling simulated insurer {index} of {len(carriers)} · {carrier['insurer']}", company=carrier["insurer"]),
-                    queued("message", speaker="representative", company=carrier["insurer"], text=f"Based on the sample profile, the quote is {carrier['monthly_premium']} per month with {carrier['personal_property']} in personal property coverage."),
+                    queued("message", speaker="representative", company=carrier["insurer"], text=f"{carrier['insurer']}, this is Jordan. How can I help you today?"),
+                    queued(
+                        "message",
+                        speaker="relay",
+                        text=(
+                            "Hi, I’m Relay, an AI voice assistant speaking for Alex, who is following by text. "
+                            "Alex would like a renters-insurance quote and will personally provide facts and decisions. Is that okay?"
+                        ),
+                    ),
+                    queued("message", speaker="representative", company=carrier["insurer"], text="Yes, I can help with that quote."),
+                    queued(
+                        "message",
+                        speaker="relay",
+                        text=(
+                            f"The property is {task['address']}. Alex’s answer on claims in the last five years is "
+                            f"{answer.lower()}. Please quote the same sample coverage profile so we can compare it consistently."
+                        ),
+                    ),
+                    queued("message", speaker="representative", company=carrier["insurer"], text=f"Based on that information, the quote is {carrier['monthly_premium']} per month with {carrier['personal_property']} in personal property coverage."),
                     queued("message", speaker="relay", text="Thank you. I’ve recorded the premium, limits, deductible, and loss-of-use coverage."),
                     queued("status", text=f"{carrier['insurer']} call completed · quote captured"),
                 ]
@@ -516,8 +537,18 @@ class DeterministicTaskEngine:
         task["phase"] = "calling"
         events = [
             queued("status", text=f"Calling {insurer} · continuing simulated application", company=insurer),
-            queued("message", speaker="representative", company=insurer, text="Welcome back. I found the quote. Are you ready to continue with the application?"),
-            queued("message", speaker="relay", text="Yes. Alex selected this quote and approved this callback. Alex will personally confirm the application details."),
+            queued("message", speaker="representative", company=insurer, text=f"{insurer}, this is Sam. How can I help?"),
+            queued(
+                "message",
+                speaker="relay",
+                text=(
+                    "Hi, I’m Relay, an AI voice assistant speaking for Alex, who is following by text. "
+                    f"Alex previously received a renters quote from {insurer}, selected it, and approved this callback "
+                    "to continue the application. Alex will personally confirm facts and decisions. Is that okay?"
+                ),
+            ),
+            queued("message", speaker="representative", company=insurer, text="Yes. I found the simulated quote and can continue the application."),
+            queued("message", speaker="relay", text="Thank you. Alex is ready to confirm the sample application details."),
         ]
         prompt = {
             "kind": "approval",
@@ -564,7 +595,10 @@ class DeterministicTaskEngine:
                 ],
             }
             return
-        if value not in {"takeover", "local_tts"}:
+        if value == "local_tts":
+            self._start_local_tts(task)
+            return
+        if value != "takeover":
             raise InvalidAction("Choose one of the payment handling methods.")
         self._enter_secure_mode(task, value)
 
@@ -585,15 +619,52 @@ class DeterministicTaskEngine:
         self._append(task, "secure_gap", text="Sensitive payment segment is neither transcribed nor logged.")
         task["stage"] = "secure_complete"
         task["prompt"] = {
-            "kind": "secure_entry" if method == "local_tts" else "secure_complete",
+            "kind": "secure_complete",
             "method": method,
-            "question": (
-                "Enter fake test card data locally, speak it with the device voice, then complete the simulated segment."
-                if method == "local_tts"
-                else "Complete the simulated protected payment segment when ready."
-            ),
+            "question": "Complete the simulated protected payment segment when ready.",
             "options": [{"value": "complete", "label": "Complete simulated payment"}],
         }
+
+    def _start_local_tts(self, task: dict[str, Any]) -> None:
+        task["secure_mode"] = True
+        self._append(task, "message", speaker="representative", company=task["selected_insurer"], text="Please provide the card number first.")
+        self._append(task, "message", speaker="relay", text="One moment while Alex provides only the card number through the local secure voice channel.")
+        self._append(task, "status", text="Relay audio paused · waiting for local device voice: card number")
+        self._append(task, "secure_gap", text="Card number is handled locally and is not sent to Relay’s server, model, transcript, or log.")
+        task["stage"] = "secure_card_number"
+        task["prompt"] = self._secure_field_prompt("card_number")
+
+    def _handle_local_tts_field(self, task: dict[str, Any], value: str) -> None:
+        if value != "sent":
+            raise InvalidAction("The local voice channel must signal completion before Relay resumes.")
+        completed_stage = task["stage"]
+        task["secure_mode"] = False
+        self._append(task, "status", text="Local device voice completed · Relay returned to the line")
+        self._append(task, "message", speaker="relay", text="Thanks. Please continue.")
+
+        if completed_stage == "secure_card_number":
+            self._append(task, "message", speaker="representative", company=task["selected_insurer"], text="Thank you. What is the expiration date?")
+            self._begin_next_secure_field(task, "expiration", "expiration date")
+            return
+        if completed_stage == "secure_expiration":
+            self._append(task, "message", speaker="representative", company=task["selected_insurer"], text="And what is the three-digit security code?")
+            self._begin_next_secure_field(task, "cvv", "security code")
+            return
+
+        self._append(task, "message", speaker="representative", company=task["selected_insurer"], text="The sandbox payment was accepted. The sample policy is active immediately.")
+        self._append(task, "message", speaker="relay", text="Thank you. I’ve captured the non-sensitive confirmation for Alex.")
+        task["phase"] = "planning"
+        self._append(task, "message", speaker="relay_private", text=f"The simulated purchase with {task['selected_insurer']} is complete. No payment fields entered Relay’s context, transcript, or logs.")
+        self._append(task, "status", text="Task complete · simulated confirmation captured")
+        task.update(phase="complete", stage="complete", status="complete", prompt=None)
+
+    def _begin_next_secure_field(self, task: dict[str, Any], field: str, spoken_label: str) -> None:
+        self._append(task, "message", speaker="relay", text=f"One moment while Alex provides only the {spoken_label} through the local secure voice channel.")
+        self._append(task, "status", text=f"Relay audio paused · waiting for local device voice: {spoken_label}")
+        self._append(task, "secure_gap", text=f"The {spoken_label} is handled locally and is not transcribed or logged.")
+        task["secure_mode"] = True
+        task["stage"] = f"secure_{field}"
+        task["prompt"] = self._secure_field_prompt(field)
 
     def _handle_secure_complete(self, task: dict[str, Any], value: str) -> None:
         if value != "complete":
@@ -601,7 +672,9 @@ class DeterministicTaskEngine:
         task["secure_mode"] = False
         self._append(task, "status", text="Secure mode ended · Relay reconnected · transcription resumed")
         self._append(task, "message", speaker="representative", company=task["selected_insurer"], text="The sandbox payment was accepted. The sample policy is active immediately.")
-        self._append(task, "message", speaker="relay", text=f"Done. The simulated policy with {task['selected_insurer']} is active. I saved the non-sensitive outcome and visible transcript.")
+        self._append(task, "message", speaker="relay", text="Thank you. I’ve captured the non-sensitive confirmation for Alex.")
+        task["phase"] = "planning"
+        self._append(task, "message", speaker="relay_private", text=f"The simulated purchase with {task['selected_insurer']} is complete. I saved only the non-sensitive outcome and visible transcript.")
         self._append(task, "status", text="Task complete · simulated confirmation captured")
         task.update(phase="complete", stage="complete", status="complete", prompt=None)
 
@@ -720,6 +793,35 @@ class DeterministicTaskEngine:
                 {"value": "local_tts", "label": "Use local device voice"},
                 {"value": "risky", "label": "Let Relay speak it · risky"},
             ],
+        }
+
+    def _secure_field_prompt(self, field: str) -> dict[str, Any]:
+        fields = {
+            "card_number": {
+                "label": "Card number",
+                "placeholder": "Fake card: 4242 4242 4242 4242",
+                "input_mode": "numeric",
+            },
+            "expiration": {
+                "label": "Expiration date",
+                "placeholder": "MM/YY",
+                "input_mode": "numeric",
+            },
+            "cvv": {
+                "label": "Security code",
+                "placeholder": "Fake CVV: 123",
+                "input_mode": "numeric",
+            },
+        }
+        spec = fields[field]
+        return {
+            "kind": "secure_field",
+            "field": field,
+            "question": f"The representative asked only for: {spec['label']}. Enter fake test data; Relay remains paused until local speech ends.",
+            "label": spec["label"],
+            "placeholder": spec["placeholder"],
+            "input_mode": spec["input_mode"],
+            "options": [],
         }
 
     def _address_confirmation_prompt(self, candidate: str) -> dict[str, Any]:

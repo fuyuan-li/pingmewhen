@@ -8,7 +8,7 @@ The OpenAI Build Week demo asks several simulated insurers for renters-insurance
 
 ## Current state
 
-This repository contains a testable deterministic product preview. It maintains separate planning and external-call panels, moves back to planning for comparison and selection, paces simulated call turns one at a time, supports user barge-in, and gates consequential steps on approval. It does not yet place real calls, connect microphone audio, or use an AI model for planning or conversation; takeover is labeled as a simulation.
+This repository contains a testable deterministic product preview. Planning stays visible as the task’s private memory; while a call is active it narrows and greys out as the live-call board opens beside it. After a call sequence, the call board collapses and planning expands for comparison and decisions. Turns are paced, each new representative receives a fresh introduction and task brief, users can barge in, and consequential steps require approval. It does not yet place real calls, route browser audio into a call, connect microphone audio, or use an AI model for planning or conversation.
 
 ## Commands
 
@@ -53,7 +53,8 @@ By default, Relay opens `http://127.0.0.1:8765` and writes redacted structured e
 - Relay discloses that it is an AI voice assistant.
 - The insurance demo presents factual quote information; Relay does not recommend or rank policies.
 - The user selects the insurer and approves consequential actions.
-- Secure mode removes the cloud AI from the media path and pauses transcription.
+- Secure mode removes the cloud AI from the media path and pauses transcription. The fake payment demo requests and speaks card number, expiration, and CVV separately, returning control to Relay between fields.
+- Browser TTS currently plays on the user device. Injecting local TTS only into the representative’s phone leg requires the planned shared media gateway.
 - Only fake card and identity data are used in the demo.
 - PDF context is stored locally under `~/.relay/contexts/`; its contents are not sent to a model in this deterministic build.
 - ChatGPT/Codex authentication does not currently authorize third-party Realtime API use. The hackathon demo uses a limited hosted backend for Realtime and telephony.

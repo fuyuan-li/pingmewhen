@@ -32,6 +32,7 @@ Exit: a simulated event source drives the real UI, and private instructions chan
 - [x] Implement quote questions, branching follow-ups, and factual results.
 - [x] Add at least one blocking unknown question.
 - [x] Add factual comparison table with no ranking or recommendation.
+- [x] Restart representative-facing context with a fresh introduction and task brief on every call.
 - Build conversation fixtures from sanitized patterns, not raw copied transcripts.
 
 Exit: `relay demo` completes three distinct dynamic quote conversations and waits for the user’s carrier selection.
@@ -54,8 +55,9 @@ Exit: the demo is driven by actual voice runtime events rather than scripted UI 
 - [x] Block the final selection/purchase step on explicit approval in the simulator.
 - [x] Add truthfully labeled simulated takeover/pause state.
 - Replace simulated takeover with a real audio-track switch only after the shared media bridge is operational.
-- [x] Add simulated secure-mode transition and a deliberate transcript gap.
-- [x] Use the browser/OS local speech facility for fake card data in the deterministic preview.
+- [x] Add field-by-field simulated secure-mode transitions and deliberate transcript gaps.
+- [x] Use the browser/OS local speech facility separately for fake card number, expiration, and CVV in the deterministic preview.
+- Inject local PCM only into the representative call leg after the shared media bridge exists; browser device playback is not phone routing.
 - Route repetition or unexpected payment questions to takeover.
 - Resume Relay and capture only non-sensitive confirmation.
 

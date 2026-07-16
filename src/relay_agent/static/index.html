@@ -35,19 +35,24 @@
       .file-name { color: #6b727c; font-size: 12px; }
       .hint { color: #767d87; font-size: 12px; }
       .primary { padding: 11px 17px; border-radius: 11px; background: #17191c; color: white; font-weight: 700; }
-      .workspace { display: none; width: 100%; max-width: 100%; height: min(760px, calc(100vh - 70px)); grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
-      .workspace > * { width: 100%; max-width: 100%; min-width: 0; }
-      .taskbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; overflow: hidden; padding: 15px 18px; border-bottom: 1px solid #e6e8ed; background: #fbfbfc; }
+      .workspace { display: none; width: 100%; max-width: 100%; height: min(760px, calc(100vh - 70px)); }
+      .boards { display: grid; width: 100%; height: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 12px; transition: grid-template-columns .3s ease, grid-template-rows .3s ease; }
+      .workspace.calling-active .boards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .workspace.planning-active.has-call-history .boards { grid-template-rows: minmax(0, 1fr) 52px; }
+      .board { display: grid; width: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; border: 1px solid #dde1e7; border-radius: 20px; background: white; box-shadow: 0 14px 45px rgba(30, 35, 50, .07); transition: opacity .25s ease, filter .25s ease, box-shadow .25s ease, height .3s ease; }
+      .board.active { border-color: #9ca6f5; box-shadow: 0 0 0 3px rgba(89, 102, 239, .13), 0 18px 55px rgba(30, 35, 50, .1); }
+      .board.inactive { opacity: .5; filter: grayscale(.25); }
+      .workspace.planning-active .calling-board { display: none; }
+      .workspace.planning-active.has-call-history .calling-board { display: grid; height: 52px; grid-template-rows: 52px; opacity: .72; }
+      .workspace.planning-active.has-call-history .calling-board .timeline,
+      .workspace.planning-active.has-call-history .calling-board .composer { display: none; }
+      .board-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; overflow: hidden; padding: 14px 16px; border-bottom: 1px solid #e6e8ed; background: #fbfbfc; }
       .task-title { min-width: 0; }
       .task-title strong { display: flex; align-items: center; gap: 8px; font-size: 14px; }
       .task-title > span { display: block; overflow: hidden; color: #747b85; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
       .phase-badge { padding: 4px 7px; border-radius: 999px; color: #4a55c7; background: #e9ebff; font-size: 10px; font-weight: 800; text-transform: uppercase; }
       .phase-badge.live { color: #9a342d; background: #ffebe9; }
       .takeover { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #df9b96; border-radius: 10px; background: #fff6f5; color: #a23d35; font-size: 12px; font-weight: 750; }
-      .stage-tabs { display: flex; gap: 8px; padding: 10px 18px; border-bottom: 1px solid #e6e8ed; background: white; }
-      .stage-tab { padding: 8px 12px; border-radius: 9px; color: #69717c; background: transparent; font-size: 12px; font-weight: 750; }
-      .stage-tab.active { color: #3540a1; background: #eceefe; }
-      .stage-tab:disabled { cursor: not-allowed; opacity: .4; }
       .timeline { min-width: 0; overflow-x: hidden; overflow-y: auto; padding: 22px clamp(16px, 4vw, 54px); background: #f7f8fa; }
       .event { min-width: 0; margin: 0 0 13px; animation: rise .22s ease-out; }
       .message-event { display: flex; width: 100%; min-width: 0; flex-direction: column; align-items: flex-start; }
@@ -58,7 +63,7 @@
       .relay { border-bottom-right-radius: 5px; background: #5865f2; color: white; }
       .user_private { border: 1px solid #abd8c4; border-bottom-right-radius: 5px; background: #e6f7ef; color: #14533b; }
       .relay_private { border: 1px dashed #9ca6f5; border-bottom-right-radius: 5px; background: #f0f1ff; color: #3540a1; }
-      .phase-planning .relay_private { border-bottom-right-radius: 16px; border-bottom-left-radius: 5px; }
+      .planning-board .relay_private { border-bottom-right-radius: 16px; border-bottom-left-radius: 5px; }
       .speaker { margin: 0 4px 4px; color: #7a818c; font-size: 10px; font-weight: 750; text-transform: uppercase; }
       .align-right { text-align: right; }
       .status, .notice, .secure-gap { max-width: 760px; margin: 11px auto; padding: 8px 12px; border-radius: 10px; text-align: center; font-size: 12px; }
@@ -89,13 +94,17 @@
       .send { padding: 10px 15px; border-radius: 10px; background: #17191c; color: white; font-weight: 700; }
       .attach-inline { display: none; flex: 0 0 auto; align-items: center; margin: 0; padding: 10px 12px; border: 1px solid #cbd1da; border-radius: 10px; color: #4f5660; background: #f9fafb; font-size: 12px; cursor: pointer; }
       .instruction-row .task-context-input { position: absolute; width: 1px; min-width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; }
-      .secure-form { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; margin: 10px 0; }
+      .secure-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 10px 0; }
       .secure-form input { min-width: 0; padding: 10px; border: 1px solid #cbd1da; border-radius: 9px; }
       .error { display: none; margin: 0 0 10px; padding: 9px 11px; border-radius: 9px; color: #9b342d; background: #fff0ef; font-size: 12px; }
       @media (max-width: 650px) {
         .shell { width: min(100% - 16px, 1120px); padding: 12px 0; }
         .hero { margin: 15px 5px 20px; }
         .workspace { height: calc(100vh - 24px); }
+        .workspace.calling-active .boards { grid-template-columns: minmax(0, 1fr); grid-template-rows: 120px minmax(0, 1fr); }
+        .workspace.calling-active .planning-board { overflow: hidden; opacity: .48; }
+        .workspace.calling-active .planning-board .timeline,
+        .workspace.calling-active .planning-board .composer { display: none; }
         .bubble { max-width: 88%; }
         .secure-form { grid-template-columns: 1fr; }
       }
@@ -124,25 +133,39 @@
         </section>
       </section>
 
-      <section id="workspace" class="panel workspace">
-        <div class="taskbar">
-          <div class="task-title"><strong><span id="phase-title">Plan with Relay</span><span id="phase-badge" class="phase-badge">Planning</span></strong><span id="goal-summary"></span></div>
-          <button id="takeover" class="takeover">Simulate takeover · no audio</button>
-        </div>
-        <nav class="stage-tabs" aria-label="Task stages">
-          <button id="planning-tab" class="stage-tab active">1 · Plan with Relay</button>
-          <button id="calling-tab" class="stage-tab" disabled>2 · External calls</button>
-        </nav>
-        <div id="timeline" class="timeline" aria-live="polite"></div>
-        <div class="composer">
-          <div id="error" class="error"></div>
-          <div id="prompt" class="prompt"></div>
-          <div class="instruction-row">
-            <label id="task-attach-label" class="attach-inline" for="task-context-file">Attach PDF</label>
-            <input id="task-context-file" class="task-context-input" type="file" accept="application/pdf,.pdf" />
-            <input id="instruction" type="text" placeholder="Instruct Relay at any time…" />
-            <button id="send" class="send">Send</button>
-          </div>
+      <section id="workspace" class="workspace planning-active">
+        <div class="boards">
+          <section id="planning-board" class="board planning-board active">
+            <div class="board-header">
+              <div class="task-title"><strong><span>Stage 1 · Work with Relay</span><span id="planning-badge" class="phase-badge">Active</span></strong><span id="goal-summary"></span></div>
+            </div>
+            <div id="planning-timeline" class="timeline" aria-live="polite"></div>
+            <div id="planning-composer" class="composer">
+              <div id="planning-error" class="error"></div>
+              <div id="planning-prompt" class="prompt"></div>
+              <div class="instruction-row">
+                <label id="task-attach-label" class="attach-inline" for="task-context-file">Attach PDF</label>
+                <input id="task-context-file" class="task-context-input" type="file" accept="application/pdf,.pdf" />
+                <input id="planning-instruction" type="text" placeholder="Reply to Relay or revise the plan…" />
+                <button id="planning-send" class="send">Send</button>
+              </div>
+            </div>
+          </section>
+          <section id="calling-board" class="board calling-board">
+            <div class="board-header">
+              <div class="task-title"><strong><span>Stage 2 · External calls</span><span id="calling-badge" class="phase-badge live">Live</span></strong><span>Representative transcript and call controls</span></div>
+              <button id="takeover" class="takeover">Simulate takeover · no audio</button>
+            </div>
+            <div id="calling-timeline" class="timeline" aria-live="polite"></div>
+            <div id="calling-composer" class="composer">
+              <div id="calling-error" class="error"></div>
+              <div id="calling-prompt" class="prompt"></div>
+              <div class="instruction-row">
+                <input id="calling-instruction" type="text" placeholder="Instruct Relay or barge in at any time…" />
+                <button id="calling-send" class="send">Send</button>
+              </div>
+            </div>
+          </section>
         </div>
       </section>
     </div>
@@ -154,14 +177,15 @@
       const startButton = document.querySelector('#start');
       const contextFile = document.querySelector('#context-file');
       const taskContextFile = document.querySelector('#task-context-file');
-      const timeline = document.querySelector('#timeline');
-      const promptBox = document.querySelector('#prompt');
-      const errorBox = document.querySelector('#error');
-      const instruction = document.querySelector('#instruction');
+      const planningTimeline = document.querySelector('#planning-timeline');
+      const callingTimeline = document.querySelector('#calling-timeline');
+      const planningPrompt = document.querySelector('#planning-prompt');
+      const callingPrompt = document.querySelector('#calling-prompt');
+      const planningInstruction = document.querySelector('#planning-instruction');
+      const callingInstruction = document.querySelector('#calling-instruction');
       let task = null;
-      let visiblePhase = 'planning';
       let workflowPhase = 'planning';
-      let seenEventIds = new Set();
+      const seenEventIds = {planning: new Set(), calling: new Set()};
       let advanceTimer = null;
       let actionInFlight = false;
 
@@ -197,7 +221,7 @@
           task = await readResponse(response);
           document.querySelector('#goal-summary').textContent = task.goal;
           landing.style.display = 'none';
-          workspace.style.display = 'grid';
+          workspace.style.display = 'block';
           renderTask();
         } catch (error) {
           showError(error.message);
@@ -206,13 +230,15 @@
         }
       });
 
-      document.querySelector('#send').addEventListener('click', sendInstruction);
-      instruction.addEventListener('keydown', event => {
-        if (event.key === 'Enter') sendInstruction();
+      document.querySelector('#planning-send').addEventListener('click', () => sendInstruction('planning'));
+      document.querySelector('#calling-send').addEventListener('click', () => sendInstruction('calling'));
+      planningInstruction.addEventListener('keydown', event => {
+        if (event.key === 'Enter') sendInstruction('planning');
+      });
+      callingInstruction.addEventListener('keydown', event => {
+        if (event.key === 'Enter') sendInstruction('calling');
       });
       document.querySelector('#takeover').addEventListener('click', () => act('takeover'));
-      document.querySelector('#planning-tab').addEventListener('click', () => switchPanel('planning'));
-      document.querySelector('#calling-tab').addEventListener('click', () => switchPanel('calling'));
       taskContextFile.addEventListener('change', attachTaskContext);
 
       async function attachTaskContext() {
@@ -236,19 +262,12 @@
         }
       }
 
-      function switchPanel(phase) {
-        if (!task || phase === visiblePhase) return;
-        if (phase === 'calling' && !task.events.some(event => event.phase === 'calling')) return;
-        visiblePhase = phase;
-        timeline.innerHTML = '';
-        seenEventIds = new Set(task.events.filter(event => event.phase !== phase).map(event => event.id));
-        renderTask();
-      }
-
-      async function sendInstruction() {
-        const value = instruction.value.trim();
+      async function sendInstruction(phase) {
+        if (phase !== workflowPhase) return;
+        const input = phase === 'planning' ? planningInstruction : callingInstruction;
+        const value = input.value.trim();
         if (!value) return;
-        instruction.value = '';
+        input.value = '';
         await act('instruction', value);
       }
 
@@ -281,38 +300,39 @@
       }
 
       function renderTask() {
-        errorBox.style.display = 'none';
-        const activePhase = task.phase === 'complete' ? workflowPhase : task.phase;
-        if (task.phase !== 'complete' && activePhase !== workflowPhase) {
-          workflowPhase = activePhase;
-          visiblePhase = activePhase;
-          timeline.innerHTML = '';
-          seenEventIds = new Set(task.events.filter(event => event.phase !== visiblePhase).map(event => event.id));
+        document.querySelector('#planning-error').style.display = 'none';
+        document.querySelector('#calling-error').style.display = 'none';
+        const activePhase = task.phase === 'complete' ? 'planning' : task.phase;
+        workflowPhase = activePhase;
+        const hasCallHistory = task.events.some(event => event.phase === 'calling');
+        workspace.classList.toggle('planning-active', activePhase === 'planning');
+        workspace.classList.toggle('calling-active', activePhase === 'calling');
+        workspace.classList.toggle('has-call-history', hasCallHistory);
+        document.querySelector('#planning-board').classList.toggle('active', activePhase === 'planning');
+        document.querySelector('#planning-board').classList.toggle('inactive', activePhase !== 'planning');
+        document.querySelector('#calling-board').classList.toggle('active', activePhase === 'calling');
+        document.querySelector('#calling-board').classList.toggle('inactive', activePhase !== 'calling');
+        document.querySelector('#planning-badge').textContent = activePhase === 'planning' ? 'Active' : 'Review only';
+        document.querySelector('#calling-badge').textContent = activePhase === 'calling' ? 'Live' : 'Call history';
+
+        for (const phase of ['planning', 'calling']) {
+          const timeline = phase === 'planning' ? planningTimeline : callingTimeline;
+          const newEvents = task.events.filter(event => event.phase === phase && !seenEventIds[phase].has(event.id));
+          newEvents.forEach(event => timeline.appendChild(renderEvent(event)));
+          newEvents.forEach(event => seenEventIds[phase].add(event.id));
+          requestAnimationFrame(() => { timeline.scrollTop = timeline.scrollHeight; });
         }
-        const viewingActivePanel = visiblePhase === activePhase;
-        workspace.classList.toggle('phase-planning', visiblePhase === 'planning');
-        document.querySelector('#phase-title').textContent = visiblePhase === 'planning' ? 'Plan with Relay' : 'Live call monitor';
-        const phaseBadge = document.querySelector('#phase-badge');
-        phaseBadge.textContent = visiblePhase === 'planning' ? 'Planning' : (task.status === 'complete' ? 'Complete' : 'Live');
-        phaseBadge.classList.toggle('live', visiblePhase === 'calling' && task.status !== 'complete');
-        document.querySelector('#planning-tab').classList.toggle('active', visiblePhase === 'planning');
-        const callingTab = document.querySelector('#calling-tab');
-        callingTab.classList.toggle('active', visiblePhase === 'calling');
-        callingTab.disabled = !task.events.some(event => event.phase === 'calling') && activePhase !== 'calling';
-        const newEvents = task.events.filter(event => event.phase === visiblePhase && !seenEventIds.has(event.id));
-        newEvents.forEach(event => timeline.appendChild(renderEvent(event)));
-        newEvents.forEach(event => seenEventIds.add(event.id));
-        renderPrompt(viewingActivePanel ? task.prompt : null);
+
+        renderPrompt(activePhase === 'planning' ? task.prompt : null, planningPrompt);
+        renderPrompt(activePhase === 'calling' ? task.prompt : null, callingPrompt);
         const takeover = document.querySelector('#takeover');
-        takeover.style.display = visiblePhase === 'calling' && viewingActivePanel ? 'block' : 'none';
+        takeover.style.display = activePhase === 'calling' ? 'block' : 'none';
         takeover.disabled = task.status === 'complete' || task.stage === 'takeover';
-        instruction.disabled = task.status === 'complete' || !viewingActivePanel;
-        instruction.placeholder = !viewingActivePanel
-          ? 'Viewing history · return to the active panel to respond'
-          : visiblePhase === 'planning' ? 'Reply to Relay or revise the plan…' : 'Instruct Relay or barge in at any time…';
-        document.querySelector('#send').disabled = task.status === 'complete' || !viewingActivePanel;
-        document.querySelector('#task-attach-label').style.display = visiblePhase === 'planning' && viewingActivePanel && task.status !== 'complete' ? 'inline-flex' : 'none';
-        requestAnimationFrame(() => { timeline.scrollTop = timeline.scrollHeight; });
+        planningInstruction.disabled = task.status === 'complete' || activePhase !== 'planning';
+        callingInstruction.disabled = task.status === 'complete' || activePhase !== 'calling';
+        document.querySelector('#planning-send').disabled = task.status === 'complete' || activePhase !== 'planning';
+        document.querySelector('#calling-send').disabled = task.status === 'complete' || activePhase !== 'calling';
+        document.querySelector('#task-attach-label').style.display = activePhase === 'planning' && task.status !== 'complete' ? 'inline-flex' : 'none';
         if (task.auto_advance) {
           advanceTimer = setTimeout(() => act('advance'), 850);
         }
@@ -372,7 +392,7 @@
         </table>`;
       }
 
-      function renderPrompt(prompt) {
+      function renderPrompt(prompt, promptBox) {
         promptBox.innerHTML = '';
         promptBox.style.display = prompt ? 'block' : 'none';
         if (!prompt) return;
@@ -381,27 +401,48 @@
         question.textContent = prompt.question;
         promptBox.appendChild(question);
 
-        if (prompt.kind === 'secure_entry') {
+        if (prompt.kind === 'secure_field') {
           const warning = document.createElement('div');
           warning.className = 'hint';
-          warning.textContent = 'Fake data only. These fields remain in this browser and are never sent to Relay’s server.';
+          warning.textContent = 'Fake data only. This value remains in this browser and is never sent to Relay’s server. This preview plays on this device; the production media bridge will inject generated audio only into the representative’s call leg.';
           const form = document.createElement('div');
           form.className = 'secure-form';
-          form.innerHTML = '<input id="local-card" autocomplete="off" placeholder="Fake card: 4242 4242 4242 4242"><input id="local-expiry" autocomplete="off" placeholder="12/34"><input id="local-cvv" autocomplete="off" placeholder="123">';
+          const field = document.createElement('input');
+          field.id = `local-${prompt.field}`;
+          field.autocomplete = 'off';
+          field.inputMode = prompt.input_mode || 'numeric';
+          field.placeholder = prompt.placeholder;
+          field.setAttribute('aria-label', prompt.label);
+          form.appendChild(field);
           const speak = document.createElement('button');
           speak.className = 'choice';
-          speak.textContent = 'Speak fake data locally';
+          speak.textContent = `Simulate ${prompt.label} via local TTS · device audio`;
           speak.onclick = () => {
-            const card = document.querySelector('#local-card').value.trim();
-            const expiry = document.querySelector('#local-expiry').value.trim();
-            const cvv = document.querySelector('#local-cvv').value.trim();
-            if (!card || !expiry || !cvv) return showError('Fill all three fake test fields first.');
+            const value = field.value.trim();
+            if (!value) return showError(`Enter a fake ${prompt.label.toLowerCase()} first.`);
             if (!window.speechSynthesis) return showError('Local browser speech is unavailable. Use Take Over instead.');
-            const spacedCard = card.replace(/\D/g, '').split('').join(' ');
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance(`Card number ${spacedCard}. Expiration ${expiry}. Security code ${cvv}.`));
-            document.querySelector('#local-card').value = '';
-            document.querySelector('#local-expiry').value = '';
-            document.querySelector('#local-cvv').value = '';
+            const digits = value.replace(/\D/g, '');
+            if (!digits) return showError(`Enter a valid fake ${prompt.label.toLowerCase()}.`);
+            let spokenValue = digits.split('').join(' ');
+            if (prompt.field === 'expiration' && digits.length >= 4) {
+              spokenValue = `${digits.slice(0, 2).split('').join(' ')}, ${digits.slice(2).split('').join(' ')}`;
+            }
+            speak.disabled = true;
+            field.disabled = true;
+            const utterance = new SpeechSynthesisUtterance(spokenValue);
+            utterance.onend = () => {
+              field.value = '';
+              act('answer', 'sent');
+            };
+            utterance.onerror = () => {
+              speak.disabled = false;
+              field.disabled = false;
+              showError('Local speech is unavailable in this browser. Use the silent state-transition fallback or Take Over.');
+              speak.textContent = 'Advance silent handoff · no audio';
+              speak.onclick = () => act('answer', 'sent');
+            };
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(utterance);
           };
           promptBox.append(warning, form, speak);
         }
@@ -419,10 +460,18 @@
       }
 
       function setControlsDisabled(disabled) {
-        document.querySelectorAll('.choice, #send, #takeover').forEach(control => control.disabled = disabled);
+        if (disabled) {
+          document.querySelectorAll('.choice, #planning-send, #calling-send, #takeover').forEach(control => control.disabled = true);
+          return;
+        }
+        document.querySelectorAll('.choice').forEach(control => control.disabled = false);
+        document.querySelector('#planning-send').disabled = task?.status === 'complete' || workflowPhase !== 'planning';
+        document.querySelector('#calling-send').disabled = task?.status === 'complete' || workflowPhase !== 'calling';
+        document.querySelector('#takeover').disabled = task?.status === 'complete' || workflowPhase !== 'calling' || task?.stage === 'takeover';
       }
 
       function showError(message) {
+        const errorBox = document.querySelector(workflowPhase === 'calling' ? '#calling-error' : '#planning-error');
         errorBox.textContent = message;
         errorBox.style.display = 'block';
       }

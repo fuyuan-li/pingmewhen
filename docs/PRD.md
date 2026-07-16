@@ -43,15 +43,15 @@ No other CLI commands are required in P0.
 1. In the private planning stage, the user gives Relay the goal and optional supporting documents.
 2. Relay asks for missing facts, proposes companies and verified contact details, and lets the user revise the plan over multiple rounds.
 3. Relay starts no call until the user explicitly approves the finalized plan.
-4. The UI then switches to the persistent live-call panel; each call appears as a paced chat conversation.
+4. The live-call board opens beside the persistent planning board; planning becomes greyed, narrow, and review-only while each call appears as a paced chat conversation.
 5. When Relay lacks an answer, it asks the representative for a moment and renders a quick-reply control.
 6. The user may barge in at any time; Relay reformulates the private instruction and inserts it before the next call turn.
 7. After quote calls finish, Relay returns to the persistent planning panel and shows a factual comparison without ranking or recommending.
 8. The user selects an insurer and explicitly approves the callback in that planning conversation.
 9. Relay switches back to the live-call panel, calls the selected simulated insurer, and continues the application.
 10. The user personally confirms material representations and approves purchase.
-11. Relay enters secure mode for a fake payment: cloud AI muted, transcription paused, macOS on-device TTS or user takeover available.
-12. Relay resumes and records the non-sensitive policy outcome.
+11. Relay enters secure mode for a fake payment: cloud AI muted, transcription paused, and card number, expiration, and CVV requested in separate local-TTS handoffs (or user takeover).
+12. Relay resumes between each requested field, then returns to planning and records only the non-sensitive policy outcome.
 
 ## Functional requirements
 
@@ -65,7 +65,7 @@ No other CLI commands are required in P0.
 
 ### Planning boundary
 
-- Planning is a private conversation between the user and Relay; representative transcript UI is not shown yet.
+- Planning is a private conversation between the user and Relay. It fills the workspace when no call is active and remains visible but read-only beside an active call.
 - Relay may request missing facts or documents before proposing external actions.
 - The user can revise companies, questions, constraints, and ordering over multiple rounds.
 - The plan shows intended calls and contact details before execution.
@@ -80,6 +80,7 @@ No other CLI commands are required in P0.
 - Private instructions are not spoken verbatim by default; Relay reformulates them in context.
 - Call turns appear incrementally rather than being dumped as a completed transcript.
 - A barge-in is inserted ahead of the next queued call turn so it changes the visible conversation naturally.
+- Every new representative receives a fresh disclosure, goal, and relevant call context even though Relay retains task memory across calls.
 
 ### Structured user input
 

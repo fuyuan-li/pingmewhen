@@ -125,9 +125,75 @@ def test_complete_deterministic_insurance_workflow(tmp_path):
 
     task = answer(engine, task, "local_tts")
     assert task["secure_mode"] is True
-    task = answer(engine, task, "complete")
+    assert task["stage"] == "secure_card_number"
+    assert task["prompt"]["field"] == "card_number"
+    task = answer(engine, task, "sent")
+    assert task["stage"] == "secure_expiration"
+    assert task["prompt"]["field"] == "expiration"
+    task = answer(engine, task, "sent")
+    assert task["stage"] == "secure_cvv"
+    assert task["prompt"]["field"] == "cvv"
+    task = answer(engine, task, "sent")
     assert task["status"] == "complete"
     assert task["secure_mode"] is False
+    assert task["events"][-1]["phase"] == "planning"
+
+
+def test_each_new_representative_gets_a_fresh_introduction_and_call_context(tmp_path):
+    engine = make_engine(tmp_path)
+    task = reach_comparison(engine, begin_calls(engine, engine.create("Collect three quotes.")))
+
+    call_events = [event for event in task["events"] if event["phase"] == "calling"]
+    relay_introductions = [
+        event
+        for event in call_events
+        if event["type"] == "message"
+        and event["speaker"] == "relay"
+        and "AI voice assistant speaking for Alex" in event["text"]
+    ]
+    assert len(relay_introductions) == 3
+    for insurer in ("Northstar Insurance", "Cedar Shield"):
+        greeting_index = next(
+            index
+            for index, event in enumerate(call_events)
+            if event.get("company") == insurer and "How can I help" in event.get("text", "")
+        )
+        quote_index = next(
+            index
+            for index, event in enumerate(call_events)
+            if event.get("company") == insurer and "quote is" in event.get("text", "")
+        )
+        between = call_events[greeting_index:quote_index]
+        assert any(
+            event.get("speaker") == "relay" and "property is" in event.get("text", "").lower()
+            for event in between
+        )
+
+
+def test_local_tts_cycles_one_field_at_a_time_without_logging_values(tmp_path):
+    log_path = tmp_path / "events.jsonl"
+    engine = DeterministicTaskEngine(EventLog(log_path))
+    task = reach_comparison(engine, begin_calls(engine, engine.create("Collect quotes.")))
+    task = answer(engine, task, "harbor")
+    task = advance_until_waiting(engine, answer(engine, task, "approve"))
+    task = advance_until_waiting(engine, answer(engine, task, "confirm"))
+    task = answer(engine, task, "local_tts")
+
+    expected = [
+        ("secure_card_number", "card_number"),
+        ("secure_expiration", "expiration"),
+        ("secure_cvv", "cvv"),
+    ]
+    for stage, field in expected:
+        assert task["stage"] == stage
+        assert task["prompt"]["kind"] == "secure_field"
+        assert task["prompt"]["field"] == field
+        assert task["prompt"]["options"] == []
+        task = answer(engine, task, "sent")
+
+    logged = log_path.read_text()
+    assert "4242424242424242" not in logged
+    assert '\"value\":\"sent\"' in logged
 
 
 def test_user_can_stop_before_callback(tmp_path):

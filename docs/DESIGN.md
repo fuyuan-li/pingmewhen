@@ -54,12 +54,12 @@ It must bind to `127.0.0.1` by default.
 
 ### Dashboard
 
-The production dashboard is split across two persistent surfaces:
+The production dashboard uses two coordinated surfaces:
 
 1. **Private planning:** goal/context intake, clarification dialogue, editable call plan, contact details, and approve/hold/decline controls.
 2. **Live call monitor:** entered only for external execution, with paced transcript turns and controls for intervention.
 
-The normal insurance sequence is `planning → quote calls → planning comparison/decision → application callback`. Each panel retains its own history, and the active panel changes automatically; the user may inspect the inactive history panel without sending input to it.
+The normal insurance sequence is `planning → quote calls → planning comparison/decision → application callback → planning outcome`. With no active call, planning fills the workspace and the call history is hidden or collapsed to a bar. During a call, the live-call board opens beside planning; planning narrows, greys out, and becomes review-only. Each board retains its history and only the active board accepts input.
 
 The primary active-call layout is:
 
@@ -71,6 +71,8 @@ The primary active-call layout is:
 - permanent Take Over button
 
 The transcript is the primary live representation. Summaries are produced between calls and at task completion, not continuously on every turn.
+
+Task memory persists across the complete goal, but representative conversation context resets at every new call. Each representative hears a fresh AI disclosure, purpose, and the relevant known facts before Relay requests a quote or resumes an application.
 
 The deterministic simulator keeps future turns in a backend queue. The UI requests one turn at a time. A user barge-in is placed at the front of that queue as a private user message, a contextually reformulated Relay utterance, and a simulated representative response. The pending script then resumes.
 
@@ -162,6 +164,8 @@ Secure-mode invariants:
 4. Values are cleared after use.
 5. The user can take over at any time.
 6. P0 accepts fake values only.
+
+Payment is a field-by-field state machine, not one combined form: the representative asks for one field; Relay yields the outbound channel; local TTS speaks only that field; its completion signal returns the channel to Relay; and the representative may then request the next field. The deterministic browser preview demonstrates these transitions with device audio. In the real gateway, locally generated PCM must be published only to the representative leg, never the user playback leg or cloud model leg.
 
 The simulated representative will not intentionally repeat fake card data. A repeat or unexpected verification request routes to human takeover.
 
