@@ -8,7 +8,7 @@ The OpenAI Build Week demo asks several simulated insurers for renters-insurance
 
 ## Current state
 
-This repository contains a testable deterministic product preview. Planning stays visible as the task’s private memory; while a call is active it narrows and greys out as the live-call board opens beside it. After a call sequence, the call board collapses and planning expands for comparison and decisions. Turns are paced, each new representative receives a fresh introduction and task brief, users can barge in, and consequential steps require approval. It does not yet place real calls, route browser audio into a call, connect microphone audio, or use an AI model for planning or conversation.
+This repository contains a testable deterministic product preview. Planning stays visible as the task’s private memory; while a call is active it narrows and greys out as the live-call board animates open beside it. Every external connection gets a separate transcript tab and a fresh representative-facing introduction. After a call sequence, Stage 2 animates into a clickable history bar while planning expands for comparison and decisions. Users can reopen any call tab, barge into a live call, and approve consequential steps. It does not yet place real calls, route browser audio into a call, connect microphone audio, or use an AI model for planning or conversation.
 
 ## Commands
 

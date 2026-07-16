@@ -170,6 +170,25 @@ def test_each_new_representative_gets_a_fresh_introduction_and_call_context(tmp_
         )
 
 
+def test_application_callback_starts_a_new_representative_conversation(tmp_path):
+    engine = make_engine(tmp_path)
+    task = reach_comparison(engine, begin_calls(engine, engine.create("Collect three quotes.")))
+    task = answer(engine, task, "cedar")
+    task = advance_until_waiting(engine, answer(engine, task, "approve"))
+
+    callback_start = next(
+        index
+        for index, event in enumerate(task["events"])
+        if event["type"] == "status" and "continuing simulated application" in event.get("text", "")
+    )
+    callback_events = task["events"][callback_start:]
+    assert callback_events[1]["speaker"] == "representative"
+    assert "How can I help?" in callback_events[1]["text"]
+    assert callback_events[2]["speaker"] == "relay"
+    assert "AI voice assistant speaking for Alex" in callback_events[2]["text"]
+    assert "previously received a renters quote" in callback_events[2]["text"]
+
+
 def test_local_tts_cycles_one_field_at_a_time_without_logging_values(tmp_path):
     log_path = tmp_path / "events.jsonl"
     engine = DeterministicTaskEngine(EventLog(log_path))

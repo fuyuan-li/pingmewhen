@@ -36,23 +36,41 @@
       .hint { color: #767d87; font-size: 12px; }
       .primary { padding: 11px 17px; border-radius: 11px; background: #17191c; color: white; font-weight: 700; }
       .workspace { display: none; width: 100%; max-width: 100%; height: min(760px, calc(100vh - 70px)); }
-      .boards { display: grid; width: 100%; height: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 12px; transition: grid-template-columns .3s ease, grid-template-rows .3s ease; }
-      .workspace.calling-active .boards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-      .workspace.planning-active.has-call-history .boards { grid-template-rows: minmax(0, 1fr) 52px; }
-      .board { display: grid; width: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; border: 1px solid #dde1e7; border-radius: 20px; background: white; box-shadow: 0 14px 45px rgba(30, 35, 50, .07); transition: opacity .25s ease, filter .25s ease, box-shadow .25s ease, height .3s ease; }
+      .boards { display: grid; width: 100%; height: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 0; gap: 0; transition: grid-template-columns .42s cubic-bezier(.2,.8,.2,1), grid-template-rows .42s cubic-bezier(.2,.8,.2,1), gap .3s ease; }
+      .workspace.calling-active .boards,
+      .workspace.call-history-open .boards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 12px; }
+      .workspace.planning-active.has-call-history:not(.call-history-open) .boards { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 52px; gap: 12px; }
+      .board { display: grid; width: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; border: 1px solid #dde1e7; border-radius: 20px; background: white; box-shadow: 0 14px 45px rgba(30, 35, 50, .07); transition: opacity .38s ease, filter .38s ease, box-shadow .38s ease, transform .42s cubic-bezier(.2,.8,.2,1), height .42s cubic-bezier(.2,.8,.2,1); }
       .board.active { border-color: #9ca6f5; box-shadow: 0 0 0 3px rgba(89, 102, 239, .13), 0 18px 55px rgba(30, 35, 50, .1); }
       .board.inactive { opacity: .5; filter: grayscale(.25); }
-      .workspace.planning-active .calling-board { display: none; }
-      .workspace.planning-active.has-call-history .calling-board { display: grid; height: 52px; grid-template-rows: 52px; opacity: .72; }
-      .workspace.planning-active.has-call-history .calling-board .timeline,
-      .workspace.planning-active.has-call-history .calling-board .composer { display: none; }
+      .calling-board { height: 0; visibility: hidden; opacity: 0; transform: translateX(28px) scale(.985); pointer-events: none; }
+      .calling-board { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+      .workspace.calling-active .calling-board,
+      .workspace.planning-active.has-call-history .calling-board { height: auto; visibility: visible; opacity: 1; transform: translate(0) scale(1); pointer-events: auto; }
+      .workspace.planning-active.has-call-history:not(.call-history-open) .calling-board { height: 52px; grid-template-rows: 52px; opacity: .78; transform-origin: bottom center; }
+      .workspace.planning-active.has-call-history:not(.call-history-open) .calling-board .call-tabs,
+      .workspace.planning-active.has-call-history:not(.call-history-open) .calling-board .call-timeline-shell,
+      .workspace.planning-active .calling-board .composer { display: none; }
+      .workspace.call-history-open .calling-board { grid-template-rows: auto auto minmax(0, 1fr); }
+      .workspace.call-history-open .calling-board.inactive { opacity: 1; filter: none; border-color: #cbd1da; box-shadow: 0 14px 45px rgba(30, 35, 50, .07); }
       .board-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; overflow: hidden; padding: 14px 16px; border-bottom: 1px solid #e6e8ed; background: #fbfbfc; }
+      .workspace.planning-active.has-call-history .call-board-header { cursor: pointer; }
       .task-title { min-width: 0; }
       .task-title strong { display: flex; align-items: center; gap: 8px; font-size: 14px; }
       .task-title > span { display: block; overflow: hidden; color: #747b85; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
       .phase-badge { padding: 4px 7px; border-radius: 999px; color: #4a55c7; background: #e9ebff; font-size: 10px; font-weight: 800; text-transform: uppercase; }
       .phase-badge.live { color: #9a342d; background: #ffebe9; }
+      .call-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+      .history-toggle { display: none; padding: 8px 11px; border: 1px solid #cbd1da; border-radius: 9px; color: #4f5660; background: white; font-size: 11px; font-weight: 750; }
+      .workspace.planning-active.has-call-history .history-toggle { display: block; }
       .takeover { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #df9b96; border-radius: 10px; background: #fff6f5; color: #a23d35; font-size: 12px; font-weight: 750; }
+      .call-tabs { display: flex; min-width: 0; gap: 7px; overflow-x: auto; padding: 10px 12px; border-bottom: 1px solid #e6e8ed; background: white; scrollbar-width: thin; }
+      .call-tab { flex: 0 0 auto; max-width: 190px; overflow: hidden; padding: 8px 10px; border: 1px solid #d8dce3; border-radius: 9px; color: #68707b; background: #f8f9fb; font-size: 11px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+      .call-tab.selected { border-color: #8f99ef; color: #3540a1; background: #eceefe; }
+      .call-tab.current::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: #e2564c; vertical-align: 1px; }
+      .call-timeline-shell { min-width: 0; min-height: 0; overflow: hidden; background: #f7f8fa; }
+      .call-pane { display: none; width: 100%; height: 100%; }
+      .call-pane.selected { display: block; }
       .timeline { min-width: 0; overflow-x: hidden; overflow-y: auto; padding: 22px clamp(16px, 4vw, 54px); background: #f7f8fa; }
       .event { min-width: 0; margin: 0 0 13px; animation: rise .22s ease-out; }
       .message-event { display: flex; width: 100%; min-width: 0; flex-direction: column; align-items: flex-start; }
@@ -101,10 +119,14 @@
         .shell { width: min(100% - 16px, 1120px); padding: 12px 0; }
         .hero { margin: 15px 5px 20px; }
         .workspace { height: calc(100vh - 24px); }
-        .workspace.calling-active .boards { grid-template-columns: minmax(0, 1fr); grid-template-rows: 120px minmax(0, 1fr); }
-        .workspace.calling-active .planning-board { overflow: hidden; opacity: .48; }
+        .workspace.calling-active .boards,
+        .workspace.call-history-open .boards { grid-template-columns: minmax(0, 1fr); grid-template-rows: 120px minmax(0, 1fr); }
+        .workspace.calling-active .planning-board,
+        .workspace.call-history-open .planning-board { overflow: hidden; opacity: .48; }
         .workspace.calling-active .planning-board .timeline,
-        .workspace.calling-active .planning-board .composer { display: none; }
+        .workspace.calling-active .planning-board .composer,
+        .workspace.call-history-open .planning-board .timeline,
+        .workspace.call-history-open .planning-board .composer { display: none; }
         .bubble { max-width: 88%; }
         .secure-form { grid-template-columns: 1fr; }
       }
@@ -152,11 +174,15 @@
             </div>
           </section>
           <section id="calling-board" class="board calling-board">
-            <div class="board-header">
+            <div id="call-board-header" class="board-header call-board-header" aria-expanded="false">
               <div class="task-title"><strong><span>Stage 2 · External calls</span><span id="calling-badge" class="phase-badge live">Live</span></strong><span>Representative transcript and call controls</span></div>
-              <button id="takeover" class="takeover">Simulate takeover · no audio</button>
+              <div class="call-controls">
+                <button id="history-toggle" class="history-toggle">Review calls</button>
+                <button id="takeover" class="takeover">Simulate takeover · no audio</button>
+              </div>
             </div>
-            <div id="calling-timeline" class="timeline" aria-live="polite"></div>
+            <nav id="call-tabs" class="call-tabs" aria-label="External call transcripts"></nav>
+            <div id="calling-timeline" class="call-timeline-shell" aria-live="polite"></div>
             <div id="calling-composer" class="composer">
               <div id="calling-error" class="error"></div>
               <div id="calling-prompt" class="prompt"></div>
@@ -178,6 +204,7 @@
       const contextFile = document.querySelector('#context-file');
       const taskContextFile = document.querySelector('#task-context-file');
       const planningTimeline = document.querySelector('#planning-timeline');
+      const callTabs = document.querySelector('#call-tabs');
       const callingTimeline = document.querySelector('#calling-timeline');
       const planningPrompt = document.querySelector('#planning-prompt');
       const callingPrompt = document.querySelector('#calling-prompt');
@@ -185,7 +212,10 @@
       const callingInstruction = document.querySelector('#calling-instruction');
       let task = null;
       let workflowPhase = 'planning';
-      const seenEventIds = {planning: new Set(), calling: new Set()};
+      const seenPlanningEventIds = new Set();
+      const callViews = new Map();
+      let selectedCallId = null;
+      let callHistoryOpen = false;
       let advanceTimer = null;
       let actionInFlight = false;
 
@@ -239,7 +269,23 @@
         if (event.key === 'Enter') sendInstruction('calling');
       });
       document.querySelector('#takeover').addEventListener('click', () => act('takeover'));
+      document.querySelector('#history-toggle').addEventListener('click', event => {
+        event.stopPropagation();
+        toggleCallHistory();
+      });
+      document.querySelector('#call-board-header').addEventListener('click', () => {
+        if (workflowPhase === 'planning') toggleCallHistory();
+      });
       taskContextFile.addEventListener('change', attachTaskContext);
+
+      function toggleCallHistory() {
+        if (!task?.events.some(event => event.phase === 'calling') || workflowPhase !== 'planning') return;
+        callHistoryOpen = !callHistoryOpen;
+        workspace.classList.toggle('call-history-open', callHistoryOpen);
+        document.querySelector('#history-toggle').textContent = callHistoryOpen ? 'Minimize calls' : 'Review calls';
+        document.querySelector('#call-board-header').setAttribute('aria-expanded', String(callHistoryOpen));
+        if (callHistoryOpen && selectedCallId) activateCallTab(selectedCallId);
+      }
 
       async function attachTaskContext() {
         const file = taskContextFile.files[0];
@@ -305,23 +351,25 @@
         const activePhase = task.phase === 'complete' ? 'planning' : task.phase;
         workflowPhase = activePhase;
         const hasCallHistory = task.events.some(event => event.phase === 'calling');
+        if (activePhase === 'calling') callHistoryOpen = false;
         workspace.classList.toggle('planning-active', activePhase === 'planning');
         workspace.classList.toggle('calling-active', activePhase === 'calling');
         workspace.classList.toggle('has-call-history', hasCallHistory);
+        workspace.classList.toggle('call-history-open', callHistoryOpen && activePhase === 'planning');
         document.querySelector('#planning-board').classList.toggle('active', activePhase === 'planning');
         document.querySelector('#planning-board').classList.toggle('inactive', activePhase !== 'planning');
         document.querySelector('#calling-board').classList.toggle('active', activePhase === 'calling');
         document.querySelector('#calling-board').classList.toggle('inactive', activePhase !== 'calling');
         document.querySelector('#planning-badge').textContent = activePhase === 'planning' ? 'Active' : 'Review only';
         document.querySelector('#calling-badge').textContent = activePhase === 'calling' ? 'Live' : 'Call history';
+        document.querySelector('#history-toggle').textContent = callHistoryOpen ? 'Minimize calls' : 'Review calls';
+        document.querySelector('#call-board-header').setAttribute('aria-expanded', String(callHistoryOpen));
 
-        for (const phase of ['planning', 'calling']) {
-          const timeline = phase === 'planning' ? planningTimeline : callingTimeline;
-          const newEvents = task.events.filter(event => event.phase === phase && !seenEventIds[phase].has(event.id));
-          newEvents.forEach(event => timeline.appendChild(renderEvent(event)));
-          newEvents.forEach(event => seenEventIds[phase].add(event.id));
-          requestAnimationFrame(() => { timeline.scrollTop = timeline.scrollHeight; });
-        }
+        const newPlanningEvents = task.events.filter(event => event.phase === 'planning' && !seenPlanningEventIds.has(event.id));
+        newPlanningEvents.forEach(event => planningTimeline.appendChild(renderEvent(event)));
+        newPlanningEvents.forEach(event => seenPlanningEventIds.add(event.id));
+        requestAnimationFrame(() => { planningTimeline.scrollTop = planningTimeline.scrollHeight; });
+        renderCallHistory(task.events.filter(event => event.phase === 'calling'), activePhase);
 
         renderPrompt(activePhase === 'planning' ? task.prompt : null, planningPrompt);
         renderPrompt(activePhase === 'calling' ? task.prompt : null, callingPrompt);
@@ -336,6 +384,73 @@
         if (task.auto_advance) {
           advanceTimer = setTimeout(() => act('advance'), 850);
         }
+      }
+
+      function renderCallHistory(events, activePhase) {
+        const groups = groupCallingEvents(events);
+        let createdCall = false;
+        groups.forEach((group, index) => {
+          let view = callViews.get(group.id);
+          if (!view) {
+            createdCall = true;
+            const tab = document.createElement('button');
+            tab.className = 'call-tab';
+            tab.type = 'button';
+            tab.onclick = () => {
+              selectedCallId = group.id;
+              activateCallTab(group.id);
+            };
+            const pane = document.createElement('div');
+            pane.className = 'timeline call-pane';
+            pane.setAttribute('role', 'tabpanel');
+            callTabs.appendChild(tab);
+            callingTimeline.appendChild(pane);
+            view = {tab, pane, seen: new Set()};
+            callViews.set(group.id, view);
+          }
+          view.tab.textContent = group.label;
+          view.tab.classList.toggle('current', activePhase === 'calling' && index === groups.length - 1);
+          const newEvents = group.events.filter(event => !view.seen.has(event.id));
+          newEvents.forEach(event => view.pane.appendChild(renderEvent(event)));
+          newEvents.forEach(event => view.seen.add(event.id));
+          if (newEvents.length) requestAnimationFrame(() => { view.pane.scrollTop = view.pane.scrollHeight; });
+        });
+        if (!groups.length) return;
+        if (!selectedCallId || (activePhase === 'calling' && createdCall)) selectedCallId = groups.at(-1).id;
+        activateCallTab(selectedCallId);
+      }
+
+      function groupCallingEvents(events) {
+        const groups = [];
+        let current = null;
+        events.forEach(event => {
+          if (event.type === 'status' && event.text.startsWith('Calling ')) {
+            const application = event.text.includes('continuing simulated application');
+            const name = event.company || `External call ${groups.length + 1}`;
+            current = {
+              id: `call-${event.id}`,
+              label: `${groups.length + 1} · ${name}${application ? ' · application' : ''}`,
+              events: [],
+            };
+            groups.push(current);
+          }
+          if (!current) {
+            current = {id: 'call-activity', label: 'Call activity', events: []};
+            groups.push(current);
+          }
+          current.events.push(event);
+        });
+        return groups;
+      }
+
+      function activateCallTab(callId) {
+        if (!callViews.has(callId)) return;
+        callViews.forEach((view, id) => {
+          const selected = id === callId;
+          view.tab.classList.toggle('selected', selected);
+          view.tab.setAttribute('aria-selected', String(selected));
+          view.pane.classList.toggle('selected', selected);
+        });
       }
 
       function renderEvent(event) {
