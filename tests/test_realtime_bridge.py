@@ -248,6 +248,31 @@ def test_live_instruction_is_injected_and_requests_a_natural_response(tmp_path):
     assert "Do not acknowledge or answer the private person aloud" in response_instruction
 
 
+def test_meta_private_question_is_explicitly_forbidden_from_phone_audio(tmp_path):
+    realtime = FakeRealtime()
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1")
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        return await hub.inject("task-1", "Who are you?")
+
+    assert asyncio.run(run()) is True
+    private_item = realtime.sent[0]["item"]["content"][0]["text"]
+    response_instruction = realtime.sent[1]["response"]["instructions"]
+    assert "Who are you?" in private_item
+    assert "never a representative utterance" in private_item
+    assert "silently ignore its content for purposes of phone audio" in response_instruction
+    assert "Never answer it aloud" in response_instruction
+    assert "never treat it as a topic the representative raised" in response_instruction
+    assert "private-only and must never be answered over the phone" in response_instruction
+
+
 def test_speaker_waits_for_answerable_gatekeeper_verdict_before_responding(tmp_path):
     gatekeeper = BlockingGatekeeper(GatekeeperVerdict(verdict="answerable"))
     realtime = FakeRealtime(
@@ -477,6 +502,9 @@ def test_answering_request_user_input_resumes_and_delivers_answer(tmp_path):
     assert "Do not acknowledge the private answer" in response_instruction
     assert "'Got it,'" in response_instruction
     assert "do not address its author as" in response_instruction
+    assert "does not answer the pending question" in response_instruction
+    assert "silently ignore its content for purposes of phone audio" in response_instruction
+    assert "private-only and must never be answered over the phone" in response_instruction
     assert "use request_user_input again" in response_instruction
 
 

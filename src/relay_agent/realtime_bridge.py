@@ -187,7 +187,8 @@ def private_instruction(text: str) -> dict[str, Any]:
                     "type": "input_text",
                     "text": (
                         "Private text from the person you represent, not from the representative on the phone: "
-                        f"{text}"
+                        f"{text}\nThis private text is never a representative utterance. Do not answer a direct "
+                        "question in it over phone audio."
                     ),
                 }
             ],
@@ -264,34 +265,52 @@ class RealtimeSessionHub:
                 await session.realtime.send(json.dumps({"type": "response.cancel"}))
             session.hold_response_active = False
             session.hold_complete.set()
-        await session.realtime.send(json.dumps(private_instruction(text)))
+        private_update = private_instruction(text)
+        await session.realtime.send(json.dumps(private_update))
         session.waiting_for_user = False
         session.pending_tool_call_id = None
-        try:
-            await session.realtime.send(
-                json.dumps(
-                    {
-                        "type": "response.create",
-                        "response": {
-                            "instructions": (
-                                "The person you represent answered privately. You are still speaking aloud to the "
-                                "representative you called, not to that private person. Do not acknowledge the private "
-                                "answer with phrases such as 'Got it,' and do not address its author as 'you.' "
-                                "Reformulate the answer as information for the representative, answering their pending "
-                                "question if there is one, then continue the active phone conversation naturally. If "
-                                "another required fact is missing, use request_user_input again."
-                                if waiting_for_user
-                                else (
-                                    "This is a private direction from the person you represent. Continue speaking to "
-                                    "the representative you called. Do not acknowledge or answer the private person "
-                                    "aloud, and do not mention the private channel. Apply or reformulate the direction "
-                                    "naturally for the representative."
-                                )
-                            )
-                        },
-                    }
+        response_request = {
+            "type": "response.create",
+            "response": {
+                "instructions": (
+                    "The person you represent answered privately. You are still speaking aloud to the "
+                    "representative you called, not to that private person. Do not acknowledge the private "
+                    "answer with phrases such as 'Got it,' and do not address its author as 'you.' "
+                    "Reformulate the answer as information for the representative if it actually answers "
+                    "their pending question, then continue the active phone conversation naturally. If "
+                    "the private text does not answer the pending question and cannot sensibly be "
+                    "reformulated as representative-facing information, silently ignore its content for "
+                    "purposes of phone audio. Never answer it aloud, never treat it as a topic the "
+                    "representative raised, and never tell the representative about it. A question "
+                    "addressed privately to Relay, such as 'who are you?', is private-only and must never "
+                    "be answered over the phone. If another required fact is missing, use "
+                    "request_user_input again."
+                    if waiting_for_user
+                    else (
+                        "This is a private direction from the person you represent. Continue speaking to "
+                        "the representative you called. Do not acknowledge or answer the private person "
+                        "aloud, and do not mention the private channel. Apply or reformulate the direction "
+                        "naturally for the representative only when that is sensible. If the private text "
+                        "cannot sensibly be reformulated as representative-facing information, silently "
+                        "ignore its content for purposes of phone audio. Never answer it aloud, never treat "
+                        "it as a topic the representative raised, and never tell the representative about "
+                        "it. A question addressed privately to Relay, such as 'who are you?', is "
+                        "private-only and must never be answered over the phone."
+                    )
                 )
+            },
+        }
+        if session.debug_trace:
+            session.debug_trace.append(
+                "speaker.private_injection",
+                {
+                    "waiting_for_user": waiting_for_user,
+                    "private_update": private_update,
+                    "response_create": response_request,
+                },
             )
+        try:
+            await session.realtime.send(json.dumps(response_request))
         except Exception:
             session.waiting_for_user = waiting_for_user
             session.pending_tool_call_id = pending_call_id
