@@ -53,7 +53,7 @@ class OpenAIPlanner:
     def __init__(self, api_key: str, model: str | None = None) -> None:
         from openai import OpenAI
 
-        self.model = model or os.environ.get("OPENAI_MODEL", "gpt-5.6")
+        self.model = model or "gpt-5.4-mini"
         self._client = OpenAI(api_key=api_key)
 
     def plan(self, goal: str, messages: list[dict[str, str]], contexts: list[dict[str, str]]) -> PlanningTurn:

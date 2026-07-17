@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 from collections.abc import Callable
 from contextlib import suppress
@@ -52,9 +51,10 @@ class ActiveRealtimeSession:
     mark_events: dict[str, asyncio.Event] = field(default_factory=dict)
 
 
-def realtime_session_update(context: dict[str, Any]) -> dict[str, Any]:
+def realtime_session_update(
+    context: dict[str, Any], transcription_model: str = "gpt-4o-mini-transcribe"
+) -> dict[str, Any]:
     action = context["action"]
-    transcription_model = os.environ.get("RELAY_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe").strip()
     private_context = "\n".join(context.get("private_messages", [])[-20:])
     document_context = context.get("document_context", "")
     prior_calls = context.get("prior_call_transcript", "")
@@ -133,6 +133,8 @@ class RealtimeSessionHub:
         call_connected: Callable[[str], dict[str, Any]] | None = None,
         tts_renderer: LocalTTSRenderer | None = None,
         playback_timeout: float = 20,
+        realtime_model: Callable[[], str] | None = None,
+        transcription_model: Callable[[], str] | None = None,
     ) -> None:
         self._credentials = credentials
         self._context_reader = context_reader
@@ -143,6 +145,8 @@ class RealtimeSessionHub:
         self._call_connected = call_connected
         self._tts_renderer = tts_renderer or MacOSLocalTTS()
         self._playback_timeout = playback_timeout
+        self._realtime_model = realtime_model or (lambda: "gpt-realtime-2.1-mini")
+        self._transcription_model = transcription_model or (lambda: "gpt-4o-mini-transcribe")
         self._sessions: dict[str, ActiveRealtimeSession] = {}
         self._lock = asyncio.Lock()
 
@@ -277,7 +281,7 @@ class RealtimeSessionHub:
             await twilio.close(code=1008)
             return
         credentials = self._credentials()
-        model = os.environ.get("RELAY_REALTIME_MODEL", "gpt-realtime-2.1")
+        model = self._realtime_model()
         url = f"wss://api.openai.com/v1/realtime?model={model}"
         try:
             async with self._connector(
@@ -289,7 +293,7 @@ class RealtimeSessionHub:
                     self._sessions[task_id] = session
                 if self._call_connected:
                     self._call_connected(task_id)
-                await realtime.send(json.dumps(realtime_session_update(context)))
+                await realtime.send(json.dumps(realtime_session_update(context, self._transcription_model())))
                 await realtime.send(json.dumps(initial_response()))
                 self._events.append("realtime.connected", {"task_id": task_id, "model": model})
                 to_openai = asyncio.create_task(self._twilio_to_openai(session))

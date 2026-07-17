@@ -13,13 +13,26 @@
       }
       * { box-sizing: border-box; }
       body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, #f8f9fb, #eef1f5); }
-      button, textarea, input { font: inherit; }
+      button, textarea, input, select { font: inherit; }
       button { border: 0; cursor: pointer; }
       button:disabled { cursor: not-allowed; opacity: .42; }
       .shell { width: min(1120px, calc(100% - 28px)); margin: 0 auto; padding: 28px 0; }
       header { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
+      .header-actions { display: flex; align-items: center; gap: 10px; }
       .brand { color: #5865f2; font-size: 15px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
       .mode { padding: 7px 11px; border-radius: 999px; background: #eceefe; color: #4853c8; font-size: 12px; font-weight: 700; }
+      .model-settings-open { display: none; padding: 7px 11px; border: 1px solid #cbd1da; border-radius: 999px; color: #4f5660; background: white; font-size: 12px; font-weight: 750; }
+      .settings-backdrop { position: fixed; z-index: 20; inset: 0; display: none; place-items: center; padding: 20px; background: rgba(24, 28, 38, .42); backdrop-filter: blur(3px); }
+      .settings-backdrop.open { display: grid; }
+      .settings-panel { width: min(560px, 100%); padding: 24px; border-radius: 20px; background: white; box-shadow: 0 24px 80px rgba(20, 25, 40, .24); }
+      .settings-panel h2 { margin: 0 0 7px; font-size: 24px; }
+      .settings-copy { margin: 0 0 20px; color: #69717c; font-size: 13px; line-height: 1.5; }
+      .settings-fields { display: grid; gap: 15px; }
+      .settings-field select { width: 100%; padding: 11px 38px 11px 12px; border: 1px solid #cbd1da; border-radius: 11px; color: #17191c; background: white; outline: none; }
+      .settings-field select:focus { border-color: #5966ef; box-shadow: 0 0 0 3px rgba(89, 102, 239, .12); }
+      .settings-help { display: block; margin-top: 5px; color: #7a818c; font-size: 11px; }
+      .settings-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 22px; }
+      .secondary { padding: 10px 14px; border: 1px solid #cbd1da; border-radius: 10px; color: #4f5660; background: white; font-weight: 700; }
       .hero { margin: 22px 0 28px; }
       h1 { max-width: 850px; margin: 0 0 10px; font-size: clamp(32px, 5vw, 50px); line-height: 1.04; letter-spacing: -.04em; }
       .lede { max-width: 800px; margin: 0; color: #606772; font-size: 17px; line-height: 1.55; }
@@ -154,7 +167,41 @@
   </head>
   <body>
     <div class="shell">
-      <header><div class="brand">Relay</div><div id="mode" class="mode">Loading runtime…</div></header>
+      <header>
+        <div class="brand">Relay</div>
+        <div class="header-actions">
+          <button id="model-settings-open" class="model-settings-open">Models</button>
+          <div id="mode" class="mode">Loading runtime…</div>
+        </div>
+      </header>
+      <div id="model-settings" class="settings-backdrop" role="dialog" aria-modal="true" aria-labelledby="model-settings-title">
+        <section class="settings-panel">
+          <h2 id="model-settings-title">Model settings</h2>
+          <p class="settings-copy">Choose each model independently. Selections are saved only on this machine and apply to new planning turns and new calls.</p>
+          <div id="model-settings-error" class="error"></div>
+          <div class="settings-fields">
+            <div class="settings-field">
+              <label for="planning-model">Planning</label>
+              <select id="planning-model"></select>
+              <span class="settings-help">Private task reasoning, structured plans, and web research.</span>
+            </div>
+            <div class="settings-field">
+              <label for="realtime-model">Realtime voice</label>
+              <select id="realtime-model"></select>
+              <span class="settings-help">Live speech-to-speech conversation during phone calls.</span>
+            </div>
+            <div class="settings-field">
+              <label for="transcription-model">Transcription</label>
+              <select id="transcription-model"></select>
+              <span class="settings-help">Representative speech-to-text inside the live session.</span>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button id="model-settings-cancel" class="secondary">Cancel</button>
+            <button id="model-settings-save" class="primary">Save models</button>
+          </div>
+        </section>
+      </div>
       <section id="setup" style="display:none">
         <section class="panel setup-panel">
           <h1>Connect your local Relay</h1>
@@ -277,10 +324,34 @@
       let refreshTimer = null;
       let actionInFlight = false;
       let runtimeMode = 'standard';
+      let currentModelSettings = null;
+
+      function fillModelSelect(id, options, selected) {
+        const select = document.querySelector(id);
+        select.replaceChildren(...options.map(model => {
+          const option = document.createElement('option');
+          option.value = model;
+          option.textContent = model;
+          option.selected = model === selected;
+          return option;
+        }));
+      }
+
+      function renderModelSettings(settings) {
+        currentModelSettings = settings;
+        fillModelSelect('#planning-model', settings.options.planning, settings.planning_model);
+        fillModelSelect('#realtime-model', settings.options.realtime, settings.realtime_model);
+        fillModelSelect('#transcription-model', settings.options.transcription, settings.transcription_model);
+      }
 
       async function loadRuntime() {
-        const runtime = await fetch('/api/runtime').then(r => r.json());
+        const runtime = await fetch('/api/runtime').then(readResponse);
         runtimeMode = runtime.mode;
+        const settingsButton = document.querySelector('#model-settings-open');
+        settingsButton.style.display = runtime.mode === 'demo' ? 'none' : 'block';
+        if (runtime.mode !== 'demo') {
+          renderModelSettings(await fetch('/api/model-settings').then(readResponse));
+        }
         document.querySelector('#mode').textContent = runtime.mode === 'demo'
           ? 'Simulated insurance demo'
           : `Agentic production preview · ${runtime.planner_model}`;
@@ -298,6 +369,48 @@
 
       loadRuntime().catch(() => {
         document.querySelector('#mode').textContent = 'Runtime unavailable';
+      });
+
+      document.querySelector('#model-settings-open').addEventListener('click', () => {
+        if (currentModelSettings) renderModelSettings(currentModelSettings);
+        document.querySelector('#model-settings-error').style.display = 'none';
+        document.querySelector('#model-settings').classList.add('open');
+        document.querySelector('#planning-model').focus();
+      });
+      document.querySelector('#model-settings-cancel').addEventListener('click', () => {
+        document.querySelector('#model-settings').classList.remove('open');
+      });
+      document.querySelector('#model-settings').addEventListener('click', event => {
+        if (event.target.id === 'model-settings') event.currentTarget.classList.remove('open');
+      });
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') document.querySelector('#model-settings').classList.remove('open');
+      });
+      document.querySelector('#model-settings-save').addEventListener('click', async () => {
+        const button = document.querySelector('#model-settings-save');
+        const errorBox = document.querySelector('#model-settings-error');
+        button.disabled = true;
+        button.textContent = 'Saving…';
+        errorBox.style.display = 'none';
+        try {
+          await readResponse(await fetch('/api/model-settings', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              planning_model: document.querySelector('#planning-model').value,
+              realtime_model: document.querySelector('#realtime-model').value,
+              transcription_model: document.querySelector('#transcription-model').value,
+            }),
+          }));
+          document.querySelector('#model-settings').classList.remove('open');
+          await loadRuntime();
+        } catch (error) {
+          errorBox.textContent = error.message;
+          errorBox.style.display = 'block';
+        } finally {
+          button.disabled = false;
+          button.textContent = 'Save models';
+        }
       });
 
       document.querySelector('#save-setup').addEventListener('click', async () => {

@@ -12,14 +12,14 @@ The standard `relay` mode has a model-driven private planning loop backed by the
 
 `relay demo` remains the deterministic end-to-end insurance preview. The **Private Workspace** holds task memory; the **Call Console** presents paced simulated calls, barge-in, approval gates, per-call history, and the field-by-field fake payment handoff.
 
-## How Codex and GPT-5.6 are used
+## How Codex and OpenAI models are used
 
 Relay is built with Codex as the repository-scale engineering agent. The repo-level [`AGENTS.md`](AGENTS.md) gives Codex the durable product, safety, architecture, and verification contract; Codex uses that contract together with the PRD and design docs to implement, review, and test changes across the application rather than generating isolated snippets. Concrete results include the schema-validated planner, application-owned approval state machine, persistent task store, redacted event log, deterministic call simulator, and their tests.
 
 The two OpenAI layers have deliberately different jobs:
 
 - **Codex builds and verifies Relay:** it works across the repository, keeps implementation aligned with the product constraints, runs the test suite, and records key decisions in the docs.
-- **GPT-5.6 runs Relay's private planner:** standard `relay` calls the Responses API with Pydantic Structured Outputs to clarify goals and produce typed action plans; application code, not model output, owns approval and execution boundaries.
+- **A user-selected GPT model runs Relay's private planner:** standard `relay` calls the Responses API with Pydantic Structured Outputs to clarify goals and produce typed action plans; application code, not model output, owns approval and execution boundaries.
 
 Codex is therefore central to the engineering workflow, but it is not an audio transport or a substitute credential for the Realtime API. The submission's Codex Session ID identifies the session in which the core functionality was built.
 
@@ -45,20 +45,7 @@ Use `relay demo` to test the complete simulated workflow without credentials. St
 
 Environment variables take precedence, so a local `.env` remains supported. Otherwise the dashboard stores credentials in `~/.relay/credentials.json` with owner-only permissions. Relay's maintainers never receive them and pay none of the user's provider costs.
 
-The three model roles are independently configurable:
-
-```env
-# Responses API planning: gpt-5.4-mini, gpt-5.4, or gpt-5.6
-OPENAI_MODEL=gpt-5.4-mini
-
-# Realtime speech-to-speech: gpt-realtime-2.1-mini or gpt-realtime-2.1
-RELAY_REALTIME_MODEL=gpt-realtime-2.1-mini
-
-# Live input transcription: gpt-4o-mini-transcribe or gpt-4o-transcribe
-RELAY_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
-```
-
-These are passed through as model IDs rather than restricted to a fixed allowlist, so advanced users can select later compatible models without a Relay release. Text-only GPT-5.4 and GPT-5.6 models cannot be used for `RELAY_REALTIME_MODEL`.
+The dashboard's **Models** control configures the three roles independently. Planning offers `gpt-5.4-mini` (default), `gpt-5.4`, and `gpt-5.6`; Realtime voice offers `gpt-realtime-2.1-mini` (default) and `gpt-realtime-2.1`; transcription offers `gpt-4o-mini-transcribe` (default) and `gpt-4o-transcribe`. Choices are stored locally in `~/.relay/model-settings.json`, not in `.env`. A changed planning model applies to the next planning turn, while changed voice and transcription models apply to the next Realtime call session.
 
 An approved task phone action starts `pycloudflared` on demand, uses its HTTPS address for that call's Twilio voice/status callbacks and WSS media endpoint, and stops the tunnel when no calls remain or Relay exits. There is no `RELAY_PUBLIC_BASE_URL` setup step. Every inbound Twilio HTTP or WebSocket request is checked with Twilio's SDK and the local `TWILIO_AUTH_TOKEN`. Audio remains PCMU end to end between Twilio Media Streams and OpenAI Realtime; the dashboard polls durable local task state to show completed transcript turns.
 

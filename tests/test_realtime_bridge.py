@@ -33,10 +33,8 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert initial_response()["type"] == "response.create"
 
 
-def test_realtime_session_uses_configured_transcription_model(monkeypatch):
-    monkeypatch.setenv("RELAY_TRANSCRIPTION_MODEL", "gpt-4o-transcribe")
-
-    update = realtime_session_update(sample_context())
+def test_realtime_session_uses_selected_transcription_model():
+    update = realtime_session_update(sample_context(), "gpt-4o-transcribe")
 
     assert update["session"]["audio"]["input"]["transcription"]["model"] == "gpt-4o-transcribe"
 
@@ -361,6 +359,8 @@ def test_bridge_twilio_stop_cancels_realtime_and_cleans_up_session(tmp_path):
         EventLog(log_path),
         connector=connector,
         call_connected=lambda task_id: connected.append(task_id) or {},
+        realtime_model=lambda: "gpt-realtime-2.1",
+        transcription_model=lambda: "gpt-4o-transcribe",
     )
 
     asyncio.run(hub.bridge(twilio))
@@ -369,6 +369,8 @@ def test_bridge_twilio_stop_cancels_realtime_and_cleans_up_session(tmp_path):
     assert twilio.accepted is True
     assert twilio.close_codes == []
     assert connected == ["task-1"]
+    assert connector.calls[0][0].endswith("model=gpt-realtime-2.1")
+    assert realtime.sent[0]["session"]["audio"]["input"]["transcription"]["model"] == "gpt-4o-transcribe"
     assert realtime.cancelled is True
     assert "task-1" not in hub._sessions
     assert [event["event"] for event in events] == ["realtime.connected", "realtime.disconnected"]

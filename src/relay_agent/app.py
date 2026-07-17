@@ -14,6 +14,13 @@ from relay_agent.context_store import ContextStore, InvalidContext
 from relay_agent.credentials import CredentialStore, RelayCredentials
 from relay_agent.event_log import EventLog, default_data_dir
 from relay_agent.local_tts import LocalTTSRenderer, is_allowed_fake_value
+from relay_agent.model_settings import (
+    PLANNING_MODELS,
+    REALTIME_MODELS,
+    TRANSCRIPTION_MODELS,
+    ModelSettings,
+    ModelSettingsStore,
+)
 from relay_agent.planner import OpenAIPlanner, Planner, PlannerError, UnavailablePlanner
 from relay_agent.realtime_bridge import RealtimeSessionHub
 from relay_agent.task_engine import DeterministicTaskEngine, InvalidAction, TaskNotFound
@@ -47,18 +54,26 @@ class SecureFieldRequest(BaseModel):
     value: str
 
 
+class ModelSettingsRequest(BaseModel):
+    planning_model: str
+    realtime_model: str
+    transcription_model: str
+
+
 def create_app(
     planner: Planner | None = None,
     credential_store: CredentialStore | None = None,
     tunnel_manager: TunnelManager | None = None,
     twilio_client_factory: Callable | None = None,
     tts_renderer: LocalTTSRenderer | None = None,
+    model_settings_store: ModelSettingsStore | None = None,
 ) -> FastAPI:
     mode = os.environ.get("RELAY_MODE", "standard")
     events = EventLog()
     contexts = ContextStore(events)
     store = SQLiteTaskStore(default_data_dir() / "state" / "relay.db")
     credentials = credential_store or CredentialStore()
+    model_settings = model_settings_store or ModelSettingsStore()
     provided_planner = planner
 
     def resolved_credentials() -> RelayCredentials:
@@ -68,7 +83,7 @@ def create_app(
         if provided_planner is not None:
             return provided_planner
         api_key = resolved_credentials().openai_api_key
-        return OpenAIPlanner(api_key) if api_key else UnavailablePlanner()
+        return OpenAIPlanner(api_key, model_settings.load().planning_model) if api_key else UnavailablePlanner()
 
     active_planner = configured_planner()
 
@@ -89,6 +104,8 @@ def create_app(
         secure_requester=lambda task_id, field_name: engine.request_secure_field(task_id, field_name),
         call_connected=lambda task_id: engine.mark_call_connected(task_id),
         tts_renderer=tts_renderer,
+        realtime_model=lambda: model_settings.load().realtime_model,
+        transcription_model=lambda: model_settings.load().transcription_model,
     )
 
     def setup_required() -> bool:
@@ -143,6 +160,7 @@ def create_app(
     @app.get("/api/runtime")
     async def runtime() -> dict:
         current_credentials = resolved_credentials()
+        selected_models = model_settings.load()
         return {
             "mode": mode,
             "event_log": str(events.path),
@@ -150,10 +168,41 @@ def create_app(
             "workflow": "deterministic-insurance-preview" if mode == "demo" else "agentic-private-planning",
             "planner_ready": True if mode == "demo" else active_planner.ready,
             "planner_model": "deterministic" if mode == "demo" else active_planner.model,
+            "realtime_model": "deterministic" if mode == "demo" else selected_models.realtime_model,
+            "transcription_model": "deterministic" if mode == "demo" else selected_models.transcription_model,
             "setup_required": setup_required(),
             "missing_credentials": [] if mode == "demo" else current_credentials.missing,
             "credential_source": "not required" if mode == "demo" else "local environment or machine-only file",
         }
+
+    @app.get("/api/model-settings")
+    async def get_model_settings() -> dict:
+        selected = model_settings.load()
+        return {
+            **selected.__dict__,
+            "options": {
+                "planning": list(PLANNING_MODELS),
+                "realtime": list(REALTIME_MODELS),
+                "transcription": list(TRANSCRIPTION_MODELS),
+            },
+        }
+
+    @app.put("/api/model-settings")
+    async def save_model_settings(request: ModelSettingsRequest) -> dict:
+        nonlocal active_planner, engine
+        selected = ModelSettings(
+            planning_model=request.planning_model.strip(),
+            realtime_model=request.realtime_model.strip(),
+            transcription_model=request.transcription_model.strip(),
+        )
+        try:
+            model_settings.save(selected)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        active_planner = configured_planner()
+        engine = build_engine()
+        events.append("runtime.models_configured", selected.__dict__)
+        return {**selected.__dict__, "saved": True}
 
     @app.post("/api/setup")
     async def save_setup(request: CredentialSetupRequest) -> dict:
