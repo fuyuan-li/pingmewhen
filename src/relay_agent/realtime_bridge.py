@@ -513,7 +513,7 @@ class RealtimeSessionHub:
             message = await session.twilio.receive_json()
             event = message.get("event")
             if event == "media":
-                if not session.secure_mode and not session.waiting_for_user:
+                if not session.secure_mode:
                     await session.realtime.send(
                         json.dumps({"type": "input_audio_buffer.append", "audio": message["media"]["payload"]})
                     )

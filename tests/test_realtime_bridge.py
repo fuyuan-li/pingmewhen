@@ -279,6 +279,56 @@ def test_speaker_waits_for_answerable_gatekeeper_verdict_before_responding(tmp_p
     assert [event["type"] for event in realtime.sent] == ["response.create"]
 
 
+def test_waiting_for_user_keeps_listening_and_transcribing_without_another_response(tmp_path):
+    gatekeeper = SequenceGatekeeper([])
+    transcripts = []
+    realtime = FakeRealtime(
+        [
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "transcript": "Take your time. I will stay on the line.",
+            }
+        ]
+    )
+    twilio = FakeTwilio(
+        [
+            {"event": "media", "media": {"payload": "representative-audio-during-wait"}},
+            {"event": "stop"},
+        ]
+    )
+    session = ActiveRealtimeSession(
+        realtime,
+        twilio,
+        "MZ1",
+        waiting_for_user=True,
+        context=sample_context(),
+    )
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: transcripts.append((task_id, speaker, text)) or {},
+        EventLog(tmp_path / "events.jsonl"),
+        gatekeeper=gatekeeper,
+    )
+
+    async def run():
+        await asyncio.gather(
+            hub._twilio_to_openai(session),
+            hub._openai_to_twilio(session, "task-1"),
+        )
+
+    asyncio.run(run())
+
+    assert transcripts == [
+        ("task-1", "representative", "Take your time. I will stay on the line."),
+    ]
+    assert gatekeeper.requests == []
+    assert realtime.sent == [
+        {"type": "input_audio_buffer.append", "audio": "representative-audio-during-wait"},
+    ]
+    assert not any(event.get("type") == "response.create" for event in realtime.sent)
+
+
 def test_unanswerable_gatekeeper_turn_waits_then_accumulates_user_updates(tmp_path):
     gatekeeper = SequenceGatekeeper(
         [
@@ -332,7 +382,7 @@ def test_unanswerable_gatekeeper_turn_waits_then_accumulates_user_updates(tmp_pa
     ]
 
 
-def test_request_user_input_tool_pauses_audio_and_notifies_task_state(tmp_path):
+def test_request_user_input_tool_blocks_speaker_output_but_keeps_listening(tmp_path):
     requests = []
     realtime = FakeRealtime(
         [
@@ -353,7 +403,7 @@ def test_request_user_input_tool_pauses_audio_and_notifies_task_state(tmp_path):
     )
     twilio = FakeTwilio(
         [
-            {"event": "media", "media": {"payload": "must-not-forward"}},
+            {"event": "media", "media": {"payload": "should-forward-for-transcription"}},
             {"event": "stop"},
         ]
     )
@@ -378,7 +428,11 @@ def test_request_user_input_tool_pauses_audio_and_notifies_task_state(tmp_path):
     assert requests == [("task-1", "What is your apartment number?", "text", True)]
     assert session.waiting_for_user is True
     assert session.pending_tool_call_id == "call-input-1"
-    assert [event["type"] for event in realtime.sent] == ["input_audio_buffer.clear"]
+    assert [event["type"] for event in realtime.sent] == [
+        "input_audio_buffer.clear",
+        "input_audio_buffer.append",
+    ]
+    assert realtime.sent[-1]["audio"] == "should-forward-for-transcription"
     assert twilio.sent == []
 
 
