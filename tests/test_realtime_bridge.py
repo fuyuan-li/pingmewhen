@@ -48,6 +48,10 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert "Never invent a missing fact" in instructions
     assert "Do not provide payment-card data or a full Social Security number" in instructions
     assert "Do not choose a regulated product for the user" in instructions
+    assert "Hi, Relay here — I'm an AI assistant on behalf of" in instructions
+    assert "Do not front-load every detail" in instructions
+    assert "one or two short sentences" in instructions
+    assert "while they follow along by text" not in instructions
     assert update["session"]["tool_choice"] == "none"
     assert update["session"]["audio"]["input"]["turn_detection"]["create_response"] is False
     assert update["session"]["tools"] == []
@@ -57,6 +61,9 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert "on behalf of Mina" in opening["response"]["instructions"]
     assert "do not say you are calling Mina" in opening["response"]["instructions"]
     assert "ask permission to continue" in opening["response"]["instructions"]
+    assert "Hi, Relay here — I'm an AI assistant on behalf of Mina." in opening["response"]["instructions"]
+    assert "following along" not in opening["response"]["instructions"]
+    assert "two short sentences" in opening["response"]["instructions"]
 
 
 def test_realtime_session_uses_selected_transcription_model():
@@ -303,6 +310,56 @@ def test_speaker_waits_for_answerable_gatekeeper_verdict_before_responding(tmp_p
     assert [event["type"] for event in realtime.sent] == ["response.create"]
 
 
+def test_trivial_acknowledgement_bypasses_gatekeeper_without_private_prompt(tmp_path):
+    gatekeeper = SequenceGatekeeper([])
+    realtime = FakeRealtime()
+    log_path = tmp_path / "events.jsonl"
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(log_path),
+        gatekeeper=gatekeeper,
+    )
+
+    asyncio.run(hub._gate_representative_turn(session, "task-1", "Mhm."))
+
+    assert gatekeeper.requests == []
+    assert realtime.sent == [{"type": "response.create"}]
+    assert logged_events(log_path)[0]["event"] == "gatekeeper.bypassed"
+
+
+def test_gatekeeper_receives_only_approved_call_facts_not_private_planning_history(tmp_path):
+    gatekeeper = SequenceGatekeeper([GatekeeperVerdict(verdict="answerable")])
+    realtime = FakeRealtime()
+    context = {
+        **sample_context(),
+        "goal": "Private planning history with an unrelated phone number +12025550123.",
+        "private_messages": ["Unrelated planning conversation"],
+        "prior_call_transcript": "Unrelated old call",
+        "document_context": "Account tier: standard",
+    }
+    context["action"]["known_facts"] = ["Service address: 123 Main Street"]
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=context)
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: context,
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        gatekeeper=gatekeeper,
+    )
+
+    asyncio.run(hub._gate_representative_turn(session, "task-1", "What plans are available?"))
+
+    supplied = gatekeeper.requests[0].context
+    assert supplied["approved_call"]["known_facts"] == ["Service address: 123 Main Street"]
+    assert supplied["document_context"] == "Account tier: standard"
+    assert "goal" not in supplied
+    assert "private_messages" not in supplied
+    assert "prior_call_transcript" not in supplied
+
+
 def test_waiting_for_user_keeps_listening_and_transcribing_without_another_response(tmp_path):
     gatekeeper = SequenceGatekeeper([])
     transcripts = []
@@ -351,6 +408,50 @@ def test_waiting_for_user_keeps_listening_and_transcribing_without_another_respo
         {"type": "input_audio_buffer.append", "audio": "representative-audio-during-wait"},
     ]
     assert not any(event.get("type") == "response.create" for event in realtime.sent)
+
+
+def test_waiting_for_user_repeats_short_keepalive_after_hold_line(tmp_path):
+    gatekeeper = SequenceGatekeeper(
+        [GatekeeperVerdict(verdict="unanswerable", question="What is your apartment number?")]
+    )
+    realtime = FakeRealtime()
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        gatekeeper=gatekeeper,
+        user_input_requester=lambda *args: {},
+        waiting_keepalive_interval=0.01,
+    )
+
+    async def run():
+        await hub._gate_representative_turn(session, "task-1", "What is the apartment number?")
+        assert len(realtime.sent) == 1
+        session.hold_response_active = False
+        session.hold_complete.set()
+        while len(realtime.sent) < 2:
+            await asyncio.sleep(0)
+        first_keepalive = realtime.sent[1]
+        assert session.waiting_for_user is True
+        assert session.keepalive_response_active is True
+        session.keepalive_response_active = False
+        session.keepalive_complete.set()
+        while len(realtime.sent) < 3:
+            await asyncio.sleep(0)
+        session.waiting_for_user = False
+        session.keepalive_response_active = False
+        session.keepalive_complete.set()
+        await hub._stop_waiting_keepalive(session)
+        return first_keepalive
+
+    keepalive = asyncio.run(run())
+
+    assert keepalive["type"] == "response.create"
+    instruction = keepalive["response"]["instructions"]
+    assert "exactly one short natural keep-alive line" in instruction
+    assert "do not answer any question" in instruction
 
 
 def test_unanswerable_gatekeeper_turn_waits_then_accumulates_user_updates(tmp_path):
@@ -661,6 +762,10 @@ def test_bridge_debug_trace_captures_exact_speaker_and_gatekeeper_inputs(monkeyp
             **sample_context(),
             "caller_name": "David",
             "private_messages": ["Install at 1079 Commonwealth Ave"],
+            "action": {
+                **sample_context()["action"],
+                "known_facts": ["Installation address: 1079 Commonwealth Ave"],
+            },
         },
         lambda task_id, speaker, text: {},
         EventLog(tmp_path / "events.jsonl"),

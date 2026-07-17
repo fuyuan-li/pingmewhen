@@ -73,7 +73,7 @@ No other CLI commands are required in P0.
 
 ### Planning boundary
 
-- Planning is a private conversation between the user and Relay. It fills the workspace when no call is active and remains visible but read-only beside an active call.
+- Planning is a private conversation between the user and Relay. It fills the workspace when no call is active and remains interactive beside an active call as the private user/Gatekeeper channel.
 - Relay may request missing facts or documents before proposing external actions.
 - The user can revise companies, questions, constraints, and ordering over multiple rounds.
 - The plan shows intended calls and contact details before execution.
@@ -83,8 +83,8 @@ No other CLI commands are required in P0.
 
 - Representative utterances appear on the left.
 - Relay utterances appear on the right.
-- Private user instructions appear on the right with a distinct color and `Private to Relay` label.
-- The user input box remains visible throughout the call.
+- Private user instructions remain in the Private Workspace on the right with a distinct color and `Private to Relay` label; Gatekeeper replies remain on the left.
+- The Private Workspace input box remains visible throughout the call. The external Call Console has no private composer.
 - Private instructions are not spoken verbatim by default; Relay reformulates them in context.
 - Call turns appear incrementally rather than being dumped as a completed transcript.
 - A barge-in is inserted ahead of the next queued call turn so it changes the visible conversation naturally.

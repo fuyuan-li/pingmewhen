@@ -248,6 +248,9 @@ def test_live_instruction_reports_when_realtime_injection_fails(monkeypatch, tmp
     assert "not delivered" in response.json()["detail"]
     unchanged = client.get(f"/api/tasks/{task['id']}").json()
     assert not any(event.get("text") == "The apartment number is 4B." for event in unchanged["events"])
+    events = [json.loads(line)["event"] for line in (tmp_path / "runtime" / "logs" / "events.jsonl").read_text().splitlines()]
+    assert "realtime.instruction_received" in events
+    assert "realtime.instruction_rejected" in events
 
 
 async def async_false():

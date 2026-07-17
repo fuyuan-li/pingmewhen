@@ -19,7 +19,10 @@ GATEKEEPER_INSTRUCTIONS = (
     "or authority. A representative's direct request for a personal, account, property, scheduling, or preference "
     "detail is unanswerable unless that exact detail is explicit; a related fact is not a substitute. For example, a "
     "street address does not make an unknown apartment number answerable. For unanswerable, write one concise question "
-    "to show privately to the represented user. Do not answer the representative and do not add explanations."
+    "to show privately to the represented user in the same language as the representative's latest utterance. The "
+    "private question must ask only for the fact or decision requested in that latest utterance; never pull in a phone "
+    "number, contact, dialing step, or unrelated planning detail. Do not answer the representative and do not add "
+    "explanations."
 )
 
 

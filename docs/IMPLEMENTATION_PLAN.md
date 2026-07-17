@@ -60,7 +60,8 @@ Exit: `relay demo` completes three distinct dynamic quote conversations and wait
 - [x] Send private user responses into the active Realtime conversation.
 - [x] Gate every representative turn through a text-only classifier before manually creating the Speaker response.
 - [x] Accumulate call-local user updates and reuse the existing waiting prompt for unanswerable turns.
-- Add interruption, timeout, disconnect, and retry handling.
+- [x] Add periodic constrained keep-alive speech while waiting for private user input.
+- Add broader interruption, timeout, disconnect, and retry handling.
 - Log tool calls, latency, errors, and transcript turns.
 
 Exit: the demo is driven by actual voice runtime events rather than scripted UI timing.

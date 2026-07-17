@@ -38,6 +38,29 @@ SENSITIVE_FIELD_PATTERNS = {
     ),
 }
 
+TRIVIAL_ACKNOWLEDGEMENTS = {
+    "ah",
+    "alright",
+    "all right",
+    "got it",
+    "i see",
+    "mhm",
+    "mmhm",
+    "mm hmm",
+    "mm-hmm",
+    "okay",
+    "ok",
+    "right",
+    "sounds good",
+    "sure",
+    "uh huh",
+    "uh-huh",
+    "understood",
+    "yeah",
+    "yep",
+    "yes",
+}
+
 
 def requested_sensitive_field(text: str) -> str | None:
     lowered = text.lower()
@@ -49,6 +72,24 @@ def requested_sensitive_field(text: str) -> str | None:
         if any(re.search(pattern, lowered) for pattern in patterns):
             return field_name
     return None
+
+
+def is_trivial_acknowledgement(text: str) -> bool:
+    cleaned = re.sub(r"[^\w\s'-]", "", text.lower()).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return "?" not in text and cleaned in TRIVIAL_ACKNOWLEDGEMENTS
+
+
+def gatekeeper_context(context: dict[str, Any]) -> dict[str, Any]:
+    action = context.get("action", {})
+    return {
+        "approved_call": {
+            "purpose": action.get("purpose", ""),
+            "target": action.get("target", ""),
+            "known_facts": action.get("known_facts", []),
+        },
+        "document_context": context.get("document_context", ""),
+    }
 
 
 @dataclass
@@ -67,6 +108,9 @@ class ActiveRealtimeSession:
     hold_complete: asyncio.Event = field(default_factory=asyncio.Event)
     debug_trace: CallDebugTrace | None = None
     session_update_ack: asyncio.Event = field(default_factory=asyncio.Event)
+    keepalive_response_active: bool = False
+    keepalive_complete: asyncio.Event = field(default_factory=asyncio.Event)
+    keepalive_task: asyncio.Task | None = None
 
 
 @dataclass(frozen=True)
@@ -102,9 +146,9 @@ def realtime_session_update(
         "called. Private text comes from the person you represent; it is an answer or instruction for you, not "
         "speech from the representative. Never acknowledge or answer that private person aloud as though they were "
         "on the phone. Reformulate their information naturally for the representative.\n\n"
-        "OPENING (say once, at the very start of the call, then never again): lead with the human — say who you "
-        "are calling on behalf of — then briefly disclose that you are Relay, an AI assistant helping them by voice "
-        "while they follow along by text. Warm, low-key, no more than two natural sentences. Do not ask whether the "
+        "OPENING (say once, at the very start of the call, then never again): say: 'Hi, Relay here — I'm an AI "
+        f"assistant on behalf of {caller_name}.' Then state the immediate reason for the call briefly. Do not "
+        "add another disclosure clause. Keep it warm and low-key. Do not ask whether the "
         "representative is comfortable continuing. After this opening, never repeat the disclosure, either identity "
         "fact above, your introduction, or the full purpose unless the representative explicitly asks. Never deny "
         "being an AI if asked.\n\n"
@@ -114,6 +158,9 @@ def realtime_session_update(
         "TURN CONTROL: The backend Gatekeeper is the sole authority that decides whether enough information exists "
         "to answer each representative turn. The backend creates your response only after approval. Never invent a "
         "missing fact or independently address the private user.\n\n"
+        "SPEAKING STYLE: Keep every turn to roughly one or two short sentences. Do not front-load every detail or goal "
+        "into one long statement. Make one useful point, then pause and let the representative respond. Prefer a "
+        "natural back-and-forth phone rhythm over a complete or exhaustive statement.\n\n"
         "BOUNDARIES: Never claim to be the user. Do not provide payment-card data or a full Social Security number. "
         "Do not choose a regulated product for the user. Be concise and natural.\n\n"
         "CONTEXT — the user's private task messages are:\n"
@@ -157,9 +204,12 @@ def initial_response(context: dict[str, Any] | None = None) -> dict[str, Any]:
         "response": {
             "instructions": (
                 f"Open this outbound call now. You are calling {target}. You represent {caller_name} — say you are "
-                f"calling on behalf of {caller_name}, do not say you are calling {caller_name}. Briefly disclose once "
-                "that you are Relay, an AI assistant helping them by voice while they follow by text, then "
-                f"immediately state the concrete reason for calling: {action.get('purpose', 'the approved purpose')}. "
+                f"calling on behalf of {caller_name}, do not say you are calling {caller_name}. Open with exactly this "
+                f"short disclosure: 'Hi, Relay here — I'm an AI assistant on behalf of {caller_name}.' Add no other "
+                f"disclosure clause. Then state only the immediate reason for calling: "
+                f"{action.get('purpose', 'the approved purpose')}. Mention only the primary service or topic; do not "
+                "enumerate later steps, constraints, addresses, prices, or contingencies in the opening. Keep the "
+                "entire opening to two short sentences and pause for the representative. "
                 "Do not welcome the recipient, offer generic support, ask what they want to do, or ask permission to "
                 "continue."
             ),
@@ -193,6 +243,7 @@ class RealtimeSessionHub:
         realtime_model: Callable[[], str] | None = None,
         transcription_model: Callable[[], str] | None = None,
         session_update_timeout: float = 0,
+        waiting_keepalive_interval: float = 10,
     ) -> None:
         self._credentials = credentials
         self._context_reader = context_reader
@@ -208,6 +259,7 @@ class RealtimeSessionHub:
         self._realtime_model = realtime_model or (lambda: "gpt-realtime-2.1-mini")
         self._transcription_model = transcription_model or (lambda: "gpt-4o-mini-transcribe")
         self._session_update_timeout = session_update_timeout
+        self._waiting_keepalive_interval = waiting_keepalive_interval
         self._sessions: dict[str, ActiveRealtimeSession] = {}
         self._lock = asyncio.Lock()
 
@@ -238,6 +290,7 @@ class RealtimeSessionHub:
                 disposition=route.disposition,
                 private_reply=route.private_reply.strip(),
             )
+        await self._stop_waiting_keepalive(session)
         if session.hold_response_active and waiting_for_user:
             try:
                 await asyncio.wait_for(session.hold_complete.wait(), timeout=3)
@@ -245,6 +298,10 @@ class RealtimeSessionHub:
                 await session.realtime.send(json.dumps({"type": "response.cancel"}))
             session.hold_response_active = False
             session.hold_complete.set()
+        if session.keepalive_response_active:
+            await session.realtime.send(json.dumps({"type": "response.cancel"}))
+            session.keepalive_response_active = False
+            session.keepalive_complete.set()
         update = route.speaker_update.model_dump() if route.speaker_update else None
         if update is None:
             raise RuntimeError("Gatekeeper did not provide a Speaker update.")
@@ -388,6 +445,7 @@ class RealtimeSessionHub:
         self._events.append("secure_mode.takeover_resumed", {"task_id": task_id})
 
     async def _enter_secure_mode(self, task_id: str, session: ActiveRealtimeSession, field_name: str) -> None:
+        await self._stop_waiting_keepalive(session)
         session.secure_mode = True
         session.expected_field = field_name
         await session.twilio.send_json({"event": "clear", "streamSid": session.stream_sid})
@@ -506,6 +564,10 @@ class RealtimeSessionHub:
             with suppress(RuntimeError):
                 await twilio.close(code=1011)
         finally:
+            if task_id:
+                active_session = self._sessions.get(task_id)
+                if active_session is not None:
+                    await self._stop_waiting_keepalive(active_session)
             async with self._lock:
                 active = self._sessions.get(task_id)
                 if active is not None and active.realtime is realtime:
@@ -543,7 +605,11 @@ class RealtimeSessionHub:
             if event_type == "session.updated":
                 session.session_update_ack.set()
             if event_type == "response.output_audio.delta":
-                if not session.secure_mode and (not session.waiting_for_user or session.hold_response_active):
+                if not session.secure_mode and (
+                    not session.waiting_for_user
+                    or session.hold_response_active
+                    or session.keepalive_response_active
+                ):
                     await session.twilio.send_json(
                         {
                             "event": "media",
@@ -560,6 +626,9 @@ class RealtimeSessionHub:
             if event_type == "response.done" and session.hold_response_active:
                 session.hold_response_active = False
                 session.hold_complete.set()
+            if event_type == "response.done" and session.keepalive_response_active:
+                session.keepalive_response_active = False
+                session.keepalive_complete.set()
             transcript = transcript_from_realtime_event(event)
             if transcript and transcript[1].strip() and not session.secure_mode:
                 sensitive_field = requested_sensitive_field(transcript[1])
@@ -582,7 +651,14 @@ class RealtimeSessionHub:
         task_id: str,
         utterance: str,
     ) -> None:
-        request = gatekeeper_request(utterance, session.context, session.context_updates)
+        if is_trivial_acknowledgement(utterance):
+            self._events.append(
+                "gatekeeper.bypassed",
+                {"task_id": task_id, "reason": "trivial_acknowledgement"},
+            )
+            await session.realtime.send(json.dumps({"type": "response.create"}))
+            return
+        request = gatekeeper_request(utterance, gatekeeper_context(session.context), session.context_updates)
         session.debug_trace and session.debug_trace.append("gatekeeper.request", gatekeeper_debug_payload(request))
         started = monotonic()
         try:
@@ -631,7 +707,64 @@ class RealtimeSessionHub:
                 }
             )
         )
+        self._start_waiting_keepalive(session, task_id)
         self._events.append("realtime.user_input_requested", {"task_id": task_id, "source": "gatekeeper"})
+
+    def _start_waiting_keepalive(self, session: ActiveRealtimeSession, task_id: str) -> None:
+        if session.keepalive_task is not None and not session.keepalive_task.done():
+            session.keepalive_task.cancel()
+        session.keepalive_task = asyncio.create_task(self._waiting_keepalive(session, task_id))
+
+    async def _stop_waiting_keepalive(self, session: ActiveRealtimeSession) -> None:
+        task = session.keepalive_task
+        session.keepalive_task = None
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    async def _waiting_keepalive(self, session: ActiveRealtimeSession, task_id: str) -> None:
+        try:
+            await session.hold_complete.wait()
+            while session.waiting_for_user and not session.secure_mode:
+                await asyncio.sleep(self._waiting_keepalive_interval)
+                if not session.waiting_for_user or session.secure_mode:
+                    return
+                session.keepalive_response_active = True
+                session.keepalive_complete.clear()
+                await session.realtime.send(
+                    json.dumps(
+                        {
+                            "type": "response.create",
+                            "response": {
+                                "instructions": (
+                                    "Say exactly one short natural keep-alive line, such as 'Just need one more "
+                                    "moment.' Say nothing else: do not answer any question, introduce a new topic, "
+                                    "repeat the pending question, or react to other representative speech."
+                                )
+                            },
+                        }
+                    )
+                )
+                self._events.append("realtime.waiting_keepalive", {"task_id": task_id})
+                try:
+                    await asyncio.wait_for(
+                        session.keepalive_complete.wait(),
+                        timeout=max(self._waiting_keepalive_interval, 5),
+                    )
+                except TimeoutError:
+                    await session.realtime.send(json.dumps({"type": "response.cancel"}))
+                    session.keepalive_response_active = False
+                    session.keepalive_complete.set()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            session.keepalive_response_active = False
+            session.keepalive_complete.set()
+            self._events.append(
+                "realtime.waiting_keepalive_failed",
+                {"task_id": task_id, "reason": type(error).__name__},
+            )
 
 
 def gatekeeper_debug_payload(request: GatekeeperRequest) -> dict[str, Any]:

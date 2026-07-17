@@ -79,16 +79,16 @@ The primary active-call layout is:
 
 - compact call header
 - left/right conversation bubbles
-- distinct private user bubbles
+- a parallel interactive Private Workspace with distinct user/Gatekeeper bubbles
 - optional quick-reply row
-- persistent instruction box
+- persistent private instruction box in the Private Workspace
 - permanent Take Over button
 
 The transcript is the primary live representation. Summaries are produced between calls and at task completion, not continuously on every turn.
 
 Task memory persists across the complete goal, but representative conversation context resets at every new call. Each representative hears a fresh AI disclosure, purpose, and the relevant known facts before Relay requests a quote or resumes an application.
 
-Production call-time reasoning is split between two roles with the backend as control plane and shared-state owner. Speaker is the sole Realtime audio model and the only model Twilio hears. It receives representative audio, the approved original context, and typed confirmed context updates; it never receives raw dashboard messages. Gatekeeper is a text-only component that classifies each completed representative transcript and routes private workspace messages. Server VAD remains enabled with automatic response creation disabled. The backend sends `response.create` only after an answerable verdict. An unanswerable verdict produces one brief Speaker hold line, transitions the durable task to `WAITING_FOR_USER`, and surfaces the question in the Private Workspace while representative audio continues to be transcribed. Gatekeeper either keeps a private/meta message entirely private or reformulates an actual answer/direction as an append-only context update. The backend refreshes Speaker with the full confirmed update projection, waits for `session.updated`, then resumes representative-facing output. Gatekeeper is the sole missing-fact authority; Speaker has no private-input tool.
+Production call-time reasoning is split between two roles with the backend as control plane and shared-state owner. Speaker is the sole Realtime audio model and the only model Twilio hears. It receives representative audio, the approved original context, and typed confirmed context updates; it never receives raw dashboard messages. Gatekeeper is a text-only component that classifies completed representative transcripts and routes private workspace messages. A conservative deterministic filter treats exact short acknowledgements as answerable without a model call. Gatekeeper receives only the approved call purpose, target, concrete known facts, relevant document context, and confirmed updates—not raw private planning history. Server VAD remains enabled with automatic response creation disabled. The backend sends `response.create` only after an answerable verdict. An unanswerable verdict produces one brief Speaker hold line, transitions the durable task to `WAITING_FOR_USER`, and surfaces the question in the Private Workspace while representative audio continues to be transcribed. If the user has not answered, constrained one-line keep-alives play periodically without processing newer representative questions. Gatekeeper either keeps a private/meta message entirely private or reformulates an actual answer/direction as an append-only context update. The backend refreshes Speaker with the full confirmed update projection, waits for `session.updated`, then resumes representative-facing output. Gatekeeper is the sole missing-fact authority; Speaker has no private-input tool.
 
 The deterministic simulator keeps future turns in a backend queue. The UI requests one turn at a time. A user barge-in is placed at the front of that queue as a private user message, a contextually reformulated Relay utterance, and a simulated representative response. The pending script then resumes.
 
@@ -137,7 +137,7 @@ Task
 PREPARING
   -> DIALING
   -> CONNECTED
-  -> WAITING_FOR_USER (Realtime audio is gated until the user answers)
+  -> WAITING_FOR_USER (representative input/transcription continues; normal Speaker responses pause except constrained keep-alives)
   -> APPROVAL_REQUIRED
   -> SECURE_HANDOFF_PENDING
   -> SECURE_LOCAL | HUMAN_TAKEOVER

@@ -381,7 +381,18 @@ def create_app(
                 instruction = request.value.strip()
                 if not instruction:
                     raise InvalidAction("Type a message before sending it.")
-                delivery = await realtime.inject(task_id, instruction)
+                events.append("realtime.instruction_received", {"task_id": task_id})
+                try:
+                    delivery = await realtime.inject(task_id, instruction)
+                except Exception as error:
+                    events.append(
+                        "realtime.instruction_failed",
+                        {"task_id": task_id, "reason": type(error).__name__},
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Relay received the private message but could not apply it to the active call.",
+                    ) from error
                 if not delivery:
                     events.append("realtime.instruction_rejected", {"task_id": task_id})
                     raise HTTPException(

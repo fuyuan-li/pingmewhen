@@ -115,3 +115,10 @@ def test_default_home_root_is_shared_by_logs_state_and_contexts(monkeypatch, tmp
     assert Path(runtime["state_db"]) == root / "state" / "relay.db"
     assert (root / "contexts" / uploaded["id"] / "source.pdf").exists()
     assert not (unrelated_cwd / ".relay").exists()
+
+
+def test_dashboard_keeps_private_speakers_left_and_restores_failed_text():
+    source = (Path(__file__).parents[1] / "src" / "relay_agent" / "static" / "index.html").read_text()
+
+    assert "event.speaker !== 'representative' && event.speaker !== 'relay_private'" in source
+    assert "if (!planningInstruction.value) planningInstruction.value = optimistic.text;" in source

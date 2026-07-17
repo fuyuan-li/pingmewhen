@@ -587,7 +587,7 @@
         if (!timeline) return null;
         timeline.append(message, pending);
         requestAnimationFrame(() => { timeline.scrollTop = timeline.scrollHeight; });
-        return {message, pending};
+        return {message, pending, text};
       }
 
       function clearOptimisticInstruction(optimistic) {
@@ -602,6 +602,7 @@
         optimistic.message.classList.add('optimistic-failed');
         const speaker = optimistic.message.querySelector('.speaker');
         if (speaker) speaker.textContent = `${speaker.textContent} · not sent`;
+        if (!planningInstruction.value) planningInstruction.value = optimistic.text;
       }
 
       async function readResponse(response) {
@@ -752,8 +753,7 @@
         const wrapper = document.createElement('div');
         wrapper.className = 'event';
         if (event.type === 'message') {
-          const isPlanningRelay = event.phase === 'planning' && event.speaker === 'relay_private';
-          const isRight = event.speaker !== 'representative' && !isPlanningRelay;
+          const isRight = event.speaker !== 'representative' && event.speaker !== 'relay_private';
           wrapper.className = `event message-event ${isRight ? 'right' : 'left'}`;
           const labels = {
             representative: event.company || 'Representative',
