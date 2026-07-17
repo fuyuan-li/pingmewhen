@@ -215,6 +215,36 @@ class RealtimeSessionHub:
         )
         self._events.append("secure_mode.exited", {"task_id": task_id})
 
+    async def resume_from_takeover(self, task_id: str) -> None:
+        async with self._lock:
+            session = self._sessions.get(task_id)
+        if session is None:
+            raise RuntimeError("The active call is no longer connected.")
+        expected_field = session.expected_field
+        await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
+        session.expected_field = None
+        session.secure_mode = False
+        try:
+            await session.realtime.send(
+                json.dumps(
+                    {
+                        "type": "response.create",
+                        "response": {
+                            "instructions": (
+                                "The user has handed the active call back to you after handling a protected exchange "
+                                "personally. Continue naturally from here without identifying or repeating any "
+                                "protected information."
+                            )
+                        },
+                    }
+                )
+            )
+        except Exception:
+            session.expected_field = expected_field
+            session.secure_mode = True
+            raise
+        self._events.append("secure_mode.takeover_resumed", {"task_id": task_id})
+
     async def _enter_secure_mode(self, task_id: str, session: ActiveRealtimeSession, field_name: str) -> None:
         session.secure_mode = True
         session.expected_field = field_name

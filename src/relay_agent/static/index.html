@@ -370,7 +370,13 @@
       callingInstruction.addEventListener('keydown', event => {
         if (event.key === 'Enter') sendInstruction('calling');
       });
-      document.querySelector('#takeover').addEventListener('click', () => act('takeover'));
+      document.querySelector('#takeover').addEventListener('click', () => {
+        if (runtimeMode === 'demo') {
+          act('takeover');
+          return;
+        }
+        resumeTakeover();
+      });
       document.querySelector('#history-toggle').addEventListener('click', event => {
         event.stopPropagation();
         toggleCallHistory();
@@ -478,8 +484,10 @@
         renderPrompt(activePhase === 'planning' ? task.prompt : null, planningPrompt);
         renderPrompt(activePhase === 'calling' ? task.prompt : null, callingPrompt);
         const takeover = document.querySelector('#takeover');
-        takeover.style.display = activePhase === 'calling' && runtimeMode === 'demo' ? 'block' : 'none';
-        takeover.disabled = task.status === 'complete' || task.stage === 'takeover';
+        const canResumeTakeover = runtimeMode !== 'demo' && task.call_state === 'HUMAN_TAKEOVER';
+        takeover.style.display = activePhase === 'calling' && (runtimeMode === 'demo' || canResumeTakeover) ? 'block' : 'none';
+        takeover.textContent = runtimeMode === 'demo' ? 'Simulate takeover · no audio' : 'Return control to Relay';
+        takeover.disabled = task.status === 'complete' || (runtimeMode === 'demo' && task.stage === 'takeover');
         planningInstruction.disabled = task.status === 'complete' || activePhase !== 'planning';
         callingInstruction.disabled = task.status === 'complete' || activePhase !== 'calling' || task.secure_mode;
         document.querySelector('#planning-send').disabled = task.status === 'complete' || activePhase !== 'planning';
@@ -751,6 +759,22 @@
           showError(error.message);
           task = await fetch(`/api/tasks/${task.id}`).then(readResponse);
           renderTask();
+        } finally {
+          actionInFlight = false;
+          setControlsDisabled(task?.status === 'complete');
+        }
+      }
+
+      async function resumeTakeover() {
+        if (!task || actionInFlight || task.call_state !== 'HUMAN_TAKEOVER') return;
+        actionInFlight = true;
+        setControlsDisabled(true);
+        try {
+          const response = await fetch(`/api/tasks/${task.id}/resume-takeover`, {method: 'POST'});
+          task = await readResponse(response);
+          renderTask();
+        } catch (error) {
+          showError(error.message);
         } finally {
           actionInFlight = false;
           setControlsDisabled(task?.status === 'complete');

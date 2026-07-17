@@ -349,6 +349,23 @@ class AgenticTaskEngine:
             self._store.save("production", task)
             return self._snapshot(task)
 
+    def resume_from_takeover(self, task_id: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            if task.get("call_state") != "HUMAN_TAKEOVER":
+                raise InvalidAction("Relay can resume only after human takeover.")
+            task.update(
+                secure_mode=False,
+                secure_expected_field=None,
+                call_state="CONNECTED",
+                stage="calling",
+                status="running",
+                prompt=None,
+            )
+            self._append(task, "status", text="Human takeover ended · Relay returned to the active call")
+            self._store.save("production", task)
+            return self._snapshot(task)
+
     def finish_call(self, task_id: str, call_sid: str, status: str) -> dict[str, Any]:
         with self._lock:
             task = self._require(task_id)

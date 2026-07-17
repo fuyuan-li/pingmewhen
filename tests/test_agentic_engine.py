@@ -1,9 +1,11 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from relay_agent.agentic_engine import AgenticTaskEngine
 from relay_agent.app import create_app
 from relay_agent.event_log import EventLog
 from relay_agent.planner import PlanAction, PlannerError, PlanningTurn, UnavailablePlanner
+from relay_agent.task_engine import InvalidAction
 from relay_agent.task_store import SQLiteTaskStore
 
 
@@ -160,6 +162,47 @@ def test_secure_fields_cycle_individually_and_repeat_routes_to_takeover(tmp_path
     assert task["stage"] == "human_takeover"
     assert task["secure_mode"] is True
     assert "4242" not in log_path.read_text()
+
+
+def test_human_takeover_can_explicitly_resume_the_active_call(tmp_path):
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    engine.begin_call(task["id"], pending["index"], "CA123")
+    task = engine.request_secure_field(task["id"], "verification_request")
+
+    resumed = engine.resume_from_takeover(task["id"])
+
+    assert task["call_state"] == "HUMAN_TAKEOVER"
+    assert resumed["call_state"] == "CONNECTED"
+    assert resumed["stage"] == "calling"
+    assert resumed["status"] == "running"
+    assert resumed["secure_mode"] is False
+    assert resumed["secure_expected_field"] is None
+    assert resumed["prompt"] is None
+    assert resumed["events"][-1]["text"] == "Human takeover ended · Relay returned to the active call"
+
+
+def test_resume_from_takeover_rejects_any_other_call_state(tmp_path):
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    engine.begin_call(task["id"], pending["index"], "CA123")
+
+    with pytest.raises(InvalidAction, match="only after human takeover"):
+        engine.resume_from_takeover(task["id"])
 
 
 def test_production_app_reports_planner_and_persists_state(monkeypatch, tmp_path):

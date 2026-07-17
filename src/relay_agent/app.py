@@ -280,6 +280,23 @@ def create_app(
             events.append("secure_mode.failed", {"task_id": task_id, "reason": type(error).__name__})
             raise HTTPException(status_code=502, detail="The protected local voice exchange did not complete.") from error
 
+    @app.post("/api/tasks/{task_id}/resume-takeover")
+    async def resume_takeover(task_id: str) -> dict:
+        if not isinstance(engine, AgenticTaskEngine):
+            raise HTTPException(status_code=409, detail="Real call takeover resume is available only in production.")
+        try:
+            task = engine.get(task_id)
+            if task.get("call_state") != "HUMAN_TAKEOVER":
+                raise InvalidAction("Relay can resume only after human takeover.")
+            await realtime.resume_from_takeover(task_id)
+            return engine.resume_from_takeover(task_id)
+        except TaskNotFound as error:
+            raise HTTPException(status_code=404, detail="Task not found.") from error
+        except InvalidAction as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except RuntimeError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     @app.post("/api/twilio/voice")
     async def twilio_voice(request: Request) -> Response:
         await validated_twilio_parameters(request)

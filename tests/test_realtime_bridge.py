@@ -238,6 +238,63 @@ def test_sensitive_request_disconnects_realtime_before_accepting_a_field(tmp_pat
     assert [event["type"] for event in realtime.sent] == ["response.cancel", "input_audio_buffer.clear"]
 
 
+def test_last_four_ssn_question_remains_in_normal_transcript_flow(tmp_path):
+    requested = []
+    transcripts = []
+    realtime = FakeRealtime(
+        [
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "transcript": "What are the last four digits of your SSN?",
+            }
+        ]
+    )
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1")
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: transcripts.append((task_id, speaker, text)) or {},
+        EventLog(tmp_path / "events.jsonl"),
+        secure_requester=lambda task_id, field: requested.append((task_id, field)) or {},
+    )
+
+    asyncio.run(hub._openai_to_twilio(session, "task-1"))
+
+    assert session.secure_mode is False
+    assert session.expected_field is None
+    assert requested == []
+    assert transcripts == [("task-1", "representative", "What are the last four digits of your SSN?")]
+
+
+def test_resume_from_takeover_reuses_session_and_injects_fresh_instruction(tmp_path):
+    realtime = FakeRealtime()
+    session = ActiveRealtimeSession(
+        realtime,
+        FakeTwilio(),
+        "MZ1",
+        secure_mode=True,
+        expected_field="verification_request",
+    )
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        await hub.resume_from_takeover("task-1")
+
+    asyncio.run(run())
+
+    assert hub._sessions["task-1"] is session
+    assert session.secure_mode is False
+    assert session.expected_field is None
+    assert [event["type"] for event in realtime.sent] == ["input_audio_buffer.clear", "response.create"]
+    assert "handed the active call back" in realtime.sent[-1]["response"]["instructions"]
+
+
 def test_secure_local_tts_sends_one_field_to_twilio_then_resumes(tmp_path):
     class FakeRenderer:
         def __init__(self):
