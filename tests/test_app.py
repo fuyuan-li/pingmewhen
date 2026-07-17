@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
@@ -87,3 +88,30 @@ def test_pdf_address_extractor_finds_street_address(monkeypatch, tmp_path):
     assert contexts._find_address("Premises: 123 Main Street, Washington, DC 20001") == (
         "123 Main Street, Washington, DC 20001"
     )
+
+
+def test_default_home_root_is_shared_by_logs_state_and_contexts(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    unrelated_cwd = tmp_path / "unrelated-project"
+    unrelated_cwd.mkdir()
+    monkeypatch.delenv("RELAY_DATA_DIR", raising=False)
+    monkeypatch.setenv("RELAY_MODE", "demo")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.chdir(unrelated_cwd)
+    client = TestClient(create_app())
+    buffer = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.write(buffer)
+
+    runtime = client.get("/api/runtime").json()
+    uploaded = client.post(
+        "/api/contexts",
+        files={"file": ("context.pdf", buffer.getvalue(), "application/pdf")},
+    ).json()
+
+    root = home / ".relay"
+    assert Path(runtime["event_log"]) == root / "logs" / "events.jsonl"
+    assert Path(runtime["state_db"]) == root / "state" / "relay.db"
+    assert (root / "contexts" / uploaded["id"] / "source.pdf").exists()
+    assert not (unrelated_cwd / ".relay").exists()

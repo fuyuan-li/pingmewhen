@@ -21,7 +21,7 @@ The renters-insurance workflow is the hackathon demo, not the product boundary.
 - Consequential actions require explicit approval.
 - A permanent Take Over control lets the user join the call.
 - Secure mode mutes/disconnects the cloud AI and pauses transcription. Each requested payment field gets its own Relay → local TTS → Relay cycle; the user can take over instead.
-- Save structured event logs and transcripts under the ignored repo-local `.relay/` directory by default. Never log secure-mode values, card data, full SSNs, secrets, or auth tokens.
+- Save structured event logs and transcripts under the machine-local `~/.relay/` directory by default. `RELAY_DATA_DIR` may override this root. Never log secure-mode values, card data, full SSNs, secrets, or auth tokens.
 - The demo uses a simulated insurer and fake payment data.
 
 ## Implemented now
@@ -31,7 +31,7 @@ The renters-insurance workflow is the hackathon demo, not the product boundary.
 - There is no hosted Relay backend, shared account system, or multi-tenant state. Every install uses only that user's credentials, SQLite data, event logs, and on-demand local tunnel.
 - Approved production plans can execute phone-call actions only when the planner supplies a verified E.164 number and source URL. The task engine dials each action sequentially through Twilio, starts a separate OpenAI Realtime session for each representative, injects private live instructions, persists both transcript sides, and returns to the Private Workspace after the queue finishes.
 - The Twilio control plane lazily starts a `pycloudflared` tunnel, constructs per-call webhook URLs, streams bidirectional PCMU audio through Twilio Media Streams and OpenAI Realtime, and rejects invalid HTTP and WebSocket webhook signatures.
-- Full task snapshots persist in repo-local SQLite at `.relay/state/relay.db` and reload after restart. Redacted append-only events remain in `.relay/logs/`.
+- Full task snapshots persist in machine-local SQLite at `~/.relay/state/relay.db` and reload after restart. Redacted append-only events remain in `~/.relay/logs/`.
 - The deterministic preview is runnable end to end: validated address/PDF clarification, editable planning, explicit start approval, paced synthetic quote calls with a fresh introduction for each representative, interruptible barge-in, an animated Private Workspace and Call Console, per-call transcript tabs with a vertical history bookmark, factual comparison back in planning, later approval gates, simulated takeover/resume, field-by-field secure payment simulation, and local JSONL logs.
 - Takeover does not connect microphone or phone audio yet. UI and documentation must call it simulated until a real media bridge exists.
 - Browser speech in the preview plays on the user device; it is not injected into a phone call. Outbound-only local audio requires the shared media bridge.

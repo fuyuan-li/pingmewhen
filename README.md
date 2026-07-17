@@ -47,7 +47,7 @@ Environment variables take precedence, so a local `.env` remains supported. Othe
 
 An approved task phone action starts `pycloudflared` on demand, uses its HTTPS address for that call's Twilio voice/status callbacks and WSS media endpoint, and stops the tunnel when no calls remain or Relay exits. There is no `RELAY_PUBLIC_BASE_URL` setup step. Every inbound Twilio HTTP or WebSocket request is checked with Twilio's SDK and the local `TWILIO_AUTH_TOKEN`. Audio remains PCMU end to end between Twilio Media Streams and OpenAI Realtime; the dashboard polls durable local task state to show completed transcript turns.
 
-By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `.relay/logs/`, and stores durable task state in `.relay/state/relay.db`. Credentials default to the machine-local `~/.relay/credentials.json`. Set `RELAY_DATA_DIR` to place all of these under one chosen local directory, or `RELAY_PORT` to change the local port.
+By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `~/.relay/logs/`, stores durable task state in `~/.relay/state/relay.db`, and keeps credentials in `~/.relay/credentials.json`. Set `RELAY_DATA_DIR` to place all of these under one chosen local directory, or `RELAY_PORT` to change the local port.
 
 ## Repository map
 
@@ -86,5 +86,5 @@ By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `.
 - Browser TTS currently plays on the user device. Injecting local TTS only into the representative’s phone leg requires the planned shared media gateway.
 - Real browser microphone takeover is not connected yet. The production Call Console must not be represented as supporting live takeover until that media leg exists.
 - Only fake card and identity data are used in the demo.
-- PDF context is stored locally under `.relay/contexts/`. Standard production planning sends bounded extracted text to the configured model; deterministic demo mode does not.
+- PDF context is stored locally under `~/.relay/contexts/`. Standard production planning sends bounded extracted text to the configured model; deterministic demo mode does not.
 - ChatGPT/Codex authentication is used only for Codex workloads; Relay does not reuse it as a third-party API credential. Standard mode uses the local user's OpenAI and Twilio credentials, while deterministic demo mode needs neither.

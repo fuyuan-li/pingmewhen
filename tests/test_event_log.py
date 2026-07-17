@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from relay_agent.event_log import EventLog, default_data_dir
 
@@ -28,8 +29,20 @@ def test_event_log_redacts_sensitive_values(tmp_path):
     assert record["payload"]["nested"]["safe"] == "visible"
 
 
-def test_default_data_dir_is_local_to_working_repo(monkeypatch, tmp_path):
+def test_default_data_dir_is_under_home_not_current_working_directory(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    working_directory = tmp_path / "unrelated-project"
+    working_directory.mkdir()
     monkeypatch.delenv("RELAY_DATA_DIR", raising=False)
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.chdir(working_directory)
 
-    assert default_data_dir() == tmp_path / ".relay"
+    assert default_data_dir() == home / ".relay"
+    assert default_data_dir() != working_directory / ".relay"
+
+
+def test_relay_data_dir_still_overrides_home(monkeypatch, tmp_path):
+    configured = tmp_path / "configured-data"
+    monkeypatch.setenv("RELAY_DATA_DIR", str(configured))
+
+    assert default_data_dir() == configured

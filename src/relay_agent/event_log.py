@@ -27,7 +27,7 @@ SENSITIVE_KEYS = {
 
 def default_data_dir() -> Path:
     configured = os.environ.get("RELAY_DATA_DIR")
-    return Path(configured).expanduser() if configured else Path.cwd() / ".relay"
+    return Path(configured).expanduser() if configured else Path.home() / ".relay"
 
 
 def redact(value: Any) -> Any:

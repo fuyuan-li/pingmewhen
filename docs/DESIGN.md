@@ -7,7 +7,7 @@ relay CLI
    |
    v
 Local FastAPI service ------ local JSONL events/transcripts
-   |                         repo-local SQLite task snapshots
+   |                         machine-local SQLite task snapshots
    |                         machine-local owner-only credentials
    |
    +------ localhost dashboard

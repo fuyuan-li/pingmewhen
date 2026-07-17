@@ -22,7 +22,7 @@ Exit: `uv run relay` and `uv run relay demo` open a local application; tests pas
 - [x] Validate typed addresses and allow PDF attachment during planning.
 - Implement local WebSocket event stream.
 - [x] Persist transcript and workflow events to the local JSONL log.
-- [x] Persist and reload active task state after a restart with repo-local SQLite.
+- [x] Persist and reload active task state after a restart with machine-local SQLite.
 - [x] Add a Responses API planner for standard `relay` mode with schema-validated plans and hard approval boundaries.
 - [x] Render general action plans independently of the insurance demo schema.
 - [x] Connect plan generation to bounded hosted web search for sourced official contact details.
