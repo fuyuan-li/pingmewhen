@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+import re
 from threading import Lock
 from typing import Any, Callable
 from uuid import uuid4
@@ -47,6 +48,8 @@ class AgenticTaskEngine:
             "secure_mode": False,
             "auto_advance": False,
             "approved_plan": None,
+            "execution_queue": [],
+            "current_call": None,
         }
         self._append(task, "message", speaker="user_private", text=cleaned_goal)
         self._run_planner(task)
@@ -89,6 +92,16 @@ class AgenticTaskEngine:
                     raise InvalidAction("Type a message before sending it.")
                 if task["status"] == "complete" or task["stage"] == "execution_ready":
                     raise InvalidAction("This approved plan is no longer editable.")
+                if task["phase"] == "calling":
+                    self._append(task, "message", speaker="user_private", text=instruction)
+                    self._append(task, "status", text="Private instruction sent to the active call")
+                    self._store.save("production", task)
+                    snapshot = self._snapshot(task)
+                    self._events.append(
+                        "task.action",
+                        {"task_id": task_id, "action": action, "value": value, "stage": task["stage"]},
+                    )
+                    return snapshot
                 before = deepcopy(task)
                 self._append(task, "message", speaker="user_private", text=instruction)
                 try:
@@ -110,7 +123,21 @@ class AgenticTaskEngine:
         task.update(status="running", stage="agent_planning", prompt=None)
         messages = []
         for event in task["events"]:
-            if event["type"] != "message" or event.get("speaker") not in {"user_private", "relay_private"}:
+            if event["type"] != "message" or event.get("speaker") not in {
+                "user_private",
+                "relay_private",
+                "relay",
+                "representative",
+            }:
+                continue
+            speaker = event.get("speaker")
+            if speaker in {"relay", "representative"}:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"EXTERNAL CALL TRANSCRIPT — {speaker}: {event['text']}",
+                    }
+                )
                 continue
             messages.append(
                 {"role": "user" if event["speaker"] == "user_private" else "assistant", "content": event["text"]}
@@ -171,21 +198,147 @@ class AgenticTaskEngine:
             raise InvalidAction("Approve, hold, or decline the plan.")
         task["approved_plan"] = deepcopy(task.get("current_plan"))
         self._append(task, "message", speaker="user_private", text="Approved. Proceed with this plan.")
-        self._append(
-            task,
-            "status",
-            text="Plan approved · external execution queued, but no telephony connector is enabled in this build",
-        )
-        self._append(
-            task,
-            "message",
-            speaker="relay_private",
-            text=(
-                "I saved your approval and queued the external actions. This production slice does not yet have a "
-                "telephony connector, so I will stop here instead of simulating a real call."
-            ),
-        )
+        actions = (task.get("approved_plan") or {}).get("actions", [])
+        phone_actions = [action for action in actions if action.get("kind") == "phone_call"]
+        executable = [
+            action
+            for action in phone_actions
+            if re.fullmatch(r"\+[1-9]\d{7,14}", action.get("phone_number", ""))
+            and action.get("contact_source_url", "").startswith(("https://", "http://"))
+            and not action.get("needs_lookup", True)
+        ]
+        if phone_actions and len(executable) != len(phone_actions):
+            self._append(task, "status", text="Plan approved · dialing blocked because no verified phone number is present")
+            self._append(
+                task,
+                "message",
+                speaker="relay_private",
+                text=(
+                    "I cannot safely dial this plan yet because its phone-call actions do not contain exact verified "
+                    "E.164 numbers. I will revise the plan to resolve the contacts before asking you to approve again."
+                ),
+            )
+            task.update(stage="execution_blocked", status="waiting_for_user", prompt=None)
+            return
+        if not phone_actions:
+            self._append(task, "status", text="Plan approved · no supported external phone action was present")
+            self._append(
+                task,
+                "message",
+                speaker="relay_private",
+                text="This build can execute approved phone actions, but this plan contains no phone call to run.",
+            )
+            task.update(stage="execution_blocked", status="waiting_for_user", prompt=None)
+            return
+        task["execution_queue"] = [
+            {"index": index, "action": deepcopy(action), "status": "pending", "call_sid": None}
+            for index, action in enumerate(executable)
+        ]
+        self._append(task, "status", text=f"Plan approved · {len(executable)} external call(s) queued")
         task.update(stage="execution_ready", status="waiting_for_execution", prompt=None)
+
+    def next_phone_action(self, task_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            task = self._require(task_id)
+            if task.get("current_call"):
+                return None
+            return deepcopy(next((item for item in task.get("execution_queue", []) if item["status"] == "pending"), None))
+
+    def begin_call(self, task_id: str, queue_index: int, call_sid: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            item = self._queue_item(task, queue_index)
+            if item["status"] != "pending":
+                raise InvalidAction("This call action is no longer pending.")
+            item.update(status="active", call_sid=call_sid)
+            task["current_call"] = {"queue_index": queue_index, "call_sid": call_sid}
+            task.update(phase="calling", stage="calling", status="running", prompt=None)
+            action = item["action"]
+            self._append(task, "status", text=f"Calling {action['target']} · real Twilio call", company=action["target"])
+            self._store.save("production", task)
+            return self._snapshot(task)
+
+    def append_transcript(self, task_id: str, speaker: str, text: str) -> dict[str, Any]:
+        cleaned = text.strip()
+        if not cleaned:
+            return self.get(task_id)
+        if speaker not in {"relay", "representative"}:
+            raise InvalidAction("Unsupported transcript speaker.")
+        with self._lock:
+            task = self._require(task_id)
+            target = ""
+            if task.get("current_call"):
+                target = self._queue_item(task, task["current_call"]["queue_index"])["action"].get("target", "")
+            self._append(task, "message", speaker=speaker, text=cleaned, company=target)
+            self._store.save("production", task)
+            return self._snapshot(task)
+
+    def finish_call(self, task_id: str, call_sid: str, status: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            item = next((entry for entry in task.get("execution_queue", []) if entry.get("call_sid") == call_sid), None)
+            if item is None or item["status"] != "active":
+                return self._snapshot(task)
+            item["status"] = "complete" if status == "completed" else status
+            task["current_call"] = None
+            self._append(task, "status", text=f"Call with {item['action']['target']} ended · {status}")
+            if any(entry["status"] == "pending" for entry in task.get("execution_queue", [])):
+                task.update(phase="calling", stage="execution_ready", status="waiting_for_execution", prompt=None)
+            else:
+                task.update(phase="planning", stage="post_call_review", status="waiting_for_user", prompt=None)
+                self._append(
+                    task,
+                    "message",
+                    speaker="relay_private",
+                    text="The approved calls are complete. I retained their transcripts in this task and am ready to review the results with you.",
+                )
+                task["prompt"] = {
+                    "kind": "text_reply",
+                    "question": "Ask Relay to summarize the results or give the next instruction.",
+                    "options": [],
+                }
+            self._store.save("production", task)
+            return self._snapshot(task)
+
+    def fail_execution(self, task_id: str, reason: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            task["current_call"] = None
+            task.update(phase="planning", stage="execution_failed", status="waiting_for_user")
+            self._append(task, "status", text=f"Approved call could not start · {reason}")
+            task["prompt"] = {"kind": "text_reply", "question": "Revise the plan or try again.", "options": []}
+            self._store.save("production", task)
+            return self._snapshot(task)
+
+    def call_context(self, task_id: str, queue_index: int) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            item = self._queue_item(task, queue_index)
+            return {
+                "goal": task["goal"],
+                "action": deepcopy(item["action"]),
+                "private_messages": [
+                    event["text"]
+                    for event in task["events"]
+                    if event["type"] == "message" and event.get("speaker") == "user_private"
+                ],
+                "document_context": "\n\n".join(
+                    self._context_reader(context.get("id", ""))
+                    for context in task.get("contexts", [])
+                    if context.get("id")
+                )[:12000],
+                "prior_call_transcript": "\n".join(
+                    f"{event.get('speaker')}: {event['text']}"
+                    for event in task["events"]
+                    if event["type"] == "message" and event.get("speaker") in {"relay", "representative"}
+                )[-12000:],
+            }
+
+    def _queue_item(self, task: dict[str, Any], queue_index: int) -> dict[str, Any]:
+        item = next((entry for entry in task.get("execution_queue", []) if entry["index"] == queue_index), None)
+        if item is None:
+            raise InvalidAction("Call action not found.")
+        return item
 
     def _require(self, task_id: str) -> dict[str, Any]:
         task = self._tasks.get(task_id)

@@ -17,6 +17,7 @@ dependencies = [
   "python-multipart",
   "twilio",
   "uvicorn[standard]",
+  "websockets>=16.0",
 ]
 
 [project.scripts]

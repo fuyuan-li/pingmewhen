@@ -25,12 +25,12 @@ Exit: `uv run relay` and `uv run relay demo` open a local application; tests pas
 - [x] Persist and reload active task state after a restart with repo-local SQLite.
 - [x] Add a Responses API planner for standard `relay` mode with schema-validated plans and hard approval boundaries.
 - [x] Render general action plans independently of the insurance demo schema.
-- Connect approved production actions to bounded research/contact lookup tools.
+- [x] Connect plan generation to bounded hosted web search for sourced official contact details.
 - [x] Add local first-run BYOK onboarding for OpenAI and Twilio credentials.
 - [x] Persist credentials in an owner-only local file with environment-variable precedence.
 - [x] Add lazy `pycloudflared` lifecycle and dynamic per-call Twilio webhook URLs.
 - [x] Validate Twilio voice/status webhooks with the official SDK helper.
-- Connect approved phone-call actions to the existing telephony control plane.
+- [x] Connect approved, sourced E.164 phone-call actions to the telephony control plane.
 
 Exit: a simulated event source drives the real UI, and private instructions change subsequent Relay output.
 
@@ -52,9 +52,10 @@ Exit: `relay demo` completes three distinct dynamic quote conversations and wait
 - Connect the simulated representative and Relay through real audio.
 - Add a browser WebRTC microphone leg and shared media conference for genuine takeover.
 - Route the simulated representative as a separate audio participant before enabling general PSTN execution from the task engine.
-- Stream transcripts and speaker identity into the local UI.
-- Implement AI disclosure at call start.
-- Send private user responses back into the active conversation.
+- [x] Bridge approved PSTN calls through Twilio Media Streams and OpenAI Realtime using PCMU audio.
+- [x] Stream completed transcripts and speaker identity into durable task state and the local UI.
+- [x] Implement AI disclosure and a fresh purpose statement at every call start.
+- [x] Send private user responses into the active Realtime conversation.
 - Add interruption, timeout, disconnect, and retry handling.
 - Log tool calls, latency, errors, and transcript turns.
 

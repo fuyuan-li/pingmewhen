@@ -16,6 +16,8 @@ class PlanAction(BaseModel):
     purpose: str
     target: str
     needs_lookup: bool
+    phone_number: str = Field(description="Exact E.164 number for executable phone calls, otherwise an empty string.")
+    contact_source_url: str = Field(description="Official source URL for the phone number, otherwise an empty string.")
 
 
 class PlanningTurn(BaseModel):
@@ -64,7 +66,11 @@ class OpenAIPlanner:
                 "content": (
                     "You are Relay's private task planner. Turn the user's goal and documents into a concrete, "
                     "reviewable plan. Ask only for genuinely blocking information. Never invent contact details, "
-                    "facts, completed research, or completed calls. Mark contact discovery as research when needed. "
+                    "facts, completed research, or completed calls. Use web search when current contact details are "
+                    "needed, prefer the organization's official website, and record the official source URL. A "
+                    "phone_call is executable only when phone_number is an exact E.164 number and needs_lookup is "
+                    "false; otherwise leave phone_number empty and make contact discovery an explicit research step. "
+                    "Create one phone_call action per organization and per separate phone conversation. "
                     "Phone calls are actions, not the product boundary. Consequential actions always require user "
                     "approval. For regulated choices, organize factual options but do not choose for the user. "
                     "Return plan_ready only when the next actions are specific enough for user approval."
@@ -77,6 +83,7 @@ class OpenAIPlanner:
             response = self._client.responses.parse(
                 model=self.model,
                 input=input_messages,
+                tools=[{"type": "web_search"}],
                 text_format=PlanningTurn,
             )
         except Exception as error:

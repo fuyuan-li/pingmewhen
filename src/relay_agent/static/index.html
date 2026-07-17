@@ -102,8 +102,8 @@
       .plan-head { padding: 13px 15px; background: #f0f1ff; color: #3540a1; font-size: 13px; font-weight: 800; }
       .plan-body { padding: 14px 15px; }
       .plan-address { margin-bottom: 10px; color: #4f5660; font-size: 12px; }
-      .plan-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 9px 0; border-top: 1px solid #eceef2; font-size: 12px; }
-      .plan-phone { color: #68707b; font-variant-numeric: tabular-nums; }
+      .plan-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 45%); gap: 12px; padding: 9px 0; border-top: 1px solid #eceef2; font-size: 12px; }
+      .plan-phone { min-width: 0; overflow-wrap: anywhere; color: #68707b; font-variant-numeric: tabular-nums; text-align: right; }
       .plan-questions { margin: 10px 0 0; padding-left: 18px; color: #4f5660; font-size: 12px; }
       .agent-plan-summary { margin-bottom: 10px; color: #343a43; font-size: 13px; line-height: 1.45; }
       .agent-plan-target { color: #68707b; font-size: 11px; }
@@ -269,17 +269,20 @@
       let selectedCallId = null;
       let callHistoryOpen = false;
       let advanceTimer = null;
+      let refreshTimer = null;
       let actionInFlight = false;
+      let runtimeMode = 'standard';
 
       async function loadRuntime() {
         const runtime = await fetch('/api/runtime').then(r => r.json());
+        runtimeMode = runtime.mode;
         document.querySelector('#mode').textContent = runtime.mode === 'demo'
           ? 'Simulated insurance demo'
           : `Agentic production preview · ${runtime.planner_model}`;
         document.querySelector('#runtime-hint').textContent = runtime.mode === 'demo'
           ? 'Deterministic, fully simulated renters-insurance workflow.'
           : runtime.planner_ready
-            ? 'Model-driven planning is ready. External execution still stops at the approved connector boundary.'
+            ? 'Model-driven planning and approved live phone execution are ready.'
             : 'Production planner is offline until the backend has an OpenAI API credential.';
         setup.style.display = runtime.setup_required ? 'block' : 'none';
         landing.style.display = runtime.setup_required ? 'none' : 'block';
@@ -446,6 +449,7 @@
       }
 
       function renderTask() {
+        clearTimeout(refreshTimer);
         document.querySelector('#planning-error').style.display = 'none';
         document.querySelector('#calling-error').style.display = 'none';
         const activePhase = task.phase === 'complete' ? 'planning' : task.phase;
@@ -474,7 +478,7 @@
         renderPrompt(activePhase === 'planning' ? task.prompt : null, planningPrompt);
         renderPrompt(activePhase === 'calling' ? task.prompt : null, callingPrompt);
         const takeover = document.querySelector('#takeover');
-        takeover.style.display = activePhase === 'calling' ? 'block' : 'none';
+        takeover.style.display = activePhase === 'calling' && runtimeMode === 'demo' ? 'block' : 'none';
         takeover.disabled = task.status === 'complete' || task.stage === 'takeover';
         planningInstruction.disabled = task.status === 'complete' || activePhase !== 'planning';
         callingInstruction.disabled = task.status === 'complete' || activePhase !== 'calling';
@@ -483,6 +487,21 @@
         document.querySelector('#task-attach-label').style.display = activePhase === 'planning' && task.status !== 'complete' ? 'inline-flex' : 'none';
         if (task.auto_advance) {
           advanceTimer = setTimeout(() => act('advance'), 850);
+        }
+        if (task.phase === 'calling' && task.status !== 'complete') {
+          refreshTimer = setTimeout(refreshTask, 750);
+        }
+      }
+
+      async function refreshTask() {
+        if (!task || actionInFlight || task.phase !== 'calling') return;
+        try {
+          const response = await fetch(`/api/tasks/${task.id}`);
+          task = await readResponse(response);
+          renderTask();
+        } catch (error) {
+          showError(error.message);
+          refreshTimer = setTimeout(refreshTask, 1500);
         }
       }
 
@@ -606,7 +625,7 @@
       function agentPlanMarkup(event) {
         const actions = (event.actions || []).map(action => `<div class="plan-row">
           <div><strong>${escapeHtml(action.label)}</strong><div class="agent-plan-target">${escapeHtml(action.purpose)}</div></div>
-          <span class="plan-phone">${escapeHtml(action.target)}${action.needs_lookup ? ' · lookup required' : ''}</span>
+          <span class="plan-phone">${escapeHtml(action.target)}${action.phone_number ? ` · ${escapeHtml(action.phone_number)}` : ''}${action.contact_source_url ? ` · ${escapeHtml(action.contact_source_url)}` : ''}${action.needs_lookup ? ' · lookup required' : ''}</span>
         </div>`).join('');
         const assumptions = event.assumptions?.length
           ? `<div class="agent-plan-target"><strong>Assumptions</strong></div><ul class="plan-questions">${event.assumptions.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`

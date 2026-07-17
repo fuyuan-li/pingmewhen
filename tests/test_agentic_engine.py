@@ -34,13 +34,17 @@ class FakePlanner:
                     purpose="Find current official customer-service numbers.",
                     target="Three user-approved providers",
                     needs_lookup=True,
+                    phone_number="",
+                    contact_source_url="",
                 ),
                 PlanAction(
                     kind="phone_call",
                     label="Collect standardized quotes",
                     purpose="Ask the same factual coverage and price questions.",
-                    target="Three verified provider numbers",
-                    needs_lookup=True,
+                    target="Example Provider",
+                    needs_lookup=False,
+                    phone_number="+12025550199",
+                    contact_source_url="https://example.com/contact",
                 ),
             ],
         )
@@ -62,10 +66,66 @@ def test_agentic_planner_clarifies_then_requires_approval(tmp_path):
     task = engine.act(task["id"], "answer", "approve")
     assert task["stage"] == "execution_ready"
     assert task["status"] == "waiting_for_execution"
+    assert task["execution_queue"][0]["action"]["phone_number"] == "+12025550199"
     assert not any(event["phase"] == "calling" for event in task["events"])
 
     restored = AgenticTaskEngine(EventLog(tmp_path / "events.jsonl"), planner, store, lambda _: "")
     assert restored.get(task["id"])["approved_plan"] == task["approved_plan"]
+
+
+def test_agentic_call_state_and_transcript_return_to_private_review(tmp_path):
+    store = SQLiteTaskStore(tmp_path / "relay.db")
+    planner = FakePlanner()
+    engine = AgenticTaskEngine(EventLog(tmp_path / "events.jsonl"), planner, store, lambda _: "")
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+
+    pending = engine.next_phone_action(task["id"])
+    task = engine.begin_call(task["id"], pending["index"], "CA123")
+    assert task["phase"] == "calling"
+    engine.append_transcript(task["id"], "relay", "Hello, I am Relay, an AI tool speaking for my user.")
+    engine.append_transcript(task["id"], "representative", "I am comfortable continuing.")
+    task = engine.finish_call(task["id"], "CA123", "completed")
+
+    assert task["phase"] == "planning"
+    assert task["stage"] == "post_call_review"
+    assert any(event.get("speaker") == "representative" for event in task["events"])
+
+
+def test_approval_refuses_an_unsourced_phone_action(tmp_path):
+    class UnsourcedPlanner:
+        ready = True
+        model = "test"
+
+        def plan(self, goal, messages, contexts):
+            return PlanningTurn(
+                status="plan_ready",
+                message="Review this plan.",
+                plan_summary="Call an unresolved contact.",
+                actions=[
+                    PlanAction(
+                        kind="phone_call",
+                        label="Call provider",
+                        purpose="Ask a question.",
+                        target="Provider",
+                        needs_lookup=True,
+                        phone_number="",
+                        contact_source_url="",
+                    )
+                ],
+            )
+
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        UnsourcedPlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider.")
+    task = engine.act(task["id"], "answer", "approve")
+
+    assert task["stage"] == "execution_blocked"
+    assert task["execution_queue"] == []
 
 
 def test_production_app_reports_planner_and_persists_state(monkeypatch, tmp_path):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from typing import Any
+from urllib.parse import urlencode
 
 from twilio.request_validator import RequestValidator
 
@@ -35,13 +36,14 @@ class TelephonyService:
         self.tunnel = tunnel
         self._client_factory = client_factory or create_twilio_client
 
-    def place_call(self, to: str) -> dict[str, str]:
+    def place_call(self, to: str, task_id: str = "", queue_index: int = 0) -> dict[str, str]:
         credentials = self._credentials()
         if not credentials.complete:
             raise RuntimeError("Relay telephony credentials are incomplete.")
         self.tunnel.acquire()
-        voice_url = self.tunnel.url("/api/twilio/voice")
-        status_url = self.tunnel.url("/api/twilio/status")
+        query = urlencode({"task_id": task_id, "queue_index": queue_index}) if task_id else ""
+        voice_url = self.tunnel.url("/api/twilio/voice", query)
+        status_url = self.tunnel.url("/api/twilio/status", query)
         try:
             client = self._client_factory(credentials.twilio_account_sid, credentials.twilio_auth_token)
             call = client.calls.create(
