@@ -32,13 +32,22 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert update["session"]["audio"]["input"]["format"] == {"type": "audio/pcmu"}
     assert update["session"]["audio"]["output"]["format"] == {"type": "audio/pcmu"}
     instructions = update["session"]["instructions"]
-    assert 'display name of the person you represent is "Mina"' in instructions
-    assert "AI disclosure exactly once per call" in instructions
+    assert 'You represent (you are calling ON BEHALF OF): "Mina"' in instructions
+    assert 'You are calling (the organization/person you dial and speak to): "Example Provider"' in instructions
+    assert 'Never say you are calling "Mina"' in instructions
+    assert "say once, at the very start of the call, then never again" in instructions
     assert "outbound caller" in instructions
+    assert "spoken audio is always addressed to the representative" in instructions
+    assert "Private text comes from the person you represent" in instructions
+    assert "Never acknowledge or answer that private person aloud" in instructions
     assert "Do not ask whether the representative is comfortable continuing" in instructions
+    assert "never repeat the disclosure" in instructions
+    assert "Never deny being an AI if asked" in instructions
     assert "then call request_user_input" in instructions
     assert "The tool call, not a spoken phrase" in instructions
     assert "ask the representative to supply the user's missing fact" in instructions
+    assert "Do not provide payment-card data or a full Social Security number" in instructions
+    assert "Do not choose a regulated product for the user" in instructions
     assert update["session"]["tool_choice"] == "auto"
     tool = update["session"]["tools"][0]
     assert tool["type"] == "function"
@@ -58,7 +67,9 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     }
     opening = initial_response(context)
     assert opening["type"] == "response.create"
+    assert "You are calling Example Provider" in opening["response"]["instructions"]
     assert "on behalf of Mina" in opening["response"]["instructions"]
+    assert "do not say you are calling Mina" in opening["response"]["instructions"]
     assert "ask permission to continue" in opening["response"]["instructions"]
 
 
@@ -73,6 +84,8 @@ def test_private_instruction_is_context_only_and_transcripts_are_classified():
 
     assert instruction["type"] == "conversation.item.create"
     assert "multi-policy" in instruction["item"]["content"][0]["text"]
+    assert "person you represent" in instruction["item"]["content"][0]["text"]
+    assert "not from the representative" in instruction["item"]["content"][0]["text"]
     assert transcript_from_realtime_event(
         {"type": "response.output_audio_transcript.done", "transcript": "Hello"}
     ) == ("relay", "Hello")
@@ -206,6 +219,9 @@ def test_live_instruction_is_injected_and_requests_a_natural_response(tmp_path):
 
     assert asyncio.run(run()) is True
     assert [event["type"] for event in realtime.sent] == ["conversation.item.create", "response.create"]
+    response_instruction = realtime.sent[-1]["response"]["instructions"]
+    assert "Continue speaking to the representative you called" in response_instruction
+    assert "Do not acknowledge or answer the private person aloud" in response_instruction
 
 
 def test_request_user_input_tool_pauses_audio_and_notifies_task_state(tmp_path):
@@ -292,7 +308,13 @@ def test_answering_request_user_input_resumes_and_delivers_answer(tmp_path):
         "output": json.dumps({"status": "answered"}),
     }
     assert "Apartment 4B" in realtime.sent[1]["item"]["content"][0]["text"]
-    assert "answered the pending question" in realtime.sent[2]["response"]["instructions"]
+    response_instruction = realtime.sent[2]["response"]["instructions"]
+    assert "person you represent answered privately" in response_instruction
+    assert "still speaking aloud to the representative" in response_instruction
+    assert "Do not acknowledge the private answer" in response_instruction
+    assert "'Got it,'" in response_instruction
+    assert "do not address its author as" in response_instruction
+    assert "use request_user_input again" in response_instruction
 
 
 def test_secure_mode_stops_audio_in_both_directions_and_suppresses_transcripts(tmp_path):
