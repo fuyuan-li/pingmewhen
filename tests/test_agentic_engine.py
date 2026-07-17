@@ -87,6 +87,7 @@ def test_agentic_call_state_and_transcript_return_to_private_review(tmp_path):
     pending = engine.next_phone_action(task["id"])
     task = engine.begin_call(task["id"], pending["index"], "CA123")
     assert task["phase"] == "calling"
+    engine.mark_call_connected(task["id"])
     engine.append_transcript(task["id"], "relay", "Hello, I am Relay, an AI tool speaking for my user.")
     engine.append_transcript(task["id"], "representative", "I am comfortable continuing.")
     task = engine.finish_call(task["id"], "CA123", "completed")
@@ -94,6 +95,23 @@ def test_agentic_call_state_and_transcript_return_to_private_review(tmp_path):
     assert task["phase"] == "planning"
     assert task["stage"] == "post_call_review"
     assert any(event.get("speaker") == "representative" for event in task["events"])
+
+
+def test_completed_twilio_call_without_media_connection_is_reported_as_failed(tmp_path):
+    store = SQLiteTaskStore(tmp_path / "relay.db")
+    engine = AgenticTaskEngine(EventLog(tmp_path / "events.jsonl"), FakePlanner(), store, lambda _: "")
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    task = engine.begin_call(task["id"], pending["index"], "CA123")
+
+    task = engine.finish_call(task["id"], "CA123", "completed")
+
+    assert task["stage"] == "execution_failed"
+    assert task["call_state"] == "FAILED"
+    assert task["execution_queue"][0]["status"] == "failed"
+    assert not any("calls are complete" in event.get("text", "") for event in task["events"])
+    assert any("No conversation transcript was captured" in event.get("text", "") for event in task["events"])
 
 
 def test_approval_refuses_an_unsourced_phone_action(tmp_path):

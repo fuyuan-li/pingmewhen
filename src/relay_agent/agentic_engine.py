@@ -396,14 +396,44 @@ class AgenticTaskEngine:
             item = next((entry for entry in task.get("execution_queue", []) if entry.get("call_sid") == call_sid), None)
             if item is None or item["status"] != "active":
                 return self._snapshot(task)
-            item["status"] = "complete" if status == "completed" else status
+            connected = task.get("call_state") in {
+                "CONNECTED",
+                "SECURE_HANDOFF_PENDING",
+                "SECURE_LOCAL",
+                "HUMAN_TAKEOVER",
+            }
+            successful = status == "completed" and connected
+            item["status"] = "complete" if successful else "failed"
             task["current_call"] = None
             task.update(
                 secure_mode=False,
                 secure_expected_field=None,
-                call_state="COMPLETED" if status == "completed" else "FAILED",
+                call_state="COMPLETED" if successful else "FAILED",
             )
-            self._append(task, "status", text=f"Call with {item['action']['target']} ended · {status}")
+            if not successful:
+                if status == "completed" and not connected:
+                    reason = "Relay never connected to the call audio"
+                else:
+                    reason = f"Twilio ended the call with status {status}"
+                self._append(task, "status", text=f"Call with {item['action']['target']} failed · {reason}")
+                self._append(
+                    task,
+                    "message",
+                    speaker="relay_private",
+                    text=(
+                        "The phone call ended before Relay completed a conversation. No conversation transcript was "
+                        "captured. Check the call connection error before retrying."
+                    ),
+                )
+                task.update(phase="planning", stage="execution_failed", status="waiting_for_user")
+                task["prompt"] = {
+                    "kind": "text_reply",
+                    "question": "Review the connection failure, revise the plan, or ask Relay to retry.",
+                    "options": [],
+                }
+                self._store.save("production", task)
+                return self._snapshot(task)
+            self._append(task, "status", text=f"Call with {item['action']['target']} ended · completed")
             if any(entry["status"] == "pending" for entry in task.get("execution_queue", [])):
                 task.update(phase="calling", stage="execution_ready", status="waiting_for_execution", prompt=None)
             else:
@@ -412,7 +442,10 @@ class AgenticTaskEngine:
                     task,
                     "message",
                     speaker="relay_private",
-                    text="The approved calls are complete. I retained their transcripts in this task and am ready to review the results with you.",
+                    text=(
+                        "The approved calls are complete. Any conversation transcript captured is retained in this "
+                        "task, and I am ready to review the results with you."
+                    ),
                 )
                 task["prompt"] = {
                     "kind": "text_reply",

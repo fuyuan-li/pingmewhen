@@ -123,9 +123,16 @@ def create_app(
         if not validate_twilio_signature(
             resolved_credentials().twilio_auth_token,
             external_url,
-            parameters,
+            form,
             signature,
         ):
+            events.append(
+                "twilio.signature_rejected",
+                {
+                    "path": request.url.path,
+                    "parameter_names": sorted({str(key) for key, _ in form.multi_items()}),
+                },
+            )
             raise HTTPException(status_code=403, detail="Twilio request validation failed.")
         return parameters
 
@@ -390,8 +397,9 @@ def create_app(
                 active = engine.get(task_id).get("current_call") or {}
                 if active.get("call_sid") == call_sid:
                     try:
-                        engine.finish_call(task_id, call_sid, parameters["CallStatus"].lower())
-                        execute_next_call(task_id)
+                        finished = engine.finish_call(task_id, call_sid, parameters["CallStatus"].lower())
+                        if finished.get("stage") == "execution_ready":
+                            execute_next_call(task_id)
                     finally:
                         tunnel.release()
         return {"accepted": True}

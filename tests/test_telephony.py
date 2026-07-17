@@ -3,6 +3,7 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.datastructures import FormData
 from starlette.websockets import WebSocketDisconnect
 from twilio.request_validator import RequestValidator
 
@@ -218,6 +219,32 @@ def test_twilio_webhook_signature_accepts_valid_and_rejects_invalid_or_missing(m
     assert 'name="task_id" value="task-123"' in valid.text
     assert invalid.status_code == 403
     assert missing.status_code == 403
+
+
+def test_twilio_voice_signature_preserves_repeated_form_values(monkeypatch, tmp_path):
+    monkeypatch.setenv("RELAY_MODE", "standard")
+    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
+    tunnel = TunnelManager(
+        8765,
+        launcher=lambda port: SimpleNamespace(tunnel="https://relay.trycloudflare.com"),
+        terminator=lambda port: None,
+    )
+    tunnel.acquire()
+    client = TestClient(create_app(credential_store=configured_store(tmp_path), tunnel_manager=tunnel))
+    url = "https://relay.trycloudflare.com/api/twilio/voice?task_id=task-123&queue_index=0"
+    parameters = FormData([("CallSid", "CA123"), ("Repeated", "first"), ("Repeated", "second")])
+    signature = RequestValidator("test-auth-token").compute_signature(url, parameters)
+
+    response = client.post(
+        "/api/twilio/voice?task_id=task-123&queue_index=0",
+        content="CallSid=CA123&Repeated=first&Repeated=second",
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Twilio-Signature": signature,
+        },
+    )
+
+    assert response.status_code == 200
 
 
 def media_websocket_client(monkeypatch, tmp_path):
