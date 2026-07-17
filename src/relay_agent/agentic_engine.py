@@ -13,6 +13,10 @@ from relay_agent.task_engine import InvalidAction, TaskNotFound, secure_field_pr
 from relay_agent.task_store import SQLiteTaskStore
 
 
+def normalize_phone_number(value: str) -> str:
+    return re.sub(r"[\s().-]", "", value)
+
+
 class AgenticTaskEngine:
     """Model-driven private planning with hard application-owned approvals."""
 
@@ -205,22 +209,37 @@ class AgenticTaskEngine:
         self._append(task, "message", speaker="user_private", text="Approved. Proceed with this plan.")
         actions = (task.get("approved_plan") or {}).get("actions", [])
         phone_actions = [action for action in actions if action.get("kind") == "phone_call"]
-        executable = [
-            action
-            for action in phone_actions
-            if re.fullmatch(r"\+[1-9]\d{7,14}", action.get("phone_number", ""))
-            and action.get("contact_source_url", "").startswith(("https://", "http://"))
-            and not action.get("needs_lookup", True)
-        ]
-        if phone_actions and len(executable) != len(phone_actions):
-            self._append(task, "status", text="Plan approved · dialing blocked because no verified phone number is present")
+        executable = []
+        blocked = []
+        for action in phone_actions:
+            supplied_number = str(action.get("phone_number", "")).strip()
+            normalized_number = normalize_phone_number(supplied_number)
+            action["phone_number"] = normalized_number
+            reasons = []
+            if not normalized_number:
+                reasons.append("phone number is missing")
+            elif not re.fullmatch(r"\+[1-9]\d{7,14}", normalized_number):
+                reasons.append(f'phone number "{supplied_number}" does not resolve to valid E.164')
+            if action.get("needs_lookup", True):
+                reasons.append("contact verification is still marked as requiring lookup")
+            if not action.get("contact_source_url", "").startswith(("https://", "http://")):
+                reasons.append("official contact source URL is missing or invalid")
+            if reasons:
+                identity = action.get("label") or action.get("target") or "Unnamed phone call"
+                target = action.get("target", "").strip()
+                blocked.append(f"{identity}{f' ({target})' if target and target != identity else ''}: {', '.join(reasons)}")
+            else:
+                executable.append(action)
+        if blocked:
+            details = "; ".join(blocked)
+            self._append(task, "status", text=f"Plan approved · dialing blocked · {details}")
             self._append(
                 task,
                 "message",
                 speaker="relay_private",
                 text=(
-                    "I cannot safely dial this plan yet because its phone-call actions do not contain exact verified "
-                    "E.164 numbers. I will revise the plan to resolve the contacts before asking you to approve again."
+                    f"I cannot safely dial the following phone-call action(s): {details}. "
+                    "Please revise those specific contact details before approving again."
                 ),
             )
             task.update(stage="execution_blocked", status="waiting_for_user", prompt=None)

@@ -130,6 +130,88 @@ def test_approval_refuses_an_unsourced_phone_action(tmp_path):
     assert task["execution_queue"] == []
 
 
+def test_approval_normalizes_human_formatted_phone_number_to_e164(tmp_path):
+    class FormattedNumberPlanner:
+        ready = True
+        model = "test"
+
+        def plan(self, goal, messages, contexts):
+            return PlanningTurn(
+                status="plan_ready",
+                message="Review this plan.",
+                plan_summary="Call the provider.",
+                actions=[
+                    PlanAction(
+                        kind="phone_call",
+                        label="Call policy service",
+                        purpose="Ask about the policy.",
+                        target="Example Insurance",
+                        needs_lookup=False,
+                        phone_number="+1 (202) 701-0927",
+                        contact_source_url="https://example.com/contact",
+                    )
+                ],
+            )
+
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        FormattedNumberPlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call Example Insurance.")
+    task = engine.act(task["id"], "answer", "approve")
+
+    assert task["stage"] == "execution_ready"
+    assert task["approved_plan"]["actions"][0]["phone_number"] == "+12027010927"
+    assert task["execution_queue"][0]["action"]["phone_number"] == "+12027010927"
+
+
+def test_malformed_phone_number_block_names_the_offending_action(tmp_path):
+    class MalformedNumberPlanner:
+        ready = True
+        model = "test"
+
+        def plan(self, goal, messages, contexts):
+            return PlanningTurn(
+                status="plan_ready",
+                message="Review this plan.",
+                plan_summary="Call the provider.",
+                actions=[
+                    PlanAction(
+                        kind="phone_call",
+                        label="Call billing support",
+                        purpose="Resolve a billing question.",
+                        target="Example Telecom",
+                        needs_lookup=False,
+                        phone_number="202-CALL-NOW",
+                        contact_source_url="https://example.com/contact",
+                    )
+                ],
+            )
+
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        MalformedNumberPlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call billing support.")
+    task = engine.act(task["id"], "answer", "approve")
+    status = next(event for event in reversed(task["events"]) if event["type"] == "status")
+    reply = next(
+        event
+        for event in reversed(task["events"])
+        if event["type"] == "message" and event.get("speaker") == "relay_private"
+    )
+
+    assert task["stage"] == "execution_blocked"
+    assert task["execution_queue"] == []
+    assert "Call billing support (Example Telecom)" in status["text"]
+    assert 'phone number "202-CALL-NOW" does not resolve to valid E.164' in status["text"]
+    assert "Call billing support (Example Telecom)" in reply["text"]
+
+
 def test_secure_fields_cycle_individually_and_repeat_routes_to_takeover(tmp_path):
     log_path = tmp_path / "events.jsonl"
     engine = AgenticTaskEngine(

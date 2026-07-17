@@ -84,6 +84,11 @@
       .event { min-width: 0; margin: 0 0 13px; animation: rise .22s ease-out; }
       .message-event { display: flex; width: 100%; min-width: 0; flex-direction: column; align-items: flex-start; }
       .message-event.right { align-items: flex-end; }
+      .message-event.optimistic { opacity: .82; }
+      .message-event.optimistic-failed .bubble { border-color: #e2aaa5; background: #fff0ee; color: #8d332c; }
+      .pending-indicator { color: #737b87; font-size: 12px; font-weight: 650; }
+      .pending-indicator::after { content: '…'; display: inline-block; width: 18px; overflow: hidden; vertical-align: bottom; animation: thinking 1.2s steps(4, end) infinite; }
+      @keyframes thinking { from { width: 0; } to { width: 18px; } }
       @keyframes rise { from { transform: translateY(4px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
       .bubble { width: auto; max-width: min(82%, 680px); margin: 0; padding: 11px 14px; border-radius: 16px; line-height: 1.42; font-size: 14px; overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
       .representative { border-bottom-left-radius: 5px; background: white; border: 1px solid #e1e4e9; }
@@ -418,15 +423,16 @@
       }
 
       async function sendInstruction(phase) {
-        if (phase !== workflowPhase) return;
+        if (phase !== workflowPhase || actionInFlight) return;
         const input = phase === 'planning' ? planningInstruction : callingInstruction;
         const value = input.value.trim();
         if (!value) return;
         input.value = '';
-        await act('instruction', value);
+        const optimistic = appendOptimisticInstruction(phase, value);
+        await act('instruction', value, optimistic);
       }
 
-      async function act(action, value = '') {
+      async function act(action, value = '', optimistic = null) {
         if (!task || actionInFlight) return;
         actionInFlight = true;
         clearTimeout(advanceTimer);
@@ -439,13 +445,46 @@
             body: JSON.stringify({action, value})
           });
           task = await readResponse(response);
+          clearOptimisticInstruction(optimistic);
           renderTask();
         } catch (error) {
+          failOptimisticInstruction(optimistic);
           showError(error.message);
         } finally {
           actionInFlight = false;
           if (userAction) setControlsDisabled(task?.status === 'complete');
         }
+      }
+
+      function appendOptimisticInstruction(phase, text) {
+        const event = {type: 'message', phase, speaker: 'user_private', text};
+        const message = renderEvent(event);
+        message.classList.add('optimistic');
+        const pending = document.createElement('div');
+        pending.className = 'event pending-indicator';
+        pending.textContent = phase === 'planning' ? 'Relay is thinking' : 'Sending to Relay';
+        let timeline = planningTimeline;
+        if (phase === 'calling') {
+          timeline = callViews.get(selectedCallId)?.pane || Array.from(callViews.values()).at(-1)?.pane;
+        }
+        if (!timeline) return null;
+        timeline.append(message, pending);
+        requestAnimationFrame(() => { timeline.scrollTop = timeline.scrollHeight; });
+        return {message, pending};
+      }
+
+      function clearOptimisticInstruction(optimistic) {
+        optimistic?.message.remove();
+        optimistic?.pending.remove();
+      }
+
+      function failOptimisticInstruction(optimistic) {
+        if (!optimistic) return;
+        optimistic.pending.remove();
+        optimistic.message.classList.remove('optimistic');
+        optimistic.message.classList.add('optimistic-failed');
+        const speaker = optimistic.message.querySelector('.speaker');
+        if (speaker) speaker.textContent = `${speaker.textContent} · not sent`;
       }
 
       async function readResponse(response) {
