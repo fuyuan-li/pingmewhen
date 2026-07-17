@@ -112,6 +112,9 @@ def create_app(
         lambda task_id, speaker, text: engine.append_transcript(task_id, speaker, text),
         events,
         secure_requester=lambda task_id, field_name: engine.request_secure_field(task_id, field_name),
+        user_input_requester=lambda task_id, question, input_kind, blocking: engine.request_user_input(
+            task_id, question, input_kind, blocking
+        ),
         call_connected=lambda task_id: engine.mark_call_connected(task_id),
         tts_renderer=tts_renderer,
         realtime_model=lambda: model_settings.load().realtime_model,
@@ -361,9 +364,20 @@ def create_app(
     async def act_on_task(task_id: str, request: TaskActionRequest) -> dict:
         try:
             was_calling = engine.get(task_id)["phase"] == "calling"
-            task = engine.act(task_id, request.action, request.value)
             if was_calling and request.action == "instruction" and isinstance(engine, AgenticTaskEngine):
-                await realtime.inject(task_id, request.value.strip())
+                instruction = request.value.strip()
+                if not instruction:
+                    raise InvalidAction("Type a message before sending it.")
+                if not await realtime.inject(task_id, instruction):
+                    events.append("realtime.instruction_rejected", {"task_id": task_id})
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "The instruction was not delivered to the live call because Relay is disconnected or "
+                            "its Realtime participation is paused."
+                        ),
+                    )
+            task = engine.act(task_id, request.action, request.value)
             if isinstance(engine, AgenticTaskEngine) and task["stage"] == "execution_ready":
                 return execute_next_call(task_id)
             return task

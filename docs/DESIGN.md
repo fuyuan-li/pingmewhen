@@ -135,7 +135,7 @@ Task
 PREPARING
   -> DIALING
   -> CONNECTED
-  -> WAITING_FOR_USER (call may continue if question is non-blocking)
+  -> WAITING_FOR_USER (Realtime audio is gated until the user answers)
   -> APPROVAL_REQUIRED
   -> SECURE_HANDOFF_PENDING
   -> SECURE_LOCAL | HUMAN_TAKEOVER

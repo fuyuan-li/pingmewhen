@@ -47,6 +47,8 @@ class ActiveRealtimeSession:
     twilio: WebSocket
     stream_sid: str
     secure_mode: bool = False
+    waiting_for_user: bool = False
+    pending_tool_call_id: str | None = None
     expected_field: str | None = None
     mark_events: dict[str, asyncio.Event] = field(default_factory=dict)
 
@@ -73,9 +75,11 @@ def realtime_session_update(
         "turn naturally from the immediately preceding conversation. Pursue only this approved purpose: "
         f"{action['purpose']}. The overall user goal is: {context['goal']}. The organization being called is: "
         f"{action['target']}. If the representative asks for a fact or decision that is not explicitly available in "
-        "your context, say only a brief hold such as 'Let me check on that one second.' Then stop speaking and wait "
-        "for a private user instruction. Do not fill time, restart the introduction, fabricate an answer, ask the "
-        "representative to supply the user's missing fact, or continue until the user responds. Do not provide "
+        "your context, first say one brief natural hold line such as 'Let me check on that one second,' then call "
+        "request_user_input with the exact concise question the user needs to answer, input_kind='text', and "
+        "blocking=true. The tool call, not a spoken phrase, is the required signal that you need the user. Do not "
+        "continue until the tool result arrives. Do not fill time, restart the introduction, fabricate an answer, "
+        "or ask the representative to supply the user's missing fact. Do not provide "
         "payment-card data or a full Social "
         "Security number. Do not choose a regulated product for the user. Be concise and natural. The user's "
         "private task messages are:\n"
@@ -88,6 +92,29 @@ def realtime_session_update(
             "type": "realtime",
             "instructions": instructions,
             "output_modalities": ["audio"],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "request_user_input",
+                    "description": (
+                        "Ask the user following the call by text for one missing fact or decision required to continue."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "question": {
+                                "type": "string",
+                                "description": "A concise question containing exactly what the user must answer.",
+                            },
+                            "input_kind": {"type": "string", "enum": ["text"]},
+                            "blocking": {"type": "boolean"},
+                        },
+                        "required": ["question", "input_kind", "blocking"],
+                        "additionalProperties": False,
+                    },
+                }
+            ],
+            "tool_choice": "auto",
             "audio": {
                 "input": {
                     "format": {"type": "audio/pcmu"},
@@ -150,6 +177,7 @@ class RealtimeSessionHub:
         events: EventLog,
         connector: Callable[..., Any] = connect,
         secure_requester: Callable[[str, str], dict[str, Any]] | None = None,
+        user_input_requester: Callable[[str, str, str, bool], dict[str, Any]] | None = None,
         call_connected: Callable[[str], dict[str, Any]] | None = None,
         tts_renderer: LocalTTSRenderer | None = None,
         playback_timeout: float = 20,
@@ -162,6 +190,7 @@ class RealtimeSessionHub:
         self._events = events
         self._connector = connector
         self._secure_requester = secure_requester
+        self._user_input_requester = user_input_requester
         self._call_connected = call_connected
         self._tts_renderer = tts_renderer or MacOSLocalTTS()
         self._playback_timeout = playback_timeout
@@ -175,20 +204,49 @@ class RealtimeSessionHub:
             session = self._sessions.get(task_id)
         if session is None or session.secure_mode:
             return False
-        await session.realtime.send(json.dumps(private_instruction(text)))
-        await session.realtime.send(
-            json.dumps(
-                {
-                    "type": "response.create",
-                    "response": {
-                        "instructions": (
-                            "Integrate the new private user instruction naturally into the phone conversation now. "
-                            "Do not mention the private channel."
-                        )
-                    },
-                }
+        waiting_for_user = session.waiting_for_user
+        pending_call_id = session.pending_tool_call_id
+        if waiting_for_user and not pending_call_id:
+            return False
+        if waiting_for_user:
+            await session.realtime.send(
+                json.dumps(
+                    {
+                        "type": "conversation.item.create",
+                        "item": {
+                            "type": "function_call_output",
+                            "call_id": pending_call_id,
+                            "output": json.dumps({"status": "answered"}),
+                        },
+                    }
+                )
             )
-        )
+        await session.realtime.send(json.dumps(private_instruction(text)))
+        session.waiting_for_user = False
+        session.pending_tool_call_id = None
+        try:
+            await session.realtime.send(
+                json.dumps(
+                    {
+                        "type": "response.create",
+                        "response": {
+                            "instructions": (
+                                "The user answered the pending question. Continue the active phone conversation "
+                                "naturally using their private answer. Do not mention the private channel."
+                                if waiting_for_user
+                                else (
+                                    "Integrate the new private user instruction naturally into the phone conversation "
+                                    "now. Do not mention the private channel."
+                                )
+                            )
+                        },
+                    }
+                )
+            )
+        except Exception:
+            session.waiting_for_user = waiting_for_user
+            session.pending_tool_call_id = pending_call_id
+            raise
         self._events.append("realtime.instruction_injected", {"task_id": task_id})
         return True
 
@@ -398,7 +456,7 @@ class RealtimeSessionHub:
             message = await session.twilio.receive_json()
             event = message.get("event")
             if event == "media":
-                if not session.secure_mode:
+                if not session.secure_mode and not session.waiting_for_user:
                     await session.realtime.send(
                         json.dumps({"type": "input_audio_buffer.append", "audio": message["media"]["payload"]})
                     )
@@ -414,7 +472,7 @@ class RealtimeSessionHub:
             event = json.loads(raw)
             event_type = event.get("type")
             if event_type == "response.output_audio.delta":
-                if not session.secure_mode:
+                if not session.secure_mode and not session.waiting_for_user:
                     await session.twilio.send_json(
                         {
                             "event": "media",
@@ -422,8 +480,14 @@ class RealtimeSessionHub:
                             "media": {"payload": event["delta"]},
                         }
                     )
-            elif event_type == "input_audio_buffer.speech_started" and not session.secure_mode:
+            elif (
+                event_type == "input_audio_buffer.speech_started"
+                and not session.secure_mode
+                and not session.waiting_for_user
+            ):
                 await session.twilio.send_json({"event": "clear", "streamSid": session.stream_sid})
+            if event_type == "response.function_call_arguments.done":
+                await self._handle_function_call(session, task_id, event)
             transcript = transcript_from_realtime_event(event)
             if transcript and transcript[1].strip() and not session.secure_mode:
                 sensitive_field = requested_sensitive_field(transcript[1])
@@ -437,3 +501,39 @@ class RealtimeSessionHub:
                     "realtime.protocol_error",
                     {"task_id": task_id, "type": detail.get("type"), "code": detail.get("code")},
                 )
+
+    async def _handle_function_call(
+        self,
+        session: ActiveRealtimeSession,
+        task_id: str,
+        event: dict[str, Any],
+    ) -> None:
+        if event.get("name") != "request_user_input":
+            return
+        call_id = str(event.get("call_id", "")).strip()
+        try:
+            arguments = json.loads(event.get("arguments", "{}"))
+        except (TypeError, json.JSONDecodeError):
+            arguments = {}
+        question = str(arguments.get("question", "")).strip()
+        input_kind = str(arguments.get("input_kind", ""))
+        blocking = arguments.get("blocking")
+        if not call_id or not question or input_kind != "text" or not isinstance(blocking, bool):
+            self._events.append(
+                "realtime.tool_rejected",
+                {"task_id": task_id, "tool": "request_user_input", "reason": "invalid_arguments"},
+            )
+            return
+        if session.waiting_for_user:
+            return
+        if self._user_input_requester is None:
+            self._events.append(
+                "realtime.tool_rejected",
+                {"task_id": task_id, "tool": "request_user_input", "reason": "handler_unavailable"},
+            )
+            return
+        self._user_input_requester(task_id, question, input_kind, blocking)
+        session.waiting_for_user = True
+        session.pending_tool_call_id = call_id
+        await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
+        self._events.append("realtime.user_input_requested", {"task_id": task_id, "input_kind": input_kind})

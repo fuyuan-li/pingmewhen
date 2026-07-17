@@ -161,6 +161,45 @@ def test_agentic_call_state_and_transcript_return_to_private_review(tmp_path):
     assert any(event.get("speaker") == "representative" for event in task["events"])
 
 
+def test_live_user_input_request_populates_prompt_and_answer_resumes_call(tmp_path):
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    engine.begin_call(task["id"], pending["index"], "CA123")
+    engine.mark_call_connected(task["id"])
+
+    waiting = engine.request_user_input(
+        task["id"],
+        "What is your apartment number?",
+        "text",
+        True,
+    )
+
+    assert waiting["call_state"] == "WAITING_FOR_USER"
+    assert waiting["stage"] == "waiting_for_user"
+    assert waiting["prompt"] == {
+        "kind": "text_reply",
+        "question": "What is your apartment number?",
+        "options": [],
+        "blocking": True,
+    }
+
+    resumed = engine.act(task["id"], "instruction", "Apartment 4B")
+
+    assert resumed["call_state"] == "CONNECTED"
+    assert resumed["stage"] == "calling"
+    assert resumed["status"] == "running"
+    assert resumed["prompt"] is None
+    assert resumed["events"][-2]["speaker"] == "user_private"
+    assert resumed["events"][-2]["text"] == "Apartment 4B"
+
+
 def test_completed_twilio_call_without_media_connection_is_reported_as_failed(tmp_path):
     store = SQLiteTaskStore(tmp_path / "relay.db")
     engine = AgenticTaskEngine(EventLog(tmp_path / "events.jsonl"), FakePlanner(), store, lambda _: "")

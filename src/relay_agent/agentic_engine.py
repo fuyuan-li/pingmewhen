@@ -105,7 +105,11 @@ class AgenticTaskEngine:
                     if task.get("secure_mode"):
                         raise InvalidAction("Relay is paused during the protected exchange. Do not type sensitive data here.")
                     self._append(task, "message", speaker="user_private", text=instruction)
-                    self._append(task, "status", text="Private instruction sent to the active call")
+                    if task.get("call_state") == "WAITING_FOR_USER":
+                        task.update(call_state="CONNECTED", stage="calling", status="running", prompt=None)
+                        self._append(task, "status", text="User answer delivered · Relay returned to the conversation")
+                    else:
+                        self._append(task, "status", text="Private instruction sent to the active call")
                     self._store.save("production", task)
                     snapshot = self._snapshot(task)
                     self._events.append(
@@ -385,6 +389,33 @@ class AgenticTaskEngine:
             task.update(call_state="SECURE_LOCAL", stage=f"secure_{field_name}", status="waiting_for_user")
             task["prompt"] = secure_field_prompt(field_name, simulated=False)
             self._append(task, "secure_gap", text="Protected audio and transcript content are suppressed for this field.")
+            self._store.save("production", task)
+            return self._snapshot(task)
+
+    def request_user_input(
+        self,
+        task_id: str,
+        question: str,
+        input_kind: str,
+        blocking: bool,
+    ) -> dict[str, Any]:
+        cleaned_question = question.strip()
+        with self._lock:
+            task = self._require(task_id)
+            if task["phase"] != "calling" or not task.get("current_call"):
+                raise InvalidAction("User input can be requested only during an active call.")
+            if task.get("secure_mode"):
+                raise InvalidAction("Normal user input is unavailable during a protected exchange.")
+            if not cleaned_question or input_kind != "text" or not isinstance(blocking, bool):
+                raise InvalidAction("Relay requested unsupported user input.")
+            task.update(call_state="WAITING_FOR_USER", stage="waiting_for_user", status="waiting_for_user")
+            task["prompt"] = {
+                "kind": "text_reply",
+                "question": cleaned_question,
+                "options": [],
+                "blocking": blocking,
+            }
+            self._append(task, "status", text="Relay is waiting for your answer")
             self._store.save("production", task)
             return self._snapshot(task)
 

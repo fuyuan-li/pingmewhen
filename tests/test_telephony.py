@@ -19,6 +19,7 @@ from relay_agent.call_capabilities import (
 from relay_agent.cli import relay_log_config
 from relay_agent.credentials import CredentialStore, RelayCredentials
 from relay_agent.planner import PlanAction, PlanningTurn
+from relay_agent.realtime_bridge import RealtimeSessionHub
 from relay_agent.telephony import TelephonyService
 from relay_agent.tunnel import TunnelManager
 
@@ -211,6 +212,46 @@ def test_approved_agentic_plan_places_the_verified_call(monkeypatch, tmp_path):
     assert approved.json()["phase"] == "calling"
     assert calls.arguments["to"] == "+12025550199"
     assert parse_qs(urlparse(calls.arguments["url"]).query)["task_id"] == [task["id"]]
+
+
+def test_live_instruction_reports_when_realtime_injection_fails(monkeypatch, tmp_path):
+    monkeypatch.setenv("RELAY_MODE", "standard")
+    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
+    monkeypatch.setattr(RealtimeSessionHub, "inject", lambda self, task_id, text: async_false())
+    calls = FakeCalls()
+    tunnel = TunnelManager(
+        8765,
+        launcher=lambda port: SimpleNamespace(tunnel="https://relay.trycloudflare.com"),
+        terminator=lambda port: None,
+    )
+    client = TestClient(
+        create_app(
+            planner=ExecutablePlanner(),
+            credential_store=configured_store(tmp_path),
+            tunnel_manager=tunnel,
+            twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
+        )
+    )
+    task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
+    calling = client.post(
+        f"/api/tasks/{task['id']}/actions",
+        json={"action": "answer", "value": "approve"},
+    ).json()
+    assert calling["phase"] == "calling"
+
+    response = client.post(
+        f"/api/tasks/{task['id']}/actions",
+        json={"action": "instruction", "value": "The apartment number is 4B."},
+    )
+
+    assert response.status_code == 409
+    assert "not delivered" in response.json()["detail"]
+    unchanged = client.get(f"/api/tasks/{task['id']}").json()
+    assert not any(event.get("text") == "The apartment number is 4B." for event in unchanged["events"])
+
+
+async def async_false():
+    return False
 
 
 def test_terminal_status_callback_revokes_the_call_capabilities(monkeypatch, tmp_path):

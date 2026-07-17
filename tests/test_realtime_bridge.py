@@ -36,8 +36,26 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert "AI disclosure exactly once per call" in instructions
     assert "outbound caller" in instructions
     assert "Do not ask whether the representative is comfortable continuing" in instructions
-    assert "Then stop speaking and wait for a private user instruction" in instructions
+    assert "then call request_user_input" in instructions
+    assert "The tool call, not a spoken phrase" in instructions
     assert "ask the representative to supply the user's missing fact" in instructions
+    assert update["session"]["tool_choice"] == "auto"
+    tool = update["session"]["tools"][0]
+    assert tool["type"] == "function"
+    assert tool["name"] == "request_user_input"
+    assert tool["parameters"] == {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "A concise question containing exactly what the user must answer.",
+            },
+            "input_kind": {"type": "string", "enum": ["text"]},
+            "blocking": {"type": "boolean"},
+        },
+        "required": ["question", "input_kind", "blocking"],
+        "additionalProperties": False,
+    }
     opening = initial_response(context)
     assert opening["type"] == "response.create"
     assert "on behalf of Mina" in opening["response"]["instructions"]
@@ -188,6 +206,93 @@ def test_live_instruction_is_injected_and_requests_a_natural_response(tmp_path):
 
     assert asyncio.run(run()) is True
     assert [event["type"] for event in realtime.sent] == ["conversation.item.create", "response.create"]
+
+
+def test_request_user_input_tool_pauses_audio_and_notifies_task_state(tmp_path):
+    requests = []
+    realtime = FakeRealtime(
+        [
+            {
+                "type": "response.function_call_arguments.done",
+                "name": "request_user_input",
+                "call_id": "call-input-1",
+                "arguments": json.dumps(
+                    {
+                        "question": "What is your apartment number?",
+                        "input_kind": "text",
+                        "blocking": True,
+                    }
+                ),
+            },
+            {"type": "response.output_audio.delta", "delta": "must-not-play"},
+        ]
+    )
+    twilio = FakeTwilio(
+        [
+            {"event": "media", "media": {"payload": "must-not-forward"}},
+            {"event": "stop"},
+        ]
+    )
+    session = ActiveRealtimeSession(realtime, twilio, "MZ1")
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        user_input_requester=lambda task_id, question, input_kind, blocking: requests.append(
+            (task_id, question, input_kind, blocking)
+        )
+        or {},
+    )
+
+    async def run():
+        await hub._openai_to_twilio(session, "task-1")
+        await hub._twilio_to_openai(session)
+
+    asyncio.run(run())
+
+    assert requests == [("task-1", "What is your apartment number?", "text", True)]
+    assert session.waiting_for_user is True
+    assert session.pending_tool_call_id == "call-input-1"
+    assert [event["type"] for event in realtime.sent] == ["input_audio_buffer.clear"]
+    assert twilio.sent == []
+
+
+def test_answering_request_user_input_resumes_and_delivers_answer(tmp_path):
+    realtime = FakeRealtime()
+    session = ActiveRealtimeSession(
+        realtime,
+        FakeTwilio(),
+        "MZ1",
+        waiting_for_user=True,
+        pending_tool_call_id="call-input-1",
+    )
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        return await hub.inject("task-1", "Apartment 4B")
+
+    assert asyncio.run(run()) is True
+    assert session.waiting_for_user is False
+    assert session.pending_tool_call_id is None
+    assert [event["type"] for event in realtime.sent] == [
+        "conversation.item.create",
+        "conversation.item.create",
+        "response.create",
+    ]
+    assert realtime.sent[0]["item"] == {
+        "type": "function_call_output",
+        "call_id": "call-input-1",
+        "output": json.dumps({"status": "answered"}),
+    }
+    assert "Apartment 4B" in realtime.sent[1]["item"]["content"][0]["text"]
+    assert "answered the pending question" in realtime.sent[2]["response"]["instructions"]
 
 
 def test_secure_mode_stops_audio_in_both_directions_and_suppresses_transcripts(tmp_path):
