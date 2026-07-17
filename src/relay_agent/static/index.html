@@ -70,6 +70,7 @@
       .workspace.call-history-open .calling-board { flex-basis: calc(50% - 6px); width: calc(50% - 6px); height: 100%; margin-left: 12px; align-self: stretch; visibility: visible; opacity: 1; transform: translateX(0); pointer-events: auto; }
       .workspace.planning-active.has-call-history:not(.call-history-open) .calling-board { flex-basis: 48px; width: 48px; height: 210px; margin-left: 10px; align-self: flex-start; visibility: visible; opacity: 1; transform: translateX(0); border-radius: 16px 0 0 16px; pointer-events: auto; }
       .workspace.planning-active .calling-board .composer { display: none; }
+      .workspace.calling-active .planning-board { opacity: 1; filter: none; }
       .workspace.call-history-open .calling-board.inactive { opacity: 1; filter: none; border-color: #cbd1da; box-shadow: 0 14px 45px rgba(30, 35, 50, .07); }
       .workspace.planning-active.has-call-history:not(.call-history-open) .calling-board.inactive { opacity: 1; filter: none; border-color: #8f99ef; box-shadow: -6px 12px 30px rgba(53, 64, 161, .16); }
       .call-content { position: absolute; inset: 0; display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; opacity: 0; transform: translateX(18px); visibility: hidden; pointer-events: none; transition: opacity .18s ease, transform .32s ease, visibility 0s linear .32s; }
@@ -155,13 +156,9 @@
         .workspace.calling-active .boards,
         .workspace.call-history-open .boards { flex-direction: column; }
         .workspace.calling-active .planning-board,
-        .workspace.call-history-open .planning-board { flex: 0 0 120px; overflow: hidden; opacity: .48; }
+        .workspace.call-history-open .planning-board { flex: 1 1 48%; min-height: 280px; overflow: hidden; opacity: 1; }
         .workspace.calling-active .calling-board,
         .workspace.call-history-open .calling-board { flex: 1 1 auto; width: 100%; height: auto; margin: 10px 0 0; }
-        .workspace.calling-active .planning-board .timeline,
-        .workspace.calling-active .planning-board .composer,
-        .workspace.call-history-open .planning-board .timeline,
-        .workspace.call-history-open .planning-board .composer { display: none; }
         .bubble { max-width: 88%; }
         .secure-form { grid-template-columns: 1fr; }
         .setup-grid { grid-template-columns: 1fr; }
@@ -290,7 +287,7 @@
             </button>
             <div class="call-content">
               <div id="call-board-header" class="board-header call-board-header" aria-expanded="false">
-                <div class="task-title"><strong><span>Call Console</span><span id="calling-badge" class="phase-badge live">Live</span></strong><span>Representative transcript and call controls</span></div>
+                <div class="task-title"><strong><span>Call Console</span><span id="calling-badge" class="phase-badge live">Live</span></strong><span>External voice transcript · private messages stay in the workspace</span></div>
                 <div class="call-controls">
                   <button id="history-toggle" class="history-toggle">Minimize</button>
                   <button id="takeover" class="takeover">Simulate takeover · no audio</button>
@@ -301,10 +298,6 @@
               <div id="calling-composer" class="composer">
                 <div id="calling-error" class="error"></div>
                 <div id="calling-prompt" class="prompt"></div>
-                <div class="instruction-row">
-                  <input id="calling-instruction" type="text" placeholder="Instruct Relay or barge in at any time…" />
-                  <button id="calling-send" class="send">Send</button>
-                </div>
               </div>
             </div>
           </section>
@@ -326,7 +319,6 @@
       const planningPrompt = document.querySelector('#planning-prompt');
       const callingPrompt = document.querySelector('#calling-prompt');
       const planningInstruction = document.querySelector('#planning-instruction');
-      const callingInstruction = document.querySelector('#calling-instruction');
       let task = null;
       let workflowPhase = 'planning';
       const seenPlanningEventIds = new Set();
@@ -500,12 +492,8 @@
       });
 
       document.querySelector('#planning-send').addEventListener('click', () => sendInstruction('planning'));
-      document.querySelector('#calling-send').addEventListener('click', () => sendInstruction('calling'));
       planningInstruction.addEventListener('keydown', event => {
         if (event.key === 'Enter') sendInstruction('planning');
-      });
-      callingInstruction.addEventListener('keydown', event => {
-        if (event.key === 'Enter') sendInstruction('calling');
       });
       document.querySelector('#takeover').addEventListener('click', () => {
         if (runtimeMode === 'demo') {
@@ -555,8 +543,8 @@
       }
 
       async function sendInstruction(phase) {
-        if (phase !== workflowPhase || actionInFlight) return;
-        const input = phase === 'planning' ? planningInstruction : callingInstruction;
+        if (phase !== 'planning' || actionInFlight) return;
+        const input = planningInstruction;
         const value = input.value.trim();
         if (!value) return;
         input.value = '';
@@ -589,16 +577,13 @@
       }
 
       function appendOptimisticInstruction(phase, text) {
-        const event = {type: 'message', phase, speaker: 'user_private', text};
+        const event = {type: 'message', phase, channel: 'private', speaker: 'user_private', text};
         const message = renderEvent(event);
         message.classList.add('optimistic');
         const pending = document.createElement('div');
         pending.className = 'event pending-indicator';
-        pending.textContent = phase === 'planning' ? 'Relay is thinking' : 'Sending to Relay';
+        pending.textContent = workflowPhase === 'calling' ? 'Relay is routing this privately' : 'Relay is thinking';
         let timeline = planningTimeline;
-        if (phase === 'calling') {
-          timeline = callViews.get(selectedCallId)?.pane || Array.from(callViews.values()).at(-1)?.pane;
-        }
         if (!timeline) return null;
         timeline.append(message, pending);
         requestAnimationFrame(() => { timeline.scrollTop = timeline.scrollHeight; });
@@ -637,32 +622,43 @@
         workspace.classList.toggle('calling-active', activePhase === 'calling');
         workspace.classList.toggle('has-call-history', hasCallHistory);
         workspace.classList.toggle('call-history-open', callHistoryOpen && activePhase === 'planning');
-        document.querySelector('#planning-board').classList.toggle('active', activePhase === 'planning');
-        document.querySelector('#planning-board').classList.toggle('inactive', activePhase !== 'planning');
+        document.querySelector('#planning-board').classList.toggle('active', true);
+        document.querySelector('#planning-board').classList.toggle('inactive', false);
         document.querySelector('#calling-board').classList.toggle('active', activePhase === 'calling');
         document.querySelector('#calling-board').classList.toggle('inactive', activePhase !== 'calling');
-        document.querySelector('#planning-badge').textContent = activePhase === 'planning' ? 'Active' : 'Review only';
+        document.querySelector('#planning-badge').textContent = activePhase === 'planning' ? 'Active' : 'Private · active';
         document.querySelector('#calling-badge').textContent = activePhase === 'calling' ? 'Live' : 'Call history';
         document.querySelector('#history-toggle').textContent = callHistoryOpen ? 'Minimize calls' : 'Review calls';
         document.querySelector('#call-board-header').setAttribute('aria-expanded', String(callHistoryOpen));
 
-        const newPlanningEvents = task.events.filter(event => event.phase === 'planning' && !seenPlanningEventIds.has(event.id));
+        const newPlanningEvents = task.events.filter(event => {
+          const isPrivate = event.channel === 'private' ||
+            event.speaker === 'user_private' || event.speaker === 'relay_private' ||
+            (event.channel == null && event.phase === 'planning');
+          return isPrivate && !seenPlanningEventIds.has(event.id);
+        });
         newPlanningEvents.forEach(event => planningTimeline.appendChild(renderEvent(event)));
         newPlanningEvents.forEach(event => seenPlanningEventIds.add(event.id));
         requestAnimationFrame(() => { planningTimeline.scrollTop = planningTimeline.scrollHeight; });
-        renderCallHistory(task.events.filter(event => event.phase === 'calling'), activePhase);
+        renderCallHistory(task.events.filter(event => {
+          if (event.channel === 'call') return true;
+          if (event.channel === 'private') return false;
+          return event.phase === 'calling' && !['user_private', 'relay_private'].includes(event.speaker);
+        }), activePhase);
 
-        renderPrompt(activePhase === 'planning' ? task.prompt : null, planningPrompt);
-        renderPrompt(activePhase === 'calling' ? task.prompt : null, callingPrompt);
+        const securePrompt = activePhase === 'calling' && (task.secure_mode || task.call_state === 'HUMAN_TAKEOVER');
+        renderPrompt(securePrompt ? null : task.prompt, planningPrompt);
+        renderPrompt(securePrompt ? task.prompt : null, callingPrompt);
         const takeover = document.querySelector('#takeover');
         const canResumeTakeover = runtimeMode !== 'demo' && task.call_state === 'HUMAN_TAKEOVER';
         takeover.style.display = activePhase === 'calling' && (runtimeMode === 'demo' || canResumeTakeover) ? 'block' : 'none';
         takeover.textContent = runtimeMode === 'demo' ? 'Simulate takeover · no audio' : 'Return control to Relay';
         takeover.disabled = task.status === 'complete' || (runtimeMode === 'demo' && task.stage === 'takeover');
-        planningInstruction.disabled = task.status === 'complete' || activePhase !== 'planning';
-        callingInstruction.disabled = task.status === 'complete' || activePhase !== 'calling' || task.secure_mode;
-        document.querySelector('#planning-send').disabled = task.status === 'complete' || activePhase !== 'planning';
-        document.querySelector('#calling-send').disabled = task.status === 'complete' || activePhase !== 'calling' || task.secure_mode;
+        planningInstruction.disabled = task.status === 'complete' || task.secure_mode;
+        planningInstruction.placeholder = activePhase === 'calling'
+          ? 'Message Relay privately · answer, update context, or change call strategy…'
+          : 'Reply to Relay or revise the plan…';
+        document.querySelector('#planning-send').disabled = task.status === 'complete' || task.secure_mode;
         document.querySelector('#task-attach-label').style.display = activePhase === 'planning' && task.status !== 'complete' ? 'inline-flex' : 'none';
         if (task.auto_advance) {
           advanceTimer = setTimeout(() => act('advance'), 850);
@@ -905,12 +901,11 @@
 
       function setControlsDisabled(disabled) {
         if (disabled) {
-          document.querySelectorAll('.choice, #planning-send, #calling-send, #takeover').forEach(control => control.disabled = true);
+          document.querySelectorAll('.choice, #planning-send, #takeover').forEach(control => control.disabled = true);
           return;
         }
         document.querySelectorAll('.choice').forEach(control => control.disabled = false);
-        document.querySelector('#planning-send').disabled = task?.status === 'complete' || workflowPhase !== 'planning';
-        document.querySelector('#calling-send').disabled = task?.status === 'complete' || workflowPhase !== 'calling' || task?.secure_mode;
+        document.querySelector('#planning-send').disabled = task?.status === 'complete' || task?.secure_mode;
         document.querySelector('#takeover').disabled = task?.status === 'complete' || workflowPhase !== 'calling' || task?.stage === 'takeover';
       }
 
@@ -953,7 +948,7 @@
       }
 
       function showError(message) {
-        const errorBox = document.querySelector(workflowPhase === 'calling' ? '#calling-error' : '#planning-error');
+        const errorBox = document.querySelector('#planning-error');
         errorBox.textContent = message;
         errorBox.style.display = 'block';
       }

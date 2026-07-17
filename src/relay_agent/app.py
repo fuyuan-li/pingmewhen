@@ -128,6 +128,7 @@ def create_app(
         tts_renderer=tts_renderer,
         realtime_model=lambda: model_settings.load().realtime_model,
         transcription_model=lambda: model_settings.load().transcription_model,
+        session_update_timeout=3,
     )
 
     def setup_required() -> bool:
@@ -380,7 +381,8 @@ def create_app(
                 instruction = request.value.strip()
                 if not instruction:
                     raise InvalidAction("Type a message before sending it.")
-                if not await realtime.inject(task_id, instruction):
+                delivery = await realtime.inject(task_id, instruction)
+                if not delivery:
                     events.append("realtime.instruction_rejected", {"task_id": task_id})
                     raise HTTPException(
                         status_code=409,
@@ -389,6 +391,14 @@ def create_app(
                             "its Realtime participation is paused."
                         ),
                     )
+                return engine.record_call_private_exchange(
+                    task_id,
+                    instruction,
+                    delivery.disposition,
+                    delivery.context_update,
+                    delivery.private_reply,
+                    delivery.resumed_call,
+                )
             task = engine.act(task_id, request.action, request.value)
             if isinstance(engine, AgenticTaskEngine) and task["stage"] == "execution_ready":
                 return execute_next_call(task_id)

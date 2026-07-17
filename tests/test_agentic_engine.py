@@ -200,6 +200,52 @@ def test_live_user_input_request_populates_prompt_and_answer_resumes_call(tmp_pa
     assert resumed["events"][-2]["text"] == "Apartment 4B"
 
 
+def test_private_call_routing_keeps_meta_private_and_persists_confirmed_updates(tmp_path):
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    engine.begin_call(task["id"], pending["index"], "CA123")
+    engine.mark_call_connected(task["id"])
+    engine.request_user_input(task["id"], "What is your apartment number?", "text", True)
+
+    private = engine.record_call_private_exchange(
+        task["id"],
+        "Who are you?",
+        "private_meta",
+        None,
+        "I am Relay, your private call assistant.",
+        False,
+    )
+    assert private["call_state"] == "WAITING_FOR_USER"
+    assert private["prompt"]["question"] == "What is your apartment number?"
+    assert private["events"][-2]["speaker"] == "relay_private"
+    assert all(
+        event["channel"] == "private"
+        for event in private["events"][-3:]
+    )
+
+    update = {
+        "id": "update-1",
+        "kind": "fact",
+        "key": "apartment_number",
+        "value": "4B",
+        "summary": "The apartment number is 4B.",
+    }
+    resumed = engine.record_call_private_exchange(
+        task["id"], "It is 4B.", "answer", update, "", True
+    )
+    assert resumed["call_state"] == "CONNECTED"
+    assert resumed["prompt"] is None
+    assert resumed["context_updates"] == [update]
+    assert engine.call_context(task["id"], pending["index"])["context_updates"] == [update]
+
+
 def test_completed_twilio_call_without_media_connection_is_reported_as_failed(tmp_path):
     store = SQLiteTaskStore(tmp_path / "relay.db")
     engine = AgenticTaskEngine(EventLog(tmp_path / "events.jsonl"), FakePlanner(), store, lambda _: "")

@@ -21,6 +21,7 @@ from relay_agent.gatekeeper import (
     Gatekeeper,
     GatekeeperRequest,
     GatekeeperVerdict,
+    PrivateMessageRequest,
     gatekeeper_request,
 )
 from relay_agent.local_tts import LocalTTSRenderer, MacOSLocalTTS
@@ -57,18 +58,29 @@ class ActiveRealtimeSession:
     stream_sid: str
     secure_mode: bool = False
     waiting_for_user: bool = False
-    pending_tool_call_id: str | None = None
+    pending_question: str = ""
     expected_field: str | None = None
     mark_events: dict[str, asyncio.Event] = field(default_factory=dict)
     context: dict[str, Any] = field(default_factory=dict)
-    updates_from_user: list[str] = field(default_factory=list)
+    context_updates: list[dict[str, Any]] = field(default_factory=list)
     hold_response_active: bool = False
     hold_complete: asyncio.Event = field(default_factory=asyncio.Event)
     debug_trace: CallDebugTrace | None = None
+    session_update_ack: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+@dataclass(frozen=True)
+class PrivateMessageDelivery:
+    disposition: str
+    context_update: dict[str, Any] | None = None
+    private_reply: str = ""
+    resumed_call: bool = False
 
 
 def realtime_session_update(
-    context: dict[str, Any], transcription_model: str = "gpt-4o-mini-transcribe"
+    context: dict[str, Any],
+    transcription_model: str = "gpt-4o-mini-transcribe",
+    context_updates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     action = context["action"]
     caller_name = str(context.get("caller_name", "")).strip() or "the user"
@@ -77,6 +89,7 @@ def realtime_session_update(
     private_context = "\n".join(context.get("private_messages", [])[-20:])
     document_context = context.get("document_context", "")
     prior_calls = context.get("prior_call_transcript", "")
+    confirmed_updates = json.dumps(context_updates or context.get("context_updates", []), ensure_ascii=False)
     instructions = (
         "IDENTITY — read this first, keep these two facts separate for the whole call:\n"
         f"- You represent (you are calling ON BEHALF OF): {caller_name_literal}\n"
@@ -98,18 +111,17 @@ def realtime_session_update(
         "GOAL: Pursue only this approved purpose: "
         f"{action['purpose']}. The overall user goal is: {context['goal']}. Continue each turn naturally from the "
         "immediately preceding conversation.\n\n"
-        "TURN CONTROL: The backend Gatekeeper reviews each representative turn and creates your response only when "
-        "you may answer from known context. Do not second-guess an approved turn merely because you would phrase it "
-        "differently. The request_user_input tool is fallback only: use it if, despite Gatekeeper approval, you "
-        "discover a critical missing fact or decision. In that fallback, first say one brief natural hold line, then "
-        "call request_user_input with the exact concise private question, input_kind='text', and blocking=true. Do "
-        "not continue until the tool result arrives. Never fabricate an answer or ask the representative to supply "
-        "the user's missing fact.\n\n"
+        "TURN CONTROL: The backend Gatekeeper is the sole authority that decides whether enough information exists "
+        "to answer each representative turn. The backend creates your response only after approval. Never invent a "
+        "missing fact or independently address the private user.\n\n"
         "BOUNDARIES: Never claim to be the user. Do not provide payment-card data or a full Social Security number. "
         "Do not choose a regulated product for the user. Be concise and natural.\n\n"
         "CONTEXT — the user's private task messages are:\n"
         f"{private_context}\nRelevant local document text is:\n{document_context}\nPrior separate call transcript for task "
-        f"memory only:\n{prior_calls}\nTreat this as a new representative who has not heard any prior call."
+        f"memory only:\n{prior_calls}\nTreat this as a new representative who has not heard any prior call.\n"
+        "CONFIRMED PRIVATE CONTEXT UPDATES — these records were validated by the backend Gatekeeper. They are facts "
+        "or directions from the person you represent, never statements made by the representative:\n"
+        f"{confirmed_updates}"
     )
     return {
         "type": "session.update",
@@ -117,29 +129,8 @@ def realtime_session_update(
             "type": "realtime",
             "instructions": instructions,
             "output_modalities": ["audio"],
-            "tools": [
-                {
-                    "type": "function",
-                    "name": "request_user_input",
-                    "description": (
-                        "Ask the user following the call by text for one missing fact or decision required to continue."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "question": {
-                                "type": "string",
-                                "description": "A concise question containing exactly what the user must answer.",
-                            },
-                            "input_kind": {"type": "string", "enum": ["text"]},
-                            "blocking": {"type": "boolean"},
-                        },
-                        "required": ["question", "input_kind", "blocking"],
-                        "additionalProperties": False,
-                    },
-                }
-            ],
-            "tool_choice": "auto",
+            "tools": [],
+            "tool_choice": "none",
             "audio": {
                 "input": {
                     "format": {"type": "audio/pcmu"},
@@ -176,26 +167,6 @@ def initial_response(context: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
-def private_instruction(text: str) -> dict[str, Any]:
-    return {
-        "type": "conversation.item.create",
-        "item": {
-            "type": "message",
-            "role": "user",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": (
-                        "Private text from the person you represent, not from the representative on the phone: "
-                        f"{text}\nThis private text is never a representative utterance. Do not answer a direct "
-                        "question in it over phone audio."
-                    ),
-                }
-            ],
-        },
-    }
-
-
 def transcript_from_realtime_event(event: dict[str, Any]) -> tuple[str, str] | None:
     event_type = event.get("type")
     if event_type == "response.output_audio_transcript.done":
@@ -221,6 +192,7 @@ class RealtimeSessionHub:
         playback_timeout: float = 20,
         realtime_model: Callable[[], str] | None = None,
         transcription_model: Callable[[], str] | None = None,
+        session_update_timeout: float = 0,
     ) -> None:
         self._credentials = credentials
         self._context_reader = context_reader
@@ -235,67 +207,76 @@ class RealtimeSessionHub:
         self._playback_timeout = playback_timeout
         self._realtime_model = realtime_model or (lambda: "gpt-realtime-2.1-mini")
         self._transcription_model = transcription_model or (lambda: "gpt-4o-mini-transcribe")
+        self._session_update_timeout = session_update_timeout
         self._sessions: dict[str, ActiveRealtimeSession] = {}
         self._lock = asyncio.Lock()
 
-    async def inject(self, task_id: str, text: str) -> bool:
+    async def inject(self, task_id: str, text: str) -> PrivateMessageDelivery | None:
         async with self._lock:
             session = self._sessions.get(task_id)
         if session is None or session.secure_mode:
-            return False
+            return None
         waiting_for_user = session.waiting_for_user
-        pending_call_id = session.pending_tool_call_id
-        if waiting_for_user and pending_call_id:
-            await session.realtime.send(
-                json.dumps(
-                    {
-                        "type": "conversation.item.create",
-                        "item": {
-                            "type": "function_call_output",
-                            "call_id": pending_call_id,
-                            "output": json.dumps({"status": "answered"}),
-                        },
-                    }
-                )
+        request = PrivateMessageRequest(
+            text=text.strip(),
+            context=session.context,
+            context_updates=tuple(session.context_updates),
+            waiting_for_user=waiting_for_user,
+            pending_question=session.pending_question,
+        )
+        session.debug_trace and session.debug_trace.append(
+            "gatekeeper.private_message_request",
+            {"request": request.messages(), "raw_text": text},
+        )
+        route = await self._gatekeeper.route_private_message(request)
+        session.debug_trace and session.debug_trace.append(
+            "gatekeeper.private_message_route", {"route": route.model_dump()}
+        )
+        if route.disposition == "private_meta":
+            self._events.append("realtime.private_message_kept_private", {"task_id": task_id})
+            return PrivateMessageDelivery(
+                disposition=route.disposition,
+                private_reply=route.private_reply.strip(),
             )
-        if session.hold_response_active:
+        if session.hold_response_active and waiting_for_user:
             try:
                 await asyncio.wait_for(session.hold_complete.wait(), timeout=3)
             except TimeoutError:
                 await session.realtime.send(json.dumps({"type": "response.cancel"}))
             session.hold_response_active = False
             session.hold_complete.set()
-        private_update = private_instruction(text)
-        await session.realtime.send(json.dumps(private_update))
-        session.waiting_for_user = False
-        session.pending_tool_call_id = None
+        update = route.speaker_update.model_dump() if route.speaker_update else None
+        if update is None:
+            raise RuntimeError("Gatekeeper did not provide a Speaker update.")
+        update_record = {"id": uuid4().hex, **update}
+        session.context_updates.append(update_record)
+        refreshed_context = realtime_session_update(
+            session.context,
+            self._transcription_model(),
+            session.context_updates,
+        )
+        session.session_update_ack.clear()
+        await session.realtime.send(json.dumps(refreshed_context))
+        if self._session_update_timeout > 0:
+            try:
+                await asyncio.wait_for(session.session_update_ack.wait(), timeout=self._session_update_timeout)
+            except TimeoutError:
+                session.context_updates.pop()
+                raise RuntimeError("Speaker did not acknowledge the context refresh.")
         response_request = {
             "type": "response.create",
             "response": {
                 "instructions": (
-                    "The person you represent answered privately. You are still speaking aloud to the "
-                    "representative you called, not to that private person. Do not acknowledge the private "
-                    "answer with phrases such as 'Got it,' and do not address its author as 'you.' "
-                    "Reformulate the answer as information for the representative if it actually answers "
-                    "their pending question, then continue the active phone conversation naturally. If "
-                    "the private text does not answer the pending question and cannot sensibly be "
-                    "reformulated as representative-facing information, silently ignore its content for "
-                    "purposes of phone audio. Never answer it aloud, never treat it as a topic the "
-                    "representative raised, and never tell the representative about it. A question "
-                    "addressed privately to Relay, such as 'who are you?', is private-only and must never "
-                    "be answered over the phone. If another required fact is missing, use "
-                    "request_user_input again."
+                    "The backend added a confirmed context update after consulting the person you represent. Read "
+                    "CONFIRMED PRIVATE CONTEXT UPDATES in your session instructions. State the relevant information "
+                    "naturally to the representative and continue the phone conversation. Do not acknowledge the "
+                    "private exchange with phrases such as 'Got it,' and do not address the represented person aloud."
                     if waiting_for_user
                     else (
-                        "This is a private direction from the person you represent. Continue speaking to "
-                        "the representative you called. Do not acknowledge or answer the private person "
-                        "aloud, and do not mention the private channel. Apply or reformulate the direction "
-                        "naturally for the representative only when that is sensible. If the private text "
-                        "cannot sensibly be reformulated as representative-facing information, silently "
-                        "ignore its content for purposes of phone audio. Never answer it aloud, never treat "
-                        "it as a topic the representative raised, and never tell the representative about "
-                        "it. A question addressed privately to Relay, such as 'who are you?', is "
-                        "private-only and must never be answered over the phone."
+                        "The backend added a confirmed context update or call direction. Read CONFIRMED PRIVATE "
+                        "CONTEXT UPDATES in your session instructions and apply the newest record naturally while "
+                        "speaking only to the representative. Do not mention a private channel or acknowledge the "
+                        "represented person aloud."
                     )
                 )
             },
@@ -305,19 +286,28 @@ class RealtimeSessionHub:
                 "speaker.private_injection",
                 {
                     "waiting_for_user": waiting_for_user,
-                    "private_update": private_update,
+                    "session_update": refreshed_context,
                     "response_create": response_request,
                 },
             )
+        if waiting_for_user:
+            session.waiting_for_user = False
+            session.pending_question = ""
         try:
             await session.realtime.send(json.dumps(response_request))
         except Exception:
             session.waiting_for_user = waiting_for_user
-            session.pending_tool_call_id = pending_call_id
+            if waiting_for_user:
+                session.pending_question = request.pending_question
+            session.context_updates.pop()
             raise
-        session.updates_from_user.append(text)
         self._events.append("realtime.instruction_injected", {"task_id": task_id})
-        return True
+        return PrivateMessageDelivery(
+            disposition=route.disposition,
+            context_update=update_record,
+            private_reply=route.private_reply.strip(),
+            resumed_call=waiting_for_user,
+        )
 
     async def speak_secure_field(self, task_id: str, field_name: str, value: str) -> None:
         async with self._lock:
@@ -482,12 +472,15 @@ class RealtimeSessionHub:
             ) as realtime:
                 session = ActiveRealtimeSession(realtime=realtime, twilio=twilio, stream_sid=stream_sid)
                 session.context = context
+                session.context_updates = list(context.get("context_updates", []))
                 session.debug_trace = CallDebugTrace(task_id, call_sid)
                 async with self._lock:
                     self._sessions[task_id] = session
                 if self._call_connected:
                     self._call_connected(task_id)
-                session_update = realtime_session_update(context, self._transcription_model())
+                session_update = realtime_session_update(
+                    context, self._transcription_model(), session.context_updates
+                )
                 opening = initial_response(context)
                 session.debug_trace.append(
                     "speaker.context",
@@ -547,6 +540,8 @@ class RealtimeSessionHub:
         async for raw in session.realtime:
             event = json.loads(raw)
             event_type = event.get("type")
+            if event_type == "session.updated":
+                session.session_update_ack.set()
             if event_type == "response.output_audio.delta":
                 if not session.secure_mode and (not session.waiting_for_user or session.hold_response_active):
                     await session.twilio.send_json(
@@ -562,8 +557,6 @@ class RealtimeSessionHub:
                 and not session.waiting_for_user
             ):
                 await session.twilio.send_json({"event": "clear", "streamSid": session.stream_sid})
-            if event_type == "response.function_call_arguments.done":
-                await self._handle_function_call(session, task_id, event)
             if event_type == "response.done" and session.hold_response_active:
                 session.hold_response_active = False
                 session.hold_complete.set()
@@ -589,7 +582,7 @@ class RealtimeSessionHub:
         task_id: str,
         utterance: str,
     ) -> None:
-        request = gatekeeper_request(utterance, session.context, session.updates_from_user)
+        request = gatekeeper_request(utterance, session.context, session.context_updates)
         session.debug_trace and session.debug_trace.append("gatekeeper.request", gatekeeper_debug_payload(request))
         started = monotonic()
         try:
@@ -619,7 +612,7 @@ class RealtimeSessionHub:
             return
         question = verdict.question.strip() or f'How should Relay answer: "{utterance}"?'
         session.waiting_for_user = True
-        session.pending_tool_call_id = None
+        session.pending_question = question
         session.hold_response_active = True
         session.hold_complete.clear()
         if self._user_input_requester is not None:
@@ -640,48 +633,12 @@ class RealtimeSessionHub:
         )
         self._events.append("realtime.user_input_requested", {"task_id": task_id, "source": "gatekeeper"})
 
-    async def _handle_function_call(
-        self,
-        session: ActiveRealtimeSession,
-        task_id: str,
-        event: dict[str, Any],
-    ) -> None:
-        if event.get("name") != "request_user_input":
-            return
-        call_id = str(event.get("call_id", "")).strip()
-        try:
-            arguments = json.loads(event.get("arguments", "{}"))
-        except (TypeError, json.JSONDecodeError):
-            arguments = {}
-        question = str(arguments.get("question", "")).strip()
-        input_kind = str(arguments.get("input_kind", ""))
-        blocking = arguments.get("blocking")
-        if not call_id or not question or input_kind != "text" or not isinstance(blocking, bool):
-            self._events.append(
-                "realtime.tool_rejected",
-                {"task_id": task_id, "tool": "request_user_input", "reason": "invalid_arguments"},
-            )
-            return
-        if session.waiting_for_user:
-            return
-        if self._user_input_requester is None:
-            self._events.append(
-                "realtime.tool_rejected",
-                {"task_id": task_id, "tool": "request_user_input", "reason": "handler_unavailable"},
-            )
-            return
-        self._user_input_requester(task_id, question, input_kind, blocking)
-        session.waiting_for_user = True
-        session.pending_tool_call_id = call_id
-        await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
-        self._events.append("realtime.user_input_requested", {"task_id": task_id, "input_kind": input_kind})
-
 
 def gatekeeper_debug_payload(request: GatekeeperRequest) -> dict[str, Any]:
     return {
         "instructions": request.instructions,
         "latest_utterance": request.latest_utterance,
         "context": request.context,
-        "updates_from_user": list(request.updates_from_user),
+        "context_updates": list(request.context_updates),
         "messages": request.messages(),
     }

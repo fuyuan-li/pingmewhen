@@ -43,6 +43,8 @@ Exit: a simulated event source drives the real UI, and private instructions chan
 - [x] Restart representative-facing context with a fresh introduction and task brief on every call.
 - [x] Render each external connection in a persistent transcript tab, including a separate application-callback tab.
 - [x] Animate the Call Console width between hidden, live parallel, expanded-history, and vertical-bookmark states while the Private Workspace resizes inversely.
+- [x] Keep the Private Workspace interactive during live calls and restrict the Call Console to the external transcript and controls.
+- [x] Route raw private call messages through Gatekeeper and expose only typed confirmed context updates to Speaker after a `session.updated` acknowledgement.
 - Build conversation fixtures from sanitized patterns, not raw copied transcripts.
 
 Exit: `relay demo` completes three distinct dynamic quote conversations and waits for the user’s carrier selection.

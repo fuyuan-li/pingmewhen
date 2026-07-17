@@ -1,7 +1,14 @@
 import asyncio
 from types import SimpleNamespace
 
-from relay_agent.gatekeeper import GatekeeperVerdict, OpenAIGatekeeper, gatekeeper_request
+from relay_agent.gatekeeper import (
+    ContextUpdate,
+    GatekeeperVerdict,
+    OpenAIGatekeeper,
+    PrivateMessageRequest,
+    PrivateMessageRoute,
+    gatekeeper_request,
+)
 
 
 class ClassifyingResponses:
@@ -39,7 +46,11 @@ def test_gatekeeper_classifies_against_context_and_accumulated_user_updates():
     )
     known = asyncio.run(
         gatekeeper.classify(
-            gatekeeper_request("What is the apartment number?", context, ["Apartment 4B"])
+            gatekeeper_request(
+                "What is the apartment number?",
+                context,
+                [{"kind": "fact", "key": "apartment_number", "value": "Apartment 4B"}],
+            )
         )
     )
 
@@ -53,6 +64,48 @@ def test_gatekeeper_classifies_against_context_and_accumulated_user_updates():
     assert responses.calls[0]["text_format"] is GatekeeperVerdict
     assert "1079 Commonwealth Ave" in responses.calls[0]["input"][-1]["content"]
     assert "Apartment 4B" in responses.calls[1]["input"][-1]["content"]
+
+
+def test_gatekeeper_routes_private_meta_without_speaker_update_and_answers_with_one():
+    class RoutingResponses:
+        def __init__(self):
+            self.calls = []
+
+        def parse(self, **arguments):
+            self.calls.append(arguments)
+            content = arguments["input"][-1]["content"]
+            if "Who are you?" in content:
+                route = PrivateMessageRoute(
+                    disposition="private_meta",
+                    private_reply="I am Relay, your private call assistant.",
+                )
+            else:
+                route = PrivateMessageRoute(
+                    disposition="answer",
+                    speaker_update=ContextUpdate(
+                        kind="fact",
+                        key="apartment_number",
+                        value="4B",
+                        summary="The apartment number is 4B.",
+                    ),
+                )
+            return SimpleNamespace(output_parsed=route)
+
+    responses = RoutingResponses()
+    gatekeeper = OpenAIGatekeeper(
+        lambda: "sk-test",
+        lambda: "gpt-5.4-nano",
+        client_factory=lambda **kwargs: SimpleNamespace(responses=responses),
+    )
+    base = dict(context={}, context_updates=(), waiting_for_user=True, pending_question="Apartment number?")
+
+    meta = asyncio.run(gatekeeper.route_private_message(PrivateMessageRequest(text="Who are you?", **base)))
+    answer = asyncio.run(gatekeeper.route_private_message(PrivateMessageRequest(text="It is 4B.", **base)))
+
+    assert meta.disposition == "private_meta"
+    assert meta.speaker_update is None
+    assert answer.speaker_update.key == "apartment_number"
+    assert responses.calls[0]["text_format"] is PrivateMessageRoute
 
 
 def test_gatekeeper_reuses_the_client_for_the_same_api_key():

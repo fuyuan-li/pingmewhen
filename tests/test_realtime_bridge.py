@@ -3,12 +3,11 @@ import json
 
 from relay_agent.credentials import RelayCredentials
 from relay_agent.event_log import EventLog
-from relay_agent.gatekeeper import GatekeeperVerdict
+from relay_agent.gatekeeper import ContextUpdate, GatekeeperVerdict, PrivateMessageRoute
 from relay_agent.realtime_bridge import (
     ActiveRealtimeSession,
     RealtimeSessionHub,
     initial_response,
-    private_instruction,
     realtime_session_update,
     requested_sensitive_field,
     transcript_from_realtime_event,
@@ -44,29 +43,14 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert "Do not ask whether the representative is comfortable continuing" in instructions
     assert "never repeat the disclosure" in instructions
     assert "Never deny being an AI if asked" in instructions
-    assert "backend Gatekeeper reviews each representative turn" in instructions
-    assert "request_user_input tool is fallback only" in instructions
-    assert "ask the representative to supply the user's missing fact" in instructions
+    assert "backend Gatekeeper is the sole authority" in instructions
+    assert "Gatekeeper is the sole authority" in instructions
+    assert "Never invent a missing fact" in instructions
     assert "Do not provide payment-card data or a full Social Security number" in instructions
     assert "Do not choose a regulated product for the user" in instructions
-    assert update["session"]["tool_choice"] == "auto"
+    assert update["session"]["tool_choice"] == "none"
     assert update["session"]["audio"]["input"]["turn_detection"]["create_response"] is False
-    tool = update["session"]["tools"][0]
-    assert tool["type"] == "function"
-    assert tool["name"] == "request_user_input"
-    assert tool["parameters"] == {
-        "type": "object",
-        "properties": {
-            "question": {
-                "type": "string",
-                "description": "A concise question containing exactly what the user must answer.",
-            },
-            "input_kind": {"type": "string", "enum": ["text"]},
-            "blocking": {"type": "boolean"},
-        },
-        "required": ["question", "input_kind", "blocking"],
-        "additionalProperties": False,
-    }
+    assert update["session"]["tools"] == []
     opening = initial_response(context)
     assert opening["type"] == "response.create"
     assert "You are calling Example Provider" in opening["response"]["instructions"]
@@ -81,13 +65,7 @@ def test_realtime_session_uses_selected_transcription_model():
     assert update["session"]["audio"]["input"]["transcription"]["model"] == "gpt-4o-transcribe"
 
 
-def test_private_instruction_is_context_only_and_transcripts_are_classified():
-    instruction = private_instruction("Ask about a multi-policy discount.")
-
-    assert instruction["type"] == "conversation.item.create"
-    assert "multi-policy" in instruction["item"]["content"][0]["text"]
-    assert "person you represent" in instruction["item"]["content"][0]["text"]
-    assert "not from the representative" in instruction["item"]["content"][0]["text"]
+def test_transcripts_are_classified():
     assert transcript_from_realtime_event(
         {"type": "response.output_audio_transcript.done", "transcript": "Hello"}
     ) == ("relay", "Hello")
@@ -162,6 +140,17 @@ class SequenceGatekeeper:
         self.requests.append(request)
         return self.verdicts.pop(0)
 
+    async def route_private_message(self, request):
+        return PrivateMessageRoute(
+            disposition="answer" if request.waiting_for_user else "call_instruction",
+            speaker_update=ContextUpdate(
+                kind="fact" if request.waiting_for_user else "call_instruction",
+                key="user_answer" if request.waiting_for_user else "call_instruction",
+                value=request.text,
+                summary=request.text,
+            ),
+        )
+
 
 class BlockingGatekeeper:
     def __init__(self, verdict):
@@ -173,6 +162,9 @@ class BlockingGatekeeper:
         self.started.set()
         await self.release.wait()
         return self.verdict
+
+    async def route_private_message(self, request):
+        raise AssertionError("Private routing was not expected")
 
 
 class BlockingRealtime(FakeRealtime):
@@ -227,9 +219,9 @@ def logged_events(path):
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def test_live_instruction_is_injected_and_requests_a_natural_response(tmp_path):
+def test_live_instruction_is_reformulated_into_session_context_before_response(tmp_path):
     realtime = FakeRealtime()
-    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1")
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
@@ -241,36 +233,43 @@ def test_live_instruction_is_injected_and_requests_a_natural_response(tmp_path):
         hub._sessions["task-1"] = session
         return await hub.inject("task-1", "Ask about a discount.")
 
-    assert asyncio.run(run()) is True
-    assert [event["type"] for event in realtime.sent] == ["conversation.item.create", "response.create"]
+    delivery = asyncio.run(run())
+    assert delivery.disposition == "call_instruction"
+    assert [event["type"] for event in realtime.sent] == ["session.update", "response.create"]
+    assert not any(event.get("type") == "conversation.item.create" for event in realtime.sent)
+    instructions = realtime.sent[0]["session"]["instructions"]
+    assert "Ask about a discount." in instructions
     response_instruction = realtime.sent[-1]["response"]["instructions"]
-    assert "Continue speaking to the representative you called" in response_instruction
-    assert "Do not acknowledge or answer the private person aloud" in response_instruction
+    assert "CONFIRMED PRIVATE CONTEXT UPDATES" in response_instruction
+    assert "acknowledge the represented person aloud" in response_instruction.lower()
 
 
-def test_meta_private_question_is_explicitly_forbidden_from_phone_audio(tmp_path):
+def test_meta_private_question_stays_in_private_workspace_and_never_reaches_speaker(tmp_path):
     realtime = FakeRealtime()
     session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1")
+    class MetaGatekeeper(SequenceGatekeeper):
+        async def route_private_message(self, request):
+            return PrivateMessageRoute(
+                disposition="private_meta",
+                private_reply="I am Relay, your private call assistant.",
+            )
+
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
         lambda task_id, speaker, text: {},
         EventLog(tmp_path / "events.jsonl"),
+        gatekeeper=MetaGatekeeper([]),
     )
 
     async def run():
         hub._sessions["task-1"] = session
         return await hub.inject("task-1", "Who are you?")
 
-    assert asyncio.run(run()) is True
-    private_item = realtime.sent[0]["item"]["content"][0]["text"]
-    response_instruction = realtime.sent[1]["response"]["instructions"]
-    assert "Who are you?" in private_item
-    assert "never a representative utterance" in private_item
-    assert "silently ignore its content for purposes of phone audio" in response_instruction
-    assert "Never answer it aloud" in response_instruction
-    assert "never treat it as a topic the representative raised" in response_instruction
-    assert "private-only and must never be answered over the phone" in response_instruction
+    delivery = asyncio.run(run())
+    assert delivery.disposition == "private_meta"
+    assert delivery.private_reply == "I am Relay, your private call assistant."
+    assert realtime.sent == []
 
 
 def test_speaker_waits_for_answerable_gatekeeper_verdict_before_responding(tmp_path):
@@ -381,11 +380,11 @@ def test_unanswerable_gatekeeper_turn_waits_then_accumulates_user_updates(tmp_pa
         session.hold_response_active = False
         session.hold_complete.set()
         hub._sessions["task-1"] = session
-        assert await hub.inject("task-1", "Apartment 4B") is True
+        assert (await hub.inject("task-1", "Apartment 4B")).resumed_call is True
         await hub._gate_representative_turn(session, "task-1", "What installation date works?")
         session.hold_response_active = False
         session.hold_complete.set()
-        assert await hub.inject("task-1", "Friday afternoon") is True
+        assert (await hub.inject("task-1", "Friday afternoon")).resumed_call is True
 
     asyncio.run(run())
 
@@ -394,81 +393,28 @@ def test_unanswerable_gatekeeper_turn_waits_then_accumulates_user_updates(tmp_pa
         ("What installation date works?", "text", True),
     ]
     assert session.waiting_for_user is False
-    assert session.updates_from_user == ["Apartment 4B", "Friday afternoon"]
-    assert gatekeeper.requests[0].updates_from_user == ()
-    assert gatekeeper.requests[1].updates_from_user == ("Apartment 4B",)
+    assert [update["value"] for update in session.context_updates] == ["Apartment 4B", "Friday afternoon"]
+    assert gatekeeper.requests[0].context_updates == ()
+    assert gatekeeper.requests[1].context_updates[0]["value"] == "Apartment 4B"
     assert [event["type"] for event in realtime.sent] == [
         "response.create",
-        "conversation.item.create",
+        "session.update",
         "response.create",
         "response.create",
-        "conversation.item.create",
+        "session.update",
         "response.create",
     ]
 
 
-def test_request_user_input_tool_blocks_speaker_output_but_keeps_listening(tmp_path):
-    requests = []
-    realtime = FakeRealtime(
-        [
-            {
-                "type": "response.function_call_arguments.done",
-                "name": "request_user_input",
-                "call_id": "call-input-1",
-                "arguments": json.dumps(
-                    {
-                        "question": "What is your apartment number?",
-                        "input_kind": "text",
-                        "blocking": True,
-                    }
-                ),
-            },
-            {"type": "response.output_audio.delta", "delta": "must-not-play"},
-        ]
-    )
-    twilio = FakeTwilio(
-        [
-            {"event": "media", "media": {"payload": "should-forward-for-transcription"}},
-            {"event": "stop"},
-        ]
-    )
-    session = ActiveRealtimeSession(realtime, twilio, "MZ1")
-    hub = RealtimeSessionHub(
-        lambda: RelayCredentials(openai_api_key="sk-test"),
-        lambda task_id, index: sample_context(),
-        lambda task_id, speaker, text: {},
-        EventLog(tmp_path / "events.jsonl"),
-        user_input_requester=lambda task_id, question, input_kind, blocking: requests.append(
-            (task_id, question, input_kind, blocking)
-        )
-        or {},
-    )
-
-    async def run():
-        await hub._openai_to_twilio(session, "task-1")
-        await hub._twilio_to_openai(session)
-
-    asyncio.run(run())
-
-    assert requests == [("task-1", "What is your apartment number?", "text", True)]
-    assert session.waiting_for_user is True
-    assert session.pending_tool_call_id == "call-input-1"
-    assert [event["type"] for event in realtime.sent] == [
-        "input_audio_buffer.clear",
-        "input_audio_buffer.append",
-    ]
-    assert realtime.sent[-1]["audio"] == "should-forward-for-transcription"
-    assert twilio.sent == []
-
-
-def test_answering_request_user_input_resumes_and_delivers_answer(tmp_path):
+def test_answering_gatekeeper_question_resumes_with_structured_context_only(tmp_path):
     realtime = FakeRealtime()
     session = ActiveRealtimeSession(
         realtime,
         FakeTwilio(),
         "MZ1",
         waiting_for_user=True,
-        pending_tool_call_id="call-input-1",
+        pending_question="What is your apartment number?",
+        context=sample_context(),
     )
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
@@ -481,31 +427,18 @@ def test_answering_request_user_input_resumes_and_delivers_answer(tmp_path):
         hub._sessions["task-1"] = session
         return await hub.inject("task-1", "Apartment 4B")
 
-    assert asyncio.run(run()) is True
+    delivery = asyncio.run(run())
+    assert delivery.resumed_call is True
     assert session.waiting_for_user is False
-    assert session.pending_tool_call_id is None
-    assert session.updates_from_user == ["Apartment 4B"]
+    assert session.pending_question == ""
+    assert session.context_updates[0]["value"] == "Apartment 4B"
     assert [event["type"] for event in realtime.sent] == [
-        "conversation.item.create",
-        "conversation.item.create",
+        "session.update",
         "response.create",
     ]
-    assert realtime.sent[0]["item"] == {
-        "type": "function_call_output",
-        "call_id": "call-input-1",
-        "output": json.dumps({"status": "answered"}),
-    }
-    assert "Apartment 4B" in realtime.sent[1]["item"]["content"][0]["text"]
-    response_instruction = realtime.sent[2]["response"]["instructions"]
-    assert "person you represent answered privately" in response_instruction
-    assert "still speaking aloud to the representative" in response_instruction
-    assert "Do not acknowledge the private answer" in response_instruction
-    assert "'Got it,'" in response_instruction
-    assert "do not address its author as" in response_instruction
-    assert "does not answer the pending question" in response_instruction
-    assert "silently ignore its content for purposes of phone audio" in response_instruction
-    assert "private-only and must never be answered over the phone" in response_instruction
-    assert "use request_user_input again" in response_instruction
+    assert "Apartment 4B" in realtime.sent[0]["session"]["instructions"]
+    assert "Apartment 4B" not in json.dumps(realtime.sent[1])
+    assert not any(event.get("type") == "conversation.item.create" for event in realtime.sent)
 
 
 def test_secure_mode_stops_audio_in_both_directions_and_suppresses_transcripts(tmp_path):

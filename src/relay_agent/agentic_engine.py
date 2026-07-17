@@ -33,6 +33,8 @@ class AgenticTaskEngine:
         self._store = store
         self._context_reader = context_reader
         self._tasks = store.load_all("production")
+        for task in self._tasks.values():
+            task.setdefault("context_updates", [])
         self._lock = Lock()
 
     def create(self, goal: str, contexts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -59,6 +61,7 @@ class AgenticTaskEngine:
             "secure_expected_field": None,
             "secure_fields_completed": [],
             "caller_name": "",
+            "context_updates": [],
         }
         self._append(task, "message", speaker="user_private", text=cleaned_goal)
         self._run_planner(task)
@@ -415,9 +418,62 @@ class AgenticTaskEngine:
                 "options": [],
                 "blocking": blocking,
             }
+            self._append(task, "message", speaker="relay_private", text=cleaned_question)
             self._append(task, "status", text="Relay is waiting for your answer")
             self._store.save("production", task)
             return self._snapshot(task)
+
+    def record_call_private_exchange(
+        self,
+        task_id: str,
+        text: str,
+        disposition: str,
+        context_update: dict[str, Any] | None,
+        private_reply: str,
+        resumed_call: bool,
+    ) -> dict[str, Any]:
+        cleaned = text.strip()
+        with self._lock:
+            task = self._require(task_id)
+            if task["phase"] != "calling" or not task.get("current_call"):
+                raise InvalidAction("Private call messages require an active call.")
+            if task.get("secure_mode"):
+                raise InvalidAction("Relay is paused during the protected exchange. Do not type sensitive data here.")
+            self._append(task, "message", speaker="user_private", text=cleaned, channel="private")
+            if context_update is not None:
+                task.setdefault("context_updates", []).append(deepcopy(context_update))
+            if private_reply.strip():
+                self._append(
+                    task,
+                    "message",
+                    speaker="relay_private",
+                    text=private_reply.strip(),
+                    channel="private",
+                )
+            if resumed_call:
+                task.update(call_state="CONNECTED", stage="calling", status="running", prompt=None)
+                self._append(
+                    task,
+                    "status",
+                    text="Your answer was added to Relay's confirmed call context",
+                    channel="private",
+                )
+            elif disposition == "private_meta":
+                self._append(task, "status", text="Kept private · nothing was spoken on the call", channel="private")
+            else:
+                self._append(
+                    task,
+                    "status",
+                    text="Private direction added to Relay's confirmed call context",
+                    channel="private",
+                )
+            self._store.save("production", task)
+            snapshot = self._snapshot(task)
+        self._events.append(
+            "task.private_call_message",
+            {"task_id": task_id, "disposition": disposition, "resumed_call": resumed_call},
+        )
+        return snapshot
 
     def complete_secure_field(self, task_id: str, field_name: str) -> dict[str, Any]:
         with self._lock:
@@ -567,6 +623,7 @@ class AgenticTaskEngine:
                     for event in task["events"]
                     if event["type"] == "message" and event.get("speaker") in {"relay", "representative"}
                 )[-12000:],
+                "context_updates": deepcopy(task.get("context_updates", [])),
             }
 
     def _queue_item(self, task: dict[str, Any], queue_index: int) -> dict[str, Any]:
@@ -585,11 +642,19 @@ class AgenticTaskEngine:
         return deepcopy(task)
 
     def _append(self, task: dict[str, Any], event_type: str, **payload: Any) -> None:
+        channel = payload.pop("channel", None)
+        if channel is None:
+            speaker = payload.get("speaker")
+            if speaker in {"user_private", "relay_private"} or task["phase"] == "planning":
+                channel = "private"
+            else:
+                channel = "call"
         event = {
             "id": len(task["events"]) + 1,
             "type": event_type,
             "phase": task["phase"],
             "timestamp": datetime.now(UTC).isoformat(),
+            "channel": channel,
             **payload,
         }
         task["events"].append(event)
