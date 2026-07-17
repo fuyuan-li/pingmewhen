@@ -50,9 +50,7 @@ class TelephonyService:
                 to=to,
                 from_=credentials.twilio_from_number,
                 url=voice_url,
-                method="POST",
                 status_callback=status_url,
-                status_callback_method="POST",
                 status_callback_event=["initiated", "ringing", "answered", "completed"],
             )
         except Exception:

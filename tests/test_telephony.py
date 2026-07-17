@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -58,7 +59,7 @@ def configured_store(tmp_path):
     return store
 
 
-def test_lazy_tunnel_url_is_used_for_per_call_webhooks(tmp_path):
+def test_tunnel_url_is_used_for_per_call_webhooks(tmp_path):
     launches = []
     terminations = []
     tunnel = TunnelManager(
@@ -78,7 +79,67 @@ def test_lazy_tunnel_url_is_used_for_per_call_webhooks(tmp_path):
     assert calls.arguments["url"] == "https://relay.trycloudflare.com/api/twilio/voice"
     assert calls.arguments["status_callback"] == "https://relay.trycloudflare.com/api/twilio/status"
     assert calls.arguments["from_"] == "+12025550123"
+    assert "method" not in calls.arguments
+    assert "status_callback_method" not in calls.arguments
     tunnel.release()
+    assert terminations == [8765]
+
+
+def test_production_runtime_starts_and_keeps_a_warm_tunnel(monkeypatch, tmp_path):
+    monkeypatch.setenv("RELAY_MODE", "standard")
+    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
+    launches = []
+    terminations = []
+    tunnel = TunnelManager(
+        8765,
+        launcher=lambda port: launches.append(port) or SimpleNamespace(tunnel="https://warm.trycloudflare.com"),
+        terminator=terminations.append,
+    )
+    app = create_app(
+        planner=ExecutablePlanner(),
+        credential_store=configured_store(tmp_path),
+        tunnel_manager=tunnel,
+    )
+
+    with TestClient(app) as client:
+        for _ in range(100):
+            if tunnel.active:
+                break
+            time.sleep(0.01)
+        runtime = client.get("/api/runtime").json()
+        assert launches == [8765]
+        assert runtime["tunnel_active"] is True
+        assert runtime["tunnel_public_url"] == "https://warm.trycloudflare.com"
+        assert terminations == []
+
+    assert tunnel.active is False
+    assert terminations == [8765]
+
+
+def test_failed_call_releases_only_call_lease_when_session_keeps_tunnel_warm(tmp_path):
+    class FailingCalls:
+        def create(self, **arguments):
+            raise RuntimeError("Twilio rejected the call")
+
+    terminations = []
+    tunnel = TunnelManager(
+        8765,
+        launcher=lambda port: SimpleNamespace(tunnel="https://warm.trycloudflare.com"),
+        terminator=terminations.append,
+    )
+    tunnel.acquire()
+    service = TelephonyService(
+        configured_store(tmp_path).resolve,
+        tunnel,
+        lambda account_sid, auth_token: SimpleNamespace(calls=FailingCalls()),
+    )
+
+    with pytest.raises(RuntimeError, match="Twilio rejected"):
+        service.place_call("+12025550199")
+
+    assert tunnel.active is True
+    assert terminations == []
+    tunnel.stop()
     assert terminations == [8765]
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -147,9 +148,24 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         events.append("runtime.started", {"mode": mode})
-        yield
-        tunnel.stop()
-        events.append("runtime.stopped", {"mode": mode})
+        warmup_task = None
+        if mode != "demo":
+            async def warm_tunnel() -> None:
+                try:
+                    public_url = await asyncio.to_thread(tunnel.acquire)
+                    events.append("tunnel.started", {"public_url": public_url, "port": port})
+                except Exception as error:
+                    events.append("tunnel.failed", {"reason": type(error).__name__, "port": port})
+
+            warmup_task = asyncio.create_task(warm_tunnel())
+        try:
+            yield
+        finally:
+            if warmup_task is not None and not warmup_task.done():
+                warmup_task.cancel()
+                await asyncio.gather(warmup_task, return_exceptions=True)
+            tunnel.stop()
+            events.append("runtime.stopped", {"mode": mode})
 
     app = FastAPI(title="Relay", version="0.1.0", lifespan=lifespan)
 
@@ -173,6 +189,8 @@ def create_app(
             "setup_required": setup_required(),
             "missing_credentials": [] if mode == "demo" else current_credentials.missing,
             "credential_source": "not required" if mode == "demo" else "local environment or machine-only file",
+            "tunnel_active": False if mode == "demo" else tunnel.active,
+            "tunnel_public_url": "" if mode == "demo" else tunnel.public_url,
         }
 
     @app.get("/api/model-settings")

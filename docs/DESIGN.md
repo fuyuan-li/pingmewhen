@@ -33,7 +33,7 @@ The local service owns user state, task state, presentation, approvals, durable 
 
 Standard mode resolves `OPENAI_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` from the environment first, then from an owner-only local credential file. The dashboard presents first-run setup only for missing values. The browser sends setup values only to the localhost service; it never calls OpenAI or Twilio directly.
 
-The HTTPS tunnel is lazy. An explicitly approved call acquisition starts `pycloudflared`, obtains a `trycloudflare.com` URL, and supplies voice and status URLs on that individual Twilio Call creation request. Twilio console webhook configuration and `RELAY_PUBLIC_BASE_URL` are not required. A reference count keeps the tunnel alive for active calls; terminal status callbacks and process shutdown tear it down.
+The production HTTPS tunnel is session-long. Relay starts `pycloudflared` in the background with the localhost dashboard, obtains one `trycloudflare.com` URL, and keeps a persistent lease so DNS and routing can settle while the user plans. Approved calls reuse that URL for voice and status callbacks. Twilio console webhook configuration and `RELAY_PUBLIC_BASE_URL` are not required. Per-call leases are released by terminal callbacks, while the persistent lease keeps the hostname stable until process shutdown tears it down.
 
 Every inbound Twilio HTTP webhook is validated before handling with the Twilio SDK's `RequestValidator`, the exact public URL, submitted form parameters, the `X-Twilio-Signature` header, and the local user's Auth Token. Missing or invalid signatures receive HTTP 403.
 

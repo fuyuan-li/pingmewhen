@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from threading import Lock
 from typing import Any, Callable
 from urllib.parse import urljoin
@@ -12,6 +13,7 @@ class TunnelError(RuntimeError):
 def launch_cloudflare(port: int) -> Any:
     from pycloudflared import try_cloudflare
 
+    os.environ.setdefault("PYCLOUDFLARED_LINES_TO_CHECK", "300")
     return try_cloudflare(port=port, verbose=False)
 
 
