@@ -128,6 +128,40 @@ def test_approval_refuses_an_unsourced_phone_action(tmp_path):
     assert task["execution_queue"] == []
 
 
+def test_secure_fields_cycle_individually_and_repeat_routes_to_takeover(tmp_path):
+    log_path = tmp_path / "events.jsonl"
+    engine = AgenticTaskEngine(
+        EventLog(log_path),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    task = engine.begin_call(task["id"], pending["index"], "CA123")
+
+    task = engine.request_secure_field(task["id"], "card_number")
+    assert task["call_state"] == "SECURE_LOCAL"
+    assert task["prompt"]["field"] == "card_number"
+    event_count = len(task["events"])
+    engine.append_transcript(task["id"], "representative", "4242 4242 4242 4242")
+    assert len(engine.get(task["id"])["events"]) == event_count
+
+    task = engine.complete_secure_field(task["id"], "card_number")
+    assert task["call_state"] == "CONNECTED"
+    assert task["secure_mode"] is False
+    task = engine.request_secure_field(task["id"], "expiration")
+    assert task["prompt"]["field"] == "expiration"
+    task = engine.complete_secure_field(task["id"], "expiration")
+
+    task = engine.request_secure_field(task["id"], "card_number")
+    assert task["call_state"] == "HUMAN_TAKEOVER"
+    assert task["stage"] == "human_takeover"
+    assert task["secure_mode"] is True
+    assert "4242" not in log_path.read_text()
+
+
 def test_production_app_reports_planner_and_persists_state(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("RELAY_MODE", "standard")

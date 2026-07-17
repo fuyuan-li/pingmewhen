@@ -68,9 +68,9 @@ Exit: the demo is driven by actual voice runtime events rather than scripted UI 
 - Replace simulated takeover with a real audio-track switch only after the shared media bridge is operational.
 - [x] Add field-by-field simulated secure-mode transitions and deliberate transcript gaps.
 - [x] Use the browser/OS local speech facility separately for fake card number, expiration, and CVV in the deterministic preview.
-- Inject local PCM only into the representative call leg after the shared media bridge exists; browser device playback is not phone routing.
-- Route repetition or unexpected payment questions to takeover.
-- Resume Relay and capture only non-sensitive confirmation.
+- [x] Inject locally synthesized PCMU only into the representative call leg while both Realtime directions are gated.
+- [x] Route repeated protected-field requests to `HUMAN_TAKEOVER` without repeating the value.
+- [x] Resume Relay only after Twilio confirms local playback and capture only non-sensitive content.
 
 Exit: a fake end-to-end policy purchase completes without sensitive values appearing in model context, transcripts, or logs.
 

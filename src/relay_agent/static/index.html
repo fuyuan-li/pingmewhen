@@ -481,9 +481,9 @@
         takeover.style.display = activePhase === 'calling' && runtimeMode === 'demo' ? 'block' : 'none';
         takeover.disabled = task.status === 'complete' || task.stage === 'takeover';
         planningInstruction.disabled = task.status === 'complete' || activePhase !== 'planning';
-        callingInstruction.disabled = task.status === 'complete' || activePhase !== 'calling';
+        callingInstruction.disabled = task.status === 'complete' || activePhase !== 'calling' || task.secure_mode;
         document.querySelector('#planning-send').disabled = task.status === 'complete' || activePhase !== 'planning';
-        document.querySelector('#calling-send').disabled = task.status === 'complete' || activePhase !== 'calling';
+        document.querySelector('#calling-send').disabled = task.status === 'complete' || activePhase !== 'calling' || task.secure_mode;
         document.querySelector('#task-attach-label').style.display = activePhase === 'planning' && task.status !== 'complete' ? 'inline-flex' : 'none';
         if (task.auto_advance) {
           advanceTimer = setTimeout(() => act('advance'), 850);
@@ -658,7 +658,9 @@
         if (prompt.kind === 'secure_field') {
           const warning = document.createElement('div');
           warning.className = 'hint';
-          warning.textContent = 'Fake data only. This value remains in this browser and is never sent to Relay’s server. This preview plays on this device; the production media bridge will inject generated audio only into the representative’s call leg.';
+          warning.textContent = runtimeMode === 'demo'
+            ? 'Fake data only. This value remains in this browser and the preview plays it on this device.'
+            : 'Fake data only. The value goes only to this localhost process for on-device speech and is never sent to the cloud model, task transcript, or event log.';
           const form = document.createElement('div');
           form.className = 'secure-form';
           const field = document.createElement('input');
@@ -670,10 +672,19 @@
           form.appendChild(field);
           const speak = document.createElement('button');
           speak.className = 'choice';
-          speak.textContent = `Simulate ${prompt.label} via local TTS · device audio`;
+          speak.textContent = runtimeMode === 'demo'
+            ? `Simulate ${prompt.label} via local TTS · device audio`
+            : `Speak fake ${prompt.label} into the protected call`;
           speak.onclick = () => {
             const value = field.value.trim();
             if (!value) return showError(`Enter a fake ${prompt.label.toLowerCase()} first.`);
+            if (runtimeMode !== 'demo') {
+              field.value = '';
+              speak.disabled = true;
+              field.disabled = true;
+              sendSecureField(prompt.field, value);
+              return;
+            }
             if (!window.speechSynthesis) return showError('Local browser speech is unavailable. Use Take Over instead.');
             const digits = value.replace(/\D/g, '');
             if (!digits) return showError(`Enter a valid fake ${prompt.label.toLowerCase()}.`);
@@ -720,8 +731,30 @@
         }
         document.querySelectorAll('.choice').forEach(control => control.disabled = false);
         document.querySelector('#planning-send').disabled = task?.status === 'complete' || workflowPhase !== 'planning';
-        document.querySelector('#calling-send').disabled = task?.status === 'complete' || workflowPhase !== 'calling';
+        document.querySelector('#calling-send').disabled = task?.status === 'complete' || workflowPhase !== 'calling' || task?.secure_mode;
         document.querySelector('#takeover').disabled = task?.status === 'complete' || workflowPhase !== 'calling' || task?.stage === 'takeover';
+      }
+
+      async function sendSecureField(field, value) {
+        actionInFlight = true;
+        try {
+          const response = await fetch(`/api/tasks/${task.id}/secure-fields`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({field, value})
+          });
+          value = '';
+          task = await readResponse(response);
+          renderTask();
+        } catch (error) {
+          value = '';
+          showError(error.message);
+          task = await fetch(`/api/tasks/${task.id}`).then(readResponse);
+          renderTask();
+        } finally {
+          actionInFlight = false;
+          setControlsDisabled(task?.status === 'complete');
+        }
       }
 
       function showError(message) {

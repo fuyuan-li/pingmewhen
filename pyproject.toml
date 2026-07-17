@@ -13,6 +13,7 @@ dependencies = [
   "openai>=2.45.0",
   "pypdf",
   "pycloudflared>=0.3.0",
+  "pyobjc-framework-AVFoundation>=12.2; platform_system == 'Darwin'",
   "python-dotenv",
   "python-multipart",
   "twilio",

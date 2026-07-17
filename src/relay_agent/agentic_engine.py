@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from relay_agent.event_log import EventLog
 from relay_agent.planner import Planner, PlannerError, PlanningTurn
-from relay_agent.task_engine import InvalidAction, TaskNotFound
+from relay_agent.task_engine import InvalidAction, TaskNotFound, secure_field_prompt
 from relay_agent.task_store import SQLiteTaskStore
 
 
@@ -50,6 +50,9 @@ class AgenticTaskEngine:
             "approved_plan": None,
             "execution_queue": [],
             "current_call": None,
+            "call_state": None,
+            "secure_expected_field": None,
+            "secure_fields_completed": [],
         }
         self._append(task, "message", speaker="user_private", text=cleaned_goal)
         self._run_planner(task)
@@ -93,6 +96,8 @@ class AgenticTaskEngine:
                 if task["status"] == "complete" or task["stage"] == "execution_ready":
                     raise InvalidAction("This approved plan is no longer editable.")
                 if task["phase"] == "calling":
+                    if task.get("secure_mode"):
+                        raise InvalidAction("Relay is paused during the protected exchange. Do not type sensitive data here.")
                     self._append(task, "message", speaker="user_private", text=instruction)
                     self._append(task, "status", text="Private instruction sent to the active call")
                     self._store.save("production", task)
@@ -252,7 +257,16 @@ class AgenticTaskEngine:
                 raise InvalidAction("This call action is no longer pending.")
             item.update(status="active", call_sid=call_sid)
             task["current_call"] = {"queue_index": queue_index, "call_sid": call_sid}
-            task.update(phase="calling", stage="calling", status="running", prompt=None)
+            task.update(
+                phase="calling",
+                stage="calling",
+                status="running",
+                prompt=None,
+                call_state="DIALING",
+                secure_mode=False,
+                secure_expected_field=None,
+                secure_fields_completed=[],
+            )
             action = item["action"]
             self._append(task, "status", text=f"Calling {action['target']} · real Twilio call", company=action["target"])
             self._store.save("production", task)
@@ -266,10 +280,72 @@ class AgenticTaskEngine:
             raise InvalidAction("Unsupported transcript speaker.")
         with self._lock:
             task = self._require(task_id)
+            if task.get("secure_mode"):
+                return self._snapshot(task)
             target = ""
             if task.get("current_call"):
                 target = self._queue_item(task, task["current_call"]["queue_index"])["action"].get("target", "")
             self._append(task, "message", speaker=speaker, text=cleaned, company=target)
+            self._store.save("production", task)
+            return self._snapshot(task)
+
+    def mark_call_connected(self, task_id: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            if task.get("current_call") and not task.get("secure_mode"):
+                task["call_state"] = "CONNECTED"
+                self._store.save("production", task)
+            return self._snapshot(task)
+
+    def request_secure_field(self, task_id: str, field_name: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            if task["phase"] != "calling" or not task.get("current_call"):
+                raise InvalidAction("Secure local voice requires an active call.")
+            task["secure_mode"] = True
+            task["secure_expected_field"] = field_name
+            if field_name == "verification_request" or field_name in task.get("secure_fields_completed", []):
+                task.update(call_state="HUMAN_TAKEOVER", stage="human_takeover", status="waiting_for_user")
+                task["prompt"] = {
+                    "kind": "takeover_required",
+                    "question": (
+                        "The representative requested a protected field again. Relay and cloud transcription remain "
+                        "disconnected. Human takeover is required; Relay will not repeat the value."
+                    ),
+                    "options": [],
+                }
+                self._append(task, "status", text="Human takeover required · repeated protected-field request")
+                self._store.save("production", task)
+                return self._snapshot(task)
+            task["call_state"] = "SECURE_HANDOFF_PENDING"
+            self._append(task, "status", text=f"Secure handoff pending · {field_name}")
+            task.update(call_state="SECURE_LOCAL", stage=f"secure_{field_name}", status="waiting_for_user")
+            task["prompt"] = secure_field_prompt(field_name, simulated=False)
+            self._append(task, "secure_gap", text="Protected audio and transcript content are suppressed for this field.")
+            self._store.save("production", task)
+            return self._snapshot(task)
+
+    def complete_secure_field(self, task_id: str, field_name: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            if (
+                task.get("call_state") != "SECURE_LOCAL"
+                or not task.get("secure_mode")
+                or task.get("secure_expected_field") != field_name
+            ):
+                raise InvalidAction("Relay is not waiting for that secure field.")
+            completed = task.setdefault("secure_fields_completed", [])
+            if field_name not in completed:
+                completed.append(field_name)
+            task.update(
+                secure_mode=False,
+                secure_expected_field=None,
+                call_state="CONNECTED",
+                stage="calling",
+                status="running",
+                prompt=None,
+            )
+            self._append(task, "status", text="Local secure voice completed · Relay returned to the line")
             self._store.save("production", task)
             return self._snapshot(task)
 
@@ -281,6 +357,11 @@ class AgenticTaskEngine:
                 return self._snapshot(task)
             item["status"] = "complete" if status == "completed" else status
             task["current_call"] = None
+            task.update(
+                secure_mode=False,
+                secure_expected_field=None,
+                call_state="COMPLETED" if status == "completed" else "FAILED",
+            )
             self._append(task, "status", text=f"Call with {item['action']['target']} ended · {status}")
             if any(entry["status"] == "pending" for entry in task.get("execution_queue", [])):
                 task.update(phase="calling", stage="execution_ready", status="waiting_for_execution", prompt=None)

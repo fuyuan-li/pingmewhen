@@ -63,6 +63,47 @@ class TaskNotFound(KeyError):
     pass
 
 
+def secure_field_prompt(field: str, simulated: bool = True) -> dict[str, Any]:
+    fields = {
+        "card_number": {
+            "label": "Card number",
+            "placeholder": "Fake card: 4242 4242 4242 4242",
+            "input_mode": "numeric",
+        },
+        "expiration": {
+            "label": "Expiration date",
+            "placeholder": "Fake expiration: 12/34",
+            "input_mode": "numeric",
+        },
+        "cvv": {
+            "label": "Security code",
+            "placeholder": "Fake CVV: 123",
+            "input_mode": "numeric",
+        },
+        "full_ssn": {
+            "label": "Full Social Security number",
+            "placeholder": "Fake SSN: 000-00-0000",
+            "input_mode": "numeric",
+        },
+    }
+    if field not in fields:
+        raise InvalidAction("Unsupported secure field.")
+    spec = fields[field]
+    context = "representative" if simulated else "live representative"
+    return {
+        "kind": "secure_field",
+        "field": field,
+        "question": (
+            f"The {context} asked only for: {spec['label']}. Enter fake test data; "
+            "Relay and cloud transcription remain paused until local speech finishes."
+        ),
+        "label": spec["label"],
+        "placeholder": spec["placeholder"],
+        "input_mode": spec["input_mode"],
+        "options": [],
+    }
+
+
 def queued(event_type: str, **payload: Any) -> dict[str, Any]:
     return {"type": event_type, **payload}
 
@@ -811,33 +852,7 @@ class DeterministicTaskEngine:
         }
 
     def _secure_field_prompt(self, field: str) -> dict[str, Any]:
-        fields = {
-            "card_number": {
-                "label": "Card number",
-                "placeholder": "Fake card: 4242 4242 4242 4242",
-                "input_mode": "numeric",
-            },
-            "expiration": {
-                "label": "Expiration date",
-                "placeholder": "MM/YY",
-                "input_mode": "numeric",
-            },
-            "cvv": {
-                "label": "Security code",
-                "placeholder": "Fake CVV: 123",
-                "input_mode": "numeric",
-            },
-        }
-        spec = fields[field]
-        return {
-            "kind": "secure_field",
-            "field": field,
-            "question": f"The representative asked only for: {spec['label']}. Enter fake test data; Relay remains paused until local speech ends.",
-            "label": spec["label"],
-            "placeholder": spec["placeholder"],
-            "input_mode": spec["input_mode"],
-            "options": [],
-        }
+        return secure_field_prompt(field)
 
     def _address_confirmation_prompt(self, candidate: str) -> dict[str, Any]:
         return {

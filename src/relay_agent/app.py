@@ -13,6 +13,7 @@ from relay_agent.agentic_engine import AgenticTaskEngine
 from relay_agent.context_store import ContextStore, InvalidContext
 from relay_agent.credentials import CredentialStore, RelayCredentials
 from relay_agent.event_log import EventLog, default_data_dir
+from relay_agent.local_tts import LocalTTSRenderer, is_allowed_fake_value
 from relay_agent.planner import OpenAIPlanner, Planner, PlannerError, UnavailablePlanner
 from relay_agent.realtime_bridge import RealtimeSessionHub
 from relay_agent.task_engine import DeterministicTaskEngine, InvalidAction, TaskNotFound
@@ -41,11 +42,17 @@ class CredentialSetupRequest(BaseModel):
     openai_api_key: str = ""
 
 
+class SecureFieldRequest(BaseModel):
+    field: str
+    value: str
+
+
 def create_app(
     planner: Planner | None = None,
     credential_store: CredentialStore | None = None,
     tunnel_manager: TunnelManager | None = None,
     twilio_client_factory: Callable | None = None,
+    tts_renderer: LocalTTSRenderer | None = None,
 ) -> FastAPI:
     mode = os.environ.get("RELAY_MODE", "standard")
     events = EventLog()
@@ -79,6 +86,9 @@ def create_app(
         lambda task_id, queue_index: engine.call_context(task_id, queue_index),
         lambda task_id, speaker, text: engine.append_transcript(task_id, speaker, text),
         events,
+        secure_requester=lambda task_id, field_name: engine.request_secure_field(task_id, field_name),
+        call_connected=lambda task_id: engine.mark_call_connected(task_id),
+        tts_renderer=tts_renderer,
     )
 
     def setup_required() -> bool:
@@ -240,6 +250,35 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from error
         except PlannerError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
+
+    @app.post("/api/tasks/{task_id}/secure-fields")
+    async def speak_secure_field(task_id: str, request: SecureFieldRequest) -> dict:
+        if not isinstance(engine, AgenticTaskEngine):
+            raise HTTPException(status_code=409, detail="Real secure voice is available only during a production call.")
+        try:
+            task = engine.get(task_id)
+            if (
+                not task.get("secure_mode")
+                or task.get("call_state") != "SECURE_LOCAL"
+                or task.get("secure_expected_field") != request.field
+            ):
+                raise InvalidAction("Relay is not waiting for that secure field.")
+            if not is_allowed_fake_value(request.field, request.value):
+                raise InvalidAction("P0 secure local voice accepts only the displayed fake test value.")
+            await realtime.speak_secure_field(task_id, request.field, request.value)
+            request.value = ""
+            await realtime.resume_after_secure_field(task_id)
+            return engine.complete_secure_field(task_id, request.field)
+        except TaskNotFound as error:
+            request.value = ""
+            raise HTTPException(status_code=404, detail="Task not found.") from error
+        except InvalidAction as error:
+            request.value = ""
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except Exception as error:
+            request.value = ""
+            events.append("secure_mode.failed", {"task_id": task_id, "reason": type(error).__name__})
+            raise HTTPException(status_code=502, detail="The protected local voice exchange did not complete.") from error
 
     @app.post("/api/twilio/voice")
     async def twilio_voice(request: Request) -> Response:

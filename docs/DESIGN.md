@@ -181,9 +181,9 @@ Secure-mode invariants:
 5. The user can take over at any time.
 6. P0 accepts fake values only.
 
-Payment is a field-by-field state machine, not one combined form: the representative asks for one field; Relay yields the outbound channel; local TTS speaks only that field; its completion signal returns the channel to Relay; and the representative may then request the next field. The deterministic browser preview demonstrates these transitions with device audio. In the real local media bridge, generated PCM must be published only to the representative leg, never the user playback leg or cloud model leg.
+Payment is a field-by-field state machine, not one combined form: the representative asks for one field; Relay yields the outbound channel; local TTS speaks only that field; its completion signal returns the channel to Relay; and the representative may then request the next field. The deterministic browser preview demonstrates these transitions with device audio. The production bridge gates both Realtime directions, generates speech in memory with macOS AVSpeechSynthesizer, converts it to PCMU, publishes it only to the representative leg, and waits for Twilio's playback mark before reconnecting Realtime.
 
-The simulated representative will not intentionally repeat fake card data. A repeat or unexpected verification request routes to human takeover.
+The simulated representative will not intentionally repeat fake card data. In production, a repeated protected-field request keeps the Realtime gate closed and transitions the durable call state to `HUMAN_TAKEOVER` rather than speaking the value again.
 
 ## Authentication and model access
 

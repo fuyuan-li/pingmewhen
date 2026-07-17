@@ -68,6 +68,7 @@ By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `~
 │   ├── agentic_engine.py
 │   ├── credentials.py
 │   ├── event_log.py
+│   ├── local_tts.py
 │   ├── planner.py
 │   ├── realtime_bridge.py
 │   ├── task_store.py
@@ -83,7 +84,7 @@ By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `~
 - The insurance demo presents factual quote information; Relay does not recommend or rank policies.
 - The user selects the insurer and approves consequential actions.
 - Secure mode removes the cloud AI from the media path and pauses transcription. The fake payment demo requests and speaks card number, expiration, and CVV separately, returning control to Relay between fields.
-- Browser TTS currently plays on the user device. Injecting local TTS only into the representative’s phone leg requires the planned shared media gateway.
+- In deterministic demo mode, browser TTS plays on the user device. During a production call, protected fake card/SSN fields are synthesized in memory with macOS speech, converted to PCMU, and injected only into the representative’s Twilio leg while both Realtime directions and transcript persistence are gated.
 - Real browser microphone takeover is not connected yet. The production Call Console must not be represented as supporting live takeover until that media leg exists.
 - Only fake card and identity data are used in the demo.
 - PDF context is stored locally under `~/.relay/contexts/`. Standard production planning sends bounded extracted text to the configured model; deterministic demo mode does not.
