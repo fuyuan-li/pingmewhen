@@ -25,12 +25,23 @@ def sample_context():
 
 
 def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
-    update = realtime_session_update(sample_context())
+    context = sample_context()
+    context["caller_name"] = "Mina"
+    update = realtime_session_update(context)
 
     assert update["session"]["audio"]["input"]["format"] == {"type": "audio/pcmu"}
     assert update["session"]["audio"]["output"]["format"] == {"type": "audio/pcmu"}
-    assert "disclose" in update["session"]["instructions"].lower()
-    assert initial_response()["type"] == "response.create"
+    instructions = update["session"]["instructions"]
+    assert 'display name of the person you represent is "Mina"' in instructions
+    assert "AI disclosure exactly once per call" in instructions
+    assert "outbound caller" in instructions
+    assert "Do not ask whether the representative is comfortable continuing" in instructions
+    assert "Then stop speaking and wait for a private user instruction" in instructions
+    assert "ask the representative to supply the user's missing fact" in instructions
+    opening = initial_response(context)
+    assert opening["type"] == "response.create"
+    assert "on behalf of Mina" in opening["response"]["instructions"]
+    assert "ask permission to continue" in opening["response"]["instructions"]
 
 
 def test_realtime_session_uses_selected_transcription_model():

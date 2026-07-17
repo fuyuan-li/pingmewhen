@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+import json
 import re
 from threading import Lock
 from typing import Any, Callable
@@ -57,6 +58,7 @@ class AgenticTaskEngine:
             "call_state": None,
             "secure_expected_field": None,
             "secure_fields_completed": [],
+            "caller_name": "",
         }
         self._append(task, "message", speaker="user_private", text=cleaned_goal)
         self._run_planner(task)
@@ -131,6 +133,17 @@ class AgenticTaskEngine:
     def _run_planner(self, task: dict[str, Any]) -> None:
         task.update(status="running", stage="agent_planning", prompt=None)
         messages = []
+        caller_name = str(task.get("caller_name", "")).strip()
+        if caller_name:
+            messages.append(
+                {
+                    "role": "developer",
+                    "content": (
+                        "RELAY TASK STATE: The caller display name is already confirmed as "
+                        f"{json.dumps(caller_name)}. Preserve it and do not ask for it again."
+                    ),
+                }
+            )
         for event in task["events"]:
             if event["type"] != "message" or event.get("speaker") not in {
                 "user_private",
@@ -159,10 +172,36 @@ class AgenticTaskEngine:
             for context in task["contexts"]
         ]
         turn = self._planner.plan(task["goal"], messages, contexts)
-        self._append(task, "message", speaker="relay_private", text=turn.message)
+        confirmed_name = turn.caller_name.strip()
+        if confirmed_name:
+            task["caller_name"] = confirmed_name[:100]
         if turn.status == "plan_ready":
+            has_phone_actions = any(action.kind == "phone_call" for action in turn.actions)
+            if has_phone_actions and not task.get("caller_name"):
+                task.update(status="waiting_for_user", stage="collecting_context")
+                question = next((question.strip() for question in turn.questions if question.strip()), "")
+                if not question:
+                    recent_user_text = "\n".join(
+                        event["text"]
+                        for event in task["events"]
+                        if event["type"] == "message" and event.get("speaker") == "user_private"
+                    )
+                    question = (
+                        "在拨号前，我该怎么介绍你？告诉我你希望我在说“我是代表某某打来的”时使用的名字就可以，"
+                        "名字或昵称都行。"
+                        if re.search(r"[\u3400-\u9fff]", recent_user_text)
+                        else (
+                            "Before I dial, how should I introduce you? A first name or nickname is completely fine; "
+                            "I will use it to say I am calling on your behalf."
+                        )
+                    )
+                self._append(task, "message", speaker="relay_private", text=question)
+                task["prompt"] = {"kind": "text_reply", "question": question, "options": []}
+                return
+            self._append(task, "message", speaker="relay_private", text=turn.message)
             self._present_plan(task, turn)
             return
+        self._append(task, "message", speaker="relay_private", text=turn.message)
         task.update(status="waiting_for_user", stage="collecting_context")
         question = turn.questions[0] if turn.questions else "What information should Relay use to continue planning?"
         task["prompt"] = {"kind": "text_reply", "question": question, "options": []}
@@ -471,6 +510,7 @@ class AgenticTaskEngine:
             item = self._queue_item(task, queue_index)
             return {
                 "goal": task["goal"],
+                "caller_name": task.get("caller_name", ""),
                 "action": deepcopy(item["action"]),
                 "private_messages": [
                     event["text"]

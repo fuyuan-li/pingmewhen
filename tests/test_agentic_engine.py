@@ -29,6 +29,7 @@ class FakePlanner:
             status="plan_ready",
             message="I have enough information to propose a plan.",
             plan_summary="Verify three providers, call each for a standardized quote, then return the facts for your decision.",
+            caller_name="Taylor",
             actions=[
                 PlanAction(
                     kind="research",
@@ -75,6 +76,69 @@ def test_agentic_planner_clarifies_then_requires_approval(tmp_path):
 
     restored = AgenticTaskEngine(EventLog(tmp_path / "events.jsonl"), planner, store, lambda _: "")
     assert restored.get(task["id"])["approved_plan"] == task["approved_plan"]
+
+
+def test_phone_plan_collects_caller_name_once_and_preserves_it_across_revisions(tmp_path):
+    class CallerNamePlanner:
+        ready = True
+        model = "test"
+
+        def __init__(self):
+            self.calls = []
+
+        def plan(self, goal, messages, contexts):
+            self.calls.append(messages)
+            user_supplied_name = any("Call me Mina" in message["content"] for message in messages)
+            name_already_confirmed = any("caller display name is already confirmed" in message["content"] for message in messages)
+            return PlanningTurn(
+                status="plan_ready",
+                message="The call plan is ready.",
+                plan_summary="Call the provider.",
+                caller_name="Mina" if user_supplied_name and not name_already_confirmed else "",
+                actions=[
+                    PlanAction(
+                        kind="phone_call",
+                        label="Call provider",
+                        purpose="Ask about service.",
+                        target="Example Provider",
+                        needs_lookup=False,
+                        phone_number="+12025550199",
+                        contact_provided_by="research",
+                        contact_source_url="https://example.com/contact",
+                    )
+                ],
+            )
+
+    planner = CallerNamePlanner()
+    store = SQLiteTaskStore(tmp_path / "relay.db")
+    engine = AgenticTaskEngine(EventLog(tmp_path / "events.jsonl"), planner, store, lambda _: "")
+
+    task = engine.create("Call the provider about service.")
+    assert task["stage"] == "collecting_context"
+    assert "how should i introduce you" in task["prompt"]["question"].lower()
+    assert task["caller_name"] == ""
+
+    task = engine.act(task["id"], "instruction", "Call me Mina.")
+    assert task["stage"] == "plan_review"
+    assert task["caller_name"] == "Mina"
+
+    task = engine.act(task["id"], "answer", "hold")
+    task = engine.act(task["id"], "instruction", "Make the call purpose more concise.")
+    assert task["stage"] == "plan_review"
+    assert task["caller_name"] == "Mina"
+    assert any("caller display name is already confirmed" in message["content"] for message in planner.calls[-1])
+    name_questions = [
+        event
+        for event in task["events"]
+        if event.get("speaker") == "relay_private" and "how should i introduce you" in event.get("text", "").lower()
+    ]
+    assert len(name_questions) == 1
+
+    task = engine.act(task["id"], "answer", "approve")
+    assert engine.call_context(task["id"], 0)["caller_name"] == "Mina"
+
+    restored = AgenticTaskEngine(EventLog(tmp_path / "events.jsonl"), planner, store, lambda _: "")
+    assert restored.get(task["id"])["caller_name"] == "Mina"
 
 
 def test_agentic_call_state_and_transcript_return_to_private_review(tmp_path):
@@ -124,6 +188,7 @@ def test_approval_refuses_an_unsourced_phone_action(tmp_path):
                 status="plan_ready",
                 message="Review this plan.",
                 plan_summary="Call an unresolved contact.",
+                caller_name="Taylor",
                 actions=[
                     PlanAction(
                         kind="phone_call",
@@ -161,6 +226,7 @@ def test_user_provided_contact_without_source_url_is_executable(tmp_path):
                 status="plan_ready",
                 message="Review this plan.",
                 plan_summary="Call the user's personal contact.",
+                caller_name="Taylor",
                 actions=[
                     PlanAction(
                         kind="phone_call",
@@ -199,6 +265,7 @@ def test_researched_contact_without_source_url_remains_blocked(tmp_path):
                 status="plan_ready",
                 message="Review this plan.",
                 plan_summary="Call a researched service number.",
+                caller_name="Taylor",
                 actions=[
                     PlanAction(
                         kind="phone_call",
@@ -238,6 +305,7 @@ def test_approval_normalizes_human_formatted_phone_number_to_e164(tmp_path):
                 status="plan_ready",
                 message="Review this plan.",
                 plan_summary="Call the provider.",
+                caller_name="Taylor",
                 actions=[
                     PlanAction(
                         kind="phone_call",
@@ -276,6 +344,7 @@ def test_malformed_phone_number_block_names_the_offending_action(tmp_path):
                 status="plan_ready",
                 message="Review this plan.",
                 plan_summary="Call the provider.",
+                caller_name="Taylor",
                 actions=[
                     PlanAction(
                         kind="phone_call",

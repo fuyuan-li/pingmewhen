@@ -29,6 +29,10 @@ class PlanningTurn(BaseModel):
     status: Literal["needs_input", "plan_ready"]
     message: str
     plan_summary: str
+    caller_name: str = Field(
+        default="",
+        description="Confirmed display name or nickname to use when calling on the user's behalf; empty if unknown.",
+    )
     actions: list[PlanAction] = Field(default_factory=list)
     questions: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
@@ -85,6 +89,12 @@ class OpenAIPlanner:
                     "+12027010927 — confirm?' Do not state a specific technical defect in a phone number unless it is "
                     "actually true. "
                     "Create one phone_call action per organization and per separate phone conversation. "
+                    "Before returning plan_ready with any phone_call action, make sure you know the display name or "
+                    "nickname Relay should use when introducing the person it represents. If it is not already clear "
+                    "from the full conversation, return needs_input and ask once, warmly and in the user's language. "
+                    "Briefly explain that Relay needs it to introduce the call on their behalf; a first name or "
+                    "nickname is enough, and never demand a legal name. Put the confirmed value in caller_name. If "
+                    "the conversation says the caller name is already confirmed, preserve it and do not ask again. "
                     "Phone calls are actions, not the product boundary. Consequential actions always require user "
                     "approval. For regulated choices, organize factual options but do not choose for the user. "
                     "Return plan_ready only when the next actions are specific enough for user approval."

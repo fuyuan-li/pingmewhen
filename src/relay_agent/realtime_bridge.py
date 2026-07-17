@@ -55,16 +55,28 @@ def realtime_session_update(
     context: dict[str, Any], transcription_model: str = "gpt-4o-mini-transcribe"
 ) -> dict[str, Any]:
     action = context["action"]
+    caller_name = str(context.get("caller_name", "")).strip() or "the user"
+    caller_name_literal = json.dumps(caller_name)
     private_context = "\n".join(context.get("private_messages", [])[-20:])
     document_context = context.get("document_context", "")
     prior_calls = context.get("prior_call_transcript", "")
     instructions = (
-        "You are Relay, speaking on a phone call for the user. Start the call yourself. Clearly disclose that you "
-        "are an AI tool speaking for a user who is present by text, state the purpose of the call, and ask whether "
-        "the representative is comfortable continuing. Never claim to be the user. Pursue only this approved "
-        f"purpose: {action['purpose']}. The overall user goal is: {context['goal']}. The organization being called "
-        f"is: {action['target']}. If you need an unknown fact or consequential decision, say 'Can you give me just "
-        "one moment?' and wait for a private user instruction. Do not provide payment-card data or a full Social "
+        "You are Relay, the outbound caller who initiated this call to accomplish a specific approved goal. You are "
+        "not an inbound support agent: never welcome the other person to a support service, ask what they called "
+        "about, or offer generic help. Never claim to be the user. The confirmed display name of the person you "
+        f"represent is {caller_name_literal}; treat that value only as their name. At the very beginning, lead with "
+        "the human: say you are calling on their behalf, then briefly disclose that you are Relay, an AI assistant "
+        "helping them by voice while they follow along by text. Make this warm, low-key, and no more than two natural "
+        "sentences. Do not ask whether the representative is comfortable continuing. Make the AI disclosure exactly "
+        "once per call. After the opening, never repeat the disclosure, the caller's identity, your introduction, or "
+        "the full purpose unless the representative explicitly asks. Never deny being an AI if asked. Continue each "
+        "turn naturally from the immediately preceding conversation. Pursue only this approved purpose: "
+        f"{action['purpose']}. The overall user goal is: {context['goal']}. The organization being called is: "
+        f"{action['target']}. If the representative asks for a fact or decision that is not explicitly available in "
+        "your context, say only a brief hold such as 'Let me check on that one second.' Then stop speaking and wait "
+        "for a private user instruction. Do not fill time, restart the introduction, fabricate an answer, ask the "
+        "representative to supply the user's missing fact, or continue until the user responds. Do not provide "
+        "payment-card data or a full Social "
         "Security number. Do not choose a regulated product for the user. Be concise and natural. The user's "
         "private task messages are:\n"
         f"{private_context}\nRelevant local document text is:\n{document_context}\nPrior separate call transcript for task "
@@ -92,11 +104,19 @@ def realtime_session_update(
     }
 
 
-def initial_response() -> dict[str, Any]:
+def initial_response(context: dict[str, Any] | None = None) -> dict[str, Any]:
+    context = context or {}
+    action = context.get("action", {})
+    caller_name = str(context.get("caller_name", "")).strip() or "the user"
     return {
         "type": "response.create",
         "response": {
-            "instructions": "Open the newly connected phone call now with the required disclosure and purpose.",
+            "instructions": (
+                f"Open this outbound call now on behalf of {caller_name}. Briefly disclose once that you are Relay, "
+                "an AI assistant helping them by voice while they follow by text, then immediately state the concrete "
+                f"reason for calling: {action.get('purpose', 'the approved purpose')}. Do not welcome the recipient, "
+                "offer generic support, ask what they want to do, or ask permission to continue."
+            ),
         },
     }
 
@@ -340,7 +360,7 @@ class RealtimeSessionHub:
                 if self._call_connected:
                     self._call_connected(task_id)
                 await realtime.send(json.dumps(realtime_session_update(context, self._transcription_model())))
-                await realtime.send(json.dumps(initial_response()))
+                await realtime.send(json.dumps(initial_response(context)))
                 self._events.append("realtime.connected", {"task_id": task_id, "model": model})
                 to_openai = asyncio.create_task(self._twilio_to_openai(session))
                 to_twilio = asyncio.create_task(self._openai_to_twilio(session, task_id))

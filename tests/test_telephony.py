@@ -41,6 +41,7 @@ class ExecutablePlanner:
             status="plan_ready",
             message="The call is ready for review.",
             plan_summary="Call the verified service line.",
+            caller_name="Taylor",
             actions=[
                 PlanAction(
                     kind="phone_call",
