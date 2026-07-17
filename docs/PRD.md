@@ -30,13 +30,21 @@ The general product later supports any goal that requires one or more customer-s
 
 ### `relay`
 
-Starts the local Relay service and opens the localhost dashboard. The dashboard contains a task composer for a goal and supporting context.
+Starts the local Relay service and opens the localhost dashboard. If required provider credentials are absent, the dashboard first collects and stores them only on the user's machine. It then shows the task composer for a goal and supporting context.
 
 ### `relay demo`
 
 Starts the same application in the single simulated renters-insurance demo mode.
 
 No other CLI commands are required in P0.
+
+## Local ownership model
+
+- Relay is installed and run as a fully independent, single-user local process.
+- The user supplies their own OpenAI API key and Twilio Account SID, Auth Token, and phone number.
+- Relay operates no shared backend, account system, credential vault, or multi-tenant database.
+- Provider usage is charged only to the user's own accounts.
+- `relay demo` stays deterministic and credential-free.
 
 ## Demo journey
 
@@ -136,6 +144,14 @@ Relay begins calls with a concise disclosure such as:
 - Mark speaker and visibility for every transcript item.
 - Never store secure-mode content, card data, full SSNs, CVVs, PINs, passwords, API keys, or auth tokens.
 - Record secure-mode start/end and redaction events without content.
+
+### Telephony security
+
+- Start the local HTTPS tunnel only when an approved call is about to be placed.
+- Supply voice and status webhook URLs dynamically on each Twilio call creation request.
+- Validate every inbound Twilio webhook with Twilio's official request validator and the user's Auth Token.
+- Stop the tunnel after the last active call or when Relay exits.
+- Never expose or log the OpenAI API key or Twilio Auth Token.
 
 ## Success criteria
 

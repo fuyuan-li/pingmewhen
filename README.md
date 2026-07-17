@@ -8,7 +8,7 @@ The OpenAI Build Week demo asks several simulated insurers for renters-insurance
 
 ## Current state
 
-The standard `relay` mode now has a model-driven private planning loop backed by the OpenAI Responses API and Structured Outputs. It reads the goal and locally extracted PDF text, asks blocking questions, produces a structured action plan, and waits for explicit approval. Complete task state is stored in repo-local SQLite and reloads after restart. Approved external actions stop at an honest connector boundary: real calls, Realtime audio, and microphone takeover are not connected yet.
+The standard `relay` mode now has a model-driven private planning loop backed by the OpenAI Responses API and Structured Outputs. It reads the goal and locally extracted PDF text, asks blocking questions, produces a structured action plan, and waits for explicit approval. Complete task state is stored in local SQLite and reloads after restart. Relay is a bring-your-own-key, single-user local tool: it has no hosted backend, Relay account, or shared credential store. The Twilio control plane can create an explicitly approved outbound call through a lazy local tunnel, but the task engine, Realtime audio, and microphone takeover are not connected to that call path yet.
 
 `relay demo` remains the deterministic end-to-end insurance preview. The **Private Workspace** holds task memory; the **Call Console** presents paced simulated calls, barge-in, approval gates, per-call history, and the field-by-field fake payment handoff.
 
@@ -36,15 +36,18 @@ Open the single demo mode with:
 uv run relay demo
 ```
 
-Use `relay demo` to test the complete simulated workflow without credentials. Standard `relay` uses a server-side OpenAI API credential for planning:
+Use `relay demo` to test the complete simulated workflow without credentials. Standard `relay` opens a first-run setup screen when any required credential is missing:
 
-```bash
-OPENAI_API_KEY=... uv run relay
-```
+- `OPENAI_API_KEY`
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+- `TWILIO_FROM_NUMBER`
 
-This is an operator/development credential, not a user-facing login design. The planned hosted demo gateway will own it for judges and end users. `OPENAI_MODEL` can override the default `gpt-5.6` planner model.
+Environment variables take precedence, so a local `.env` remains supported. Otherwise the dashboard stores the values in `~/.relay/credentials.json` with owner-only permissions. Relay's maintainers never receive them and pay none of the user's provider costs. `OPENAI_MODEL` can override the default `gpt-5.6` planner model.
 
-By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `.relay/logs/`, and stores durable task state in `.relay/state/relay.db`. Set `RELAY_DATA_DIR` or `RELAY_PORT` to override those defaults.
+The explicitly approved telephony endpoint starts `pycloudflared` on demand, uses its HTTPS address for that call's Twilio `Url` and status callback, and stops the tunnel when no calls remain or Relay exits. There is no `RELAY_PUBLIC_BASE_URL` setup step. Every inbound Twilio webhook is checked with Twilio's SDK and the local `TWILIO_AUTH_TOKEN`. The task engine still needs to be connected to this endpoint before normal plans can dial.
+
+By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `.relay/logs/`, and stores durable task state in `.relay/state/relay.db`. Credentials default to the machine-local `~/.relay/credentials.json`. Set `RELAY_DATA_DIR` to place all of these under one chosen local directory, or `RELAY_PORT` to change the local port.
 
 ## Repository map
 
@@ -63,9 +66,12 @@ By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `.
 │   ├── app.py
 │   ├── cli.py
 │   ├── agentic_engine.py
+│   ├── credentials.py
 │   ├── event_log.py
 │   ├── planner.py
 │   ├── task_store.py
+│   ├── telephony.py
+│   ├── tunnel.py
 │   └── static/
 └── tests/
 ```
@@ -79,4 +85,4 @@ By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `.
 - Browser TTS currently plays on the user device. Injecting local TTS only into the representative’s phone leg requires the planned shared media gateway.
 - Only fake card and identity data are used in the demo.
 - PDF context is stored locally under `.relay/contexts/`. Standard production planning sends bounded extracted text to the configured model; deterministic demo mode does not.
-- ChatGPT/Codex authentication is used only for Codex workloads; Relay does not reuse it as a third-party Realtime API credential. The hosted demo backend owns any Realtime and telephony credentials. This media/authentication boundary is separate from the Codex engineering workflow described above.
+- ChatGPT/Codex authentication is used only for Codex workloads; Relay does not reuse it as a third-party API credential. Standard mode uses the local user's OpenAI and Twilio credentials, while deterministic demo mode needs neither.

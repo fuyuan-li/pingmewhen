@@ -40,8 +40,8 @@ class UnavailablePlanner:
 
     def plan(self, goal: str, messages: list[dict[str, str]], contexts: list[dict[str, str]]) -> PlanningTurn:
         raise PlannerError(
-            "Relay's production planner needs a backend OpenAI API credential. "
-            "Set OPENAI_API_KEY for the local backend, then restart Relay."
+            "Relay's production planner needs your OpenAI API key. "
+            "Complete local setup in the dashboard or set OPENAI_API_KEY."
         )
 
 

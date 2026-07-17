@@ -71,6 +71,10 @@ def test_agentic_planner_clarifies_then_requires_approval(tmp_path):
 def test_production_app_reports_planner_and_persists_state(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("RELAY_MODE", "standard")
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACtest")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("TWILIO_FROM_NUMBER", "+12025550123")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     client = TestClient(create_app(planner=FakePlanner()))
 
     runtime = client.get("/api/runtime").json()
@@ -86,12 +90,16 @@ def test_production_app_reports_planner_and_persists_state(monkeypatch, tmp_path
 def test_production_app_returns_clear_error_without_backend_credential(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("RELAY_MODE", "standard")
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACtest")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("TWILIO_FROM_NUMBER", "+12025550123")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     client = TestClient(create_app(planner=UnavailablePlanner()))
 
     response = client.post("/api/tasks", json={"goal": "Arrange a service call."})
 
     assert response.status_code == 503
-    assert "backend OpenAI API credential" in response.json()["detail"]
+    assert "OpenAI API key" in response.json()["detail"]
 
 
 def test_failed_replan_does_not_corrupt_persisted_task(tmp_path):

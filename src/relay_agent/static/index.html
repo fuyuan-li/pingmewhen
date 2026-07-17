@@ -25,6 +25,13 @@
       .lede { max-width: 800px; margin: 0; color: #606772; font-size: 17px; line-height: 1.55; }
       .panel { overflow: hidden; border: 1px solid #dde1e7; border-radius: 22px; background: white; box-shadow: 0 20px 60px rgba(30, 35, 50, .09); }
       .intake { padding: 24px; }
+      .setup-panel { max-width: 720px; margin: 54px auto 0; padding: 26px; }
+      .setup-panel h1 { margin-bottom: 10px; font-size: clamp(28px, 4vw, 40px); }
+      .setup-copy { margin: 0 0 22px; color: #606772; line-height: 1.55; }
+      .setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+      .setup-field input { width: 100%; padding: 12px 13px; border: 1px solid #cbd1da; border-radius: 11px; outline: none; }
+      .setup-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 20px; }
+      .setup-note { color: #767d87; font-size: 12px; line-height: 1.45; }
       label { display: block; margin-bottom: 9px; font-size: 13px; font-weight: 750; }
       textarea { width: 100%; min-height: 112px; resize: vertical; border: 1px solid #cbd1da; border-radius: 14px; padding: 14px; color: #17191c; background: #fff; outline: none; }
       textarea:focus, input:focus { border-color: #5966ef; box-shadow: 0 0 0 3px rgba(89, 102, 239, .12); }
@@ -135,13 +142,44 @@
         .workspace.call-history-open .planning-board .composer { display: none; }
         .bubble { max-width: 88%; }
         .secure-form { grid-template-columns: 1fr; }
+        .setup-grid { grid-template-columns: 1fr; }
+        .setup-actions { align-items: stretch; flex-direction: column; }
       }
     </style>
   </head>
   <body>
     <div class="shell">
       <header><div class="brand">Relay</div><div id="mode" class="mode">Loading runtime…</div></header>
-      <section id="landing">
+      <section id="setup" style="display:none">
+        <section class="panel setup-panel">
+          <h1>Connect your local Relay</h1>
+          <p class="setup-copy">Relay runs on this computer with your own OpenAI and Twilio accounts. These credentials are saved only in a private local file and are never sent to Relay’s maintainers.</p>
+          <div id="setup-error" class="error"></div>
+          <div class="setup-grid">
+            <div class="setup-field" data-credential="TWILIO_ACCOUNT_SID">
+              <label for="twilio-account-sid">Twilio Account SID</label>
+              <input id="twilio-account-sid" type="text" autocomplete="off" placeholder="AC…" />
+            </div>
+            <div class="setup-field" data-credential="TWILIO_AUTH_TOKEN">
+              <label for="twilio-auth-token">Twilio Auth Token</label>
+              <input id="twilio-auth-token" type="password" autocomplete="new-password" />
+            </div>
+            <div class="setup-field" data-credential="TWILIO_FROM_NUMBER">
+              <label for="twilio-from-number">Twilio phone number</label>
+              <input id="twilio-from-number" type="tel" autocomplete="off" placeholder="+12025550123" />
+            </div>
+            <div class="setup-field" data-credential="OPENAI_API_KEY">
+              <label for="openai-api-key">OpenAI API key</label>
+              <input id="openai-api-key" type="password" autocomplete="new-password" placeholder="sk-…" />
+            </div>
+          </div>
+          <div class="setup-actions">
+            <span class="setup-note">Environment variables take precedence. Saved credentials use owner-only file permissions.</span>
+            <button id="save-setup" class="primary">Save and continue</button>
+          </div>
+        </section>
+      </section>
+      <section id="landing" style="display:none">
         <div class="hero">
           <h1>Delegate the call. Keep the control.</h1>
           <p class="lede">Give Relay a goal and the relevant context. It handles the phone calls, keeps you informed visually, and brings you in only when your knowledge, approval, or voice is needed.</p>
@@ -211,6 +249,7 @@
 
     <script>
       const landing = document.querySelector('#landing');
+      const setup = document.querySelector('#setup');
       const workspace = document.querySelector('#workspace');
       const goalInput = document.querySelector('#goal');
       const startButton = document.querySelector('#start');
@@ -232,7 +271,8 @@
       let advanceTimer = null;
       let actionInFlight = false;
 
-      fetch('/api/runtime').then(r => r.json()).then(runtime => {
+      async function loadRuntime() {
+        const runtime = await fetch('/api/runtime').then(r => r.json());
         document.querySelector('#mode').textContent = runtime.mode === 'demo'
           ? 'Simulated insurance demo'
           : `Agentic production preview · ${runtime.planner_model}`;
@@ -241,6 +281,44 @@
           : runtime.planner_ready
             ? 'Model-driven planning is ready. External execution still stops at the approved connector boundary.'
             : 'Production planner is offline until the backend has an OpenAI API credential.';
+        setup.style.display = runtime.setup_required ? 'block' : 'none';
+        landing.style.display = runtime.setup_required ? 'none' : 'block';
+        document.querySelectorAll('[data-credential]').forEach(field => {
+          field.style.display = runtime.missing_credentials.includes(field.dataset.credential) ? 'block' : 'none';
+        });
+      }
+
+      loadRuntime().catch(() => {
+        document.querySelector('#mode').textContent = 'Runtime unavailable';
+      });
+
+      document.querySelector('#save-setup').addEventListener('click', async () => {
+        const button = document.querySelector('#save-setup');
+        const errorBox = document.querySelector('#setup-error');
+        button.disabled = true;
+        button.textContent = 'Saving…';
+        errorBox.style.display = 'none';
+        try {
+          const response = await fetch('/api/setup', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              twilio_account_sid: document.querySelector('#twilio-account-sid').value,
+              twilio_auth_token: document.querySelector('#twilio-auth-token').value,
+              twilio_from_number: document.querySelector('#twilio-from-number').value,
+              openai_api_key: document.querySelector('#openai-api-key').value,
+            }),
+          });
+          await readResponse(response);
+          document.querySelectorAll('#setup input').forEach(input => { input.value = ''; });
+          await loadRuntime();
+        } catch (error) {
+          errorBox.textContent = error.message;
+          errorBox.style.display = 'block';
+        } finally {
+          button.disabled = false;
+          button.textContent = 'Save and continue';
+        }
       });
 
       goalInput.addEventListener('input', () => {

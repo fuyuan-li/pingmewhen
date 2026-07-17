@@ -12,7 +12,10 @@ dependencies = [
   "fastapi",
   "openai>=2.45.0",
   "pypdf",
+  "pycloudflared>=0.3.0",
+  "python-dotenv",
   "python-multipart",
+  "twilio",
   "uvicorn[standard]",
 ]
 

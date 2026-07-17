@@ -8,6 +8,7 @@ relay CLI
    v
 Local FastAPI service ------ local JSONL events/transcripts
    |                         repo-local SQLite task snapshots
+   |                         machine-local owner-only credentials
    |
    +------ localhost dashboard
    |
@@ -16,17 +17,23 @@ Local FastAPI service ------ local JSONL events/transcripts
    |          +-- context and approvals
    |          +-- call plan and outcomes
    |
-   +------ limited demo gateway
-              |
-              +-- OpenAI Realtime voice session
-              +-- telephony / simulated insurer
+   +------ on-demand pycloudflared tunnel ------ Twilio webhooks
+   |
+   +------ user's OpenAI API account
+   +------ user's Twilio account
 
 Secure mode:
 dashboard -> macOS on-device TTS or user takeover -> call
 cloud AI disconnected; transcript paused
 ```
 
-The local service owns user state, task state, presentation, approvals, and durable logs. The hosted demo gateway protects hackathon credentials and restricts usage to the simulated workflow.
+The local service owns user state, task state, presentation, approvals, durable logs, and provider credential use. Relay is single-tenant by installation: there is no hosted Relay backend, shared account system, or maintainer credential boundary. Deterministic demo mode uses neither provider.
+
+Standard mode resolves `OPENAI_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` from the environment first, then from an owner-only local credential file. The dashboard presents first-run setup only for missing values. The browser sends setup values only to the localhost service; it never calls OpenAI or Twilio directly.
+
+The HTTPS tunnel is lazy. An explicitly approved call acquisition starts `pycloudflared`, obtains a `trycloudflare.com` URL, and supplies voice and status URLs on that individual Twilio Call creation request. Twilio console webhook configuration and `RELAY_PUBLIC_BASE_URL` are not required. A reference count keeps the tunnel alive for active calls; terminal status callbacks and process shutdown tear it down.
+
+Every inbound Twilio HTTP webhook is validated before handling with the Twilio SDK's `RequestValidator`, the exact public URL, submitted form parameters, the `X-Twilio-Signature` header, and the local user's Auth Token. Missing or invalid signatures receive HTTP 403.
 
 Standard `relay` uses the Responses API with a Pydantic Structured Output schema for private planning. The model may ask for missing context and propose typed actions, but application code owns approval transitions and execution permissions. `relay demo` selects the deterministic insurance engine instead. Both engines persist complete namespaced task snapshots in SQLite.
 
@@ -89,11 +96,11 @@ A real takeover requires three live participants sharing one media bridge:
 
 ```text
 representative PSTN/SIP leg ─┐
-Relay Realtime audio leg ────┼─ media conference / gateway
+Relay Realtime audio leg ────┼─ local media bridge
 user browser WebRTC leg ─────┘
 ```
 
-The browser obtains microphone audio with WebRTC. The phone leg enters through a SIP trunk or telephony provider. During Relay mode, the gateway publishes Relay audio and keeps the user microphone muted. During takeover, it cancels/pauses Relay output, unmutes the browser track into the same conference, and continues routing representative audio to the browser. Returning control reverses that switch. Ephemeral browser credentials and standard API credentials must remain server-side responsibilities.
+The browser obtains microphone audio with WebRTC. The phone leg enters through a SIP trunk or telephony provider. During Relay mode, the local media bridge publishes Relay audio and keeps the user microphone muted. During takeover, it cancels/pauses Relay output, unmutes the browser track into the same conference, and continues routing representative audio to the browser. Returning control reverses that switch. Ephemeral browser credentials and standard API credentials remain local-backend responsibilities.
 
 OpenAI recommends WebRTC for browser Realtime clients and documents browser microphone tracks and ephemeral credentials: https://developers.openai.com/api/docs/guides/realtime-webrtc. OpenAI also documents SIP phone connectivity and call monitoring: https://developers.openai.com/api/docs/guides/realtime-sip. Combining both legs in a shared conference is Relay architecture, not a capability that the current deterministic app already provides.
 
@@ -172,7 +179,7 @@ Secure-mode invariants:
 5. The user can take over at any time.
 6. P0 accepts fake values only.
 
-Payment is a field-by-field state machine, not one combined form: the representative asks for one field; Relay yields the outbound channel; local TTS speaks only that field; its completion signal returns the channel to Relay; and the representative may then request the next field. The deterministic browser preview demonstrates these transitions with device audio. In the real gateway, locally generated PCM must be published only to the representative leg, never the user playback leg or cloud model leg.
+Payment is a field-by-field state machine, not one combined form: the representative asks for one field; Relay yields the outbound channel; local TTS speaks only that field; its completion signal returns the channel to Relay; and the representative may then request the next field. The deterministic browser preview demonstrates these transitions with device audio. In the real local media bridge, generated PCM must be published only to the representative leg, never the user playback leg or cloud model leg.
 
 The simulated representative will not intentionally repeat fake card data. A repeat or unexpected verification request routes to human takeover.
 
@@ -180,13 +187,15 @@ The simulated representative will not intentionally repeat fake card data. A rep
 
 Codex is used as Relay's repository-scale engineering agent, guided by `AGENTS.md`, the PRD, this design, and the implementation plan. It implements, reviews, and verifies the cross-cutting product slice. GPT-5.6 has a distinct runtime role: standard `relay` uses it through the Responses API and Pydantic Structured Outputs for private planning, while application code owns approval and execution permissions.
 
-ChatGPT/Codex login authorizes Codex workloads; it cannot be treated as authorization for arbitrary OpenAI Realtime API calls. P0 therefore does not request an OpenAI API key from demo users. The voice media path uses the limited hosted gateway rather than tunneling Realtime traffic through Codex. This is a credential and transport boundary, not the project's Codex usage story.
+ChatGPT/Codex login authorizes Codex workloads; it cannot be treated as authorization for arbitrary Relay API calls. Standard `relay` therefore uses the local user's OpenAI API key. The key remains in the local backend process during API requests and is never returned by an API response or written to an event log.
 
-Local development of standard model planning reads `OPENAI_API_KEY` only in the backend process. The browser never receives or asks for it. This developer setup does not replace the hosted gateway design.
+Twilio REST calls use Account SID + Auth Token Basic Auth. The same Auth Token is required by Twilio's webhook signature algorithm, so Relay neither requires nor prompts for an API Key SID/Secret.
 
-The limited demo gateway owns the OpenAI and telephony credentials, issues only short-lived/restricted access, permits only the simulated workflow, and enforces a small call-minute quota.
+Credentials entered in first-run setup are written to `~/.relay/credentials.json` by default with mode `0600`; setting `RELAY_DATA_DIR` relocates the file with the rest of Relay's local state. Environment variables take precedence over stored values. There is no per-user encryption or tenant partition because the process and file are owned by one local operating-system user.
 
-If OpenAI publishes an official third-party ChatGPT authentication and Realtime entitlement flow, it can replace the gateway later. Do not implement undocumented token reuse.
+Deterministic `relay demo` bypasses provider setup. It remains the zero-credential judge path.
+
+If OpenAI publishes an official third-party ChatGPT authentication and Realtime entitlement flow, it can replace local API-key entry later. Do not implement undocumented token reuse.
 
 ## Logging model
 

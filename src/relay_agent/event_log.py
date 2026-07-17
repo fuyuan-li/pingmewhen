@@ -16,10 +16,12 @@ SENSITIVE_KEYS = {
     "credit_card",
     "cvv",
     "full_ssn",
+    "openai_api_key",
     "password",
     "security_code",
     "ssn",
     "token",
+    "twilio_auth_token",
 }
 
 

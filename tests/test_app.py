@@ -61,6 +61,7 @@ def test_api_rejects_empty_goal(monkeypatch, tmp_path):
 
 def test_pdf_context_upload_is_stored_locally(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RELAY_MODE", "demo")
     client = TestClient(create_app())
     buffer = BytesIO()
     writer = PdfWriter()

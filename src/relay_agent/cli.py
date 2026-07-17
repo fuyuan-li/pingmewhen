@@ -6,6 +6,7 @@ import threading
 import webbrowser
 
 import uvicorn
+from dotenv import load_dotenv
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,6 +24,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    load_dotenv()
     args = parse_args()
     os.environ["RELAY_MODE"] = "demo" if args.command == "demo" else "standard"
 
@@ -35,4 +37,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

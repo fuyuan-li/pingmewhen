@@ -26,6 +26,11 @@ Exit: `uv run relay` and `uv run relay demo` open a local application; tests pas
 - [x] Add a Responses API planner for standard `relay` mode with schema-validated plans and hard approval boundaries.
 - [x] Render general action plans independently of the insurance demo schema.
 - Connect approved production actions to bounded research/contact lookup tools.
+- [x] Add local first-run BYOK onboarding for OpenAI and Twilio credentials.
+- [x] Persist credentials in an owner-only local file with environment-variable precedence.
+- [x] Add lazy `pycloudflared` lifecycle and dynamic per-call Twilio webhook URLs.
+- [x] Validate Twilio voice/status webhooks with the official SDK helper.
+- Connect approved phone-call actions to the existing telephony control plane.
 
 Exit: a simulated event source drives the real UI, and private instructions change subsequent Relay output.
 
@@ -42,11 +47,11 @@ Exit: a simulated event source drives the real UI, and private instructions chan
 
 Exit: `relay demo` completes three distinct dynamic quote conversations and waits for the user’s carrier selection.
 
-## Milestone 3 — Realtime voice and demo gateway
+## Milestone 3 — Realtime voice and local media bridge
 
 - Connect the simulated representative and Relay through real audio.
 - Add a browser WebRTC microphone leg and shared media conference for genuine takeover.
-- Route the simulated representative as a separate audio participant before attempting real PSTN calls.
+- Route the simulated representative as a separate audio participant before enabling general PSTN execution from the task engine.
 - Stream transcripts and speaker identity into the local UI.
 - Implement AI disclosure at call start.
 - Send private user responses back into the active conversation.

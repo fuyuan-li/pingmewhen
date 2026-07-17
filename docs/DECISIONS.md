@@ -38,7 +38,7 @@ For fake card data and fake full SSNs, secure mode removes the cloud AI from bot
 
 Codex is the repository-scale engineering agent used to implement, review, and verify Relay under the durable constraints in `AGENTS.md` and these product documents. GPT-5.6 has a separate runtime role in the standard private planner through the Responses API and Structured Outputs.
 
-ChatGPT/Codex authentication applies to Codex workloads; it is not reused as authorization for arbitrary Realtime voice calls. The voice media path therefore uses a limited hosted demo gateway so judges do not supply API keys. Keeping Codex out of the audio transport is an authentication and architecture boundary, not an absence of Codex from the project.
+ChatGPT/Codex authentication applies to Codex workloads; it is not reused as authorization for Relay API calls. Relay is a bring-your-own-key local tool: each install uses the local user's OpenAI API key and Twilio Account SID, Auth Token, and phone number. No hosted Relay service receives credentials or funds usage. Deterministic demo mode remains credential-free.
 
 ## 10. Logging is a product requirement
 

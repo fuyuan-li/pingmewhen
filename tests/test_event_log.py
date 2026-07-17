@@ -11,13 +11,20 @@ def test_event_log_redacts_sensitive_values(tmp_path):
         "secure_mode.test",
         {
             "card_number": "4242424242424242",
-            "nested": {"full_ssn": "111-22-3333", "safe": "visible"},
+            "nested": {
+                "full_ssn": "111-22-3333",
+                "twilio_auth_token": "twilio-secret",
+                "openai_api_key": "openai-secret",
+                "safe": "visible",
+            },
         },
     )
 
     record = json.loads(path.read_text(encoding="utf-8"))
     assert record["payload"]["card_number"] == "[REDACTED]"
     assert record["payload"]["nested"]["full_ssn"] == "[REDACTED]"
+    assert record["payload"]["nested"]["twilio_auth_token"] == "[REDACTED]"
+    assert record["payload"]["nested"]["openai_api_key"] == "[REDACTED]"
     assert record["payload"]["nested"]["safe"] == "visible"
 
 

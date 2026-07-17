@@ -27,7 +27,9 @@ The renters-insurance workflow is the hackathon demo, not the product boundary.
 ## Implemented now
 
 - Standard `relay` uses an OpenAI Responses API planner with Pydantic Structured Outputs. It can clarify a general goal, incorporate extracted PDF text, render a structured action plan, and enforce application-owned approve/hold/decline boundaries.
-- Standard planning requires a server-side `OPENAI_API_KEY`; never request it in the dashboard or imply ChatGPT login supplies it. The hosted demo gateway remains the intended end-user credential boundary.
+- Standard `relay` is a bring-your-own-key local process. First-run dashboard setup collects the user's `OPENAI_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` only when they are absent from the environment, then saves them in an owner-only machine-local file. ChatGPT login does not supply API access.
+- There is no hosted Relay backend, shared account system, or multi-tenant state. Every install uses only that user's credentials, SQLite data, event logs, and on-demand local tunnel.
+- The Twilio control plane can lazily start a `pycloudflared` tunnel, construct per-call webhook URLs, place an explicitly approved outbound call with Account SID + Auth Token Basic Auth, and reject invalid webhook signatures. The production task engine is not connected to this call service yet.
 - Full task snapshots persist in repo-local SQLite at `.relay/state/relay.db` and reload after restart. Redacted append-only events remain in `.relay/logs/`.
 - The deterministic preview is runnable end to end: validated address/PDF clarification, editable planning, explicit start approval, paced synthetic quote calls with a fresh introduction for each representative, interruptible barge-in, an animated Private Workspace and Call Console, per-call transcript tabs with a vertical history bookmark, factual comparison back in planning, later approval gates, simulated takeover/resume, field-by-field secure payment simulation, and local JSONL logs.
 - Takeover does not connect microphone or phone audio yet. UI and documentation must call it simulated until a real media bridge exists.
@@ -40,8 +42,9 @@ The renters-insurance workflow is the hackathon demo, not the product boundary.
 - No real card or SSN handling.
 - No real insurance recommendation, ranking, solicitation, binding, or commission.
 - No additional CLI commands beyond `relay` and `relay demo`.
+- No hosted multi-tenant service, user accounts, shared credential vault, tenant partitioning, or maintainer-funded API usage.
 - Do not present Relay as merely a calling agent.
-- Do not claim ChatGPT/Codex login authorizes Realtime API calls. The demo backend supplies limited Realtime and telephony access.
+- Do not claim ChatGPT/Codex login authorizes Relay API calls. Standard mode uses local BYOK credentials; deterministic demo mode uses no provider credentials.
 
 ## Engineering rules
 
@@ -51,6 +54,7 @@ The renters-insurance workflow is the hackathon demo, not the product boundary.
 - Disclose that Relay is an AI at the beginning of a call.
 - Prefer the smallest end-to-end implementation that advances the demo.
 - Add tests for state transitions, redaction, approvals, and simulator behavior.
+- Never log or return OpenAI API keys or Twilio Auth Tokens. Validate every Twilio webhook with the official SDK helper and the local user's Auth Token.
 
 ## Verification
 
