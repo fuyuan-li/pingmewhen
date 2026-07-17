@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 
 from twilio.request_validator import RequestValidator
 
+from relay_agent.call_capabilities import CallCapabilityStore
 from relay_agent.credentials import RelayCredentials
 from relay_agent.tunnel import TunnelManager
 
@@ -31,19 +32,27 @@ class TelephonyService:
         credentials: Callable[[], RelayCredentials],
         tunnel: TunnelManager,
         client_factory: Callable[[str, str], Any] | None = None,
+        capabilities: CallCapabilityStore | None = None,
     ) -> None:
         self._credentials = credentials
         self.tunnel = tunnel
         self._client_factory = client_factory or create_twilio_client
+        self.capabilities = capabilities or CallCapabilityStore()
 
     def place_call(self, to: str, task_id: str = "", queue_index: int = 0) -> dict[str, str]:
         credentials = self._credentials()
         if not credentials.complete:
             raise RuntimeError("Relay telephony credentials are incomplete.")
         self.tunnel.acquire()
-        query = urlencode({"task_id": task_id, "queue_index": queue_index}) if task_id else ""
-        voice_url = self.tunnel.url("/api/twilio/voice", query)
-        status_url = self.tunnel.url("/api/twilio/status", query)
+        capability = self.capabilities.issue(task_id, queue_index, credentials.twilio_account_sid)
+        voice_query = urlencode(
+            {"capability": capability.voice_token, "task_id": task_id, "queue_index": queue_index}
+        )
+        status_query = urlencode(
+            {"capability": capability.status_token, "task_id": task_id, "queue_index": queue_index}
+        )
+        voice_url = self.tunnel.url("/api/twilio/voice", voice_query)
+        status_url = self.tunnel.url("/api/twilio/status", status_query)
         try:
             client = self._client_factory(credentials.twilio_account_sid, credentials.twilio_auth_token)
             call = client.calls.create(
@@ -53,7 +62,9 @@ class TelephonyService:
                 status_callback=status_url,
                 status_callback_event=["initiated", "ringing", "answered", "completed"],
             )
+            self.capabilities.bind(capability, call.sid)
         except Exception:
+            self.capabilities.discard(capability)
             self.tunnel.release()
             raise
         return {"sid": call.sid, "status": str(call.status or "queued")}

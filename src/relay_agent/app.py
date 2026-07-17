@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from twilio.request_validator import RequestValidator, add_port, remove_port
 
 from relay_agent.agentic_engine import AgenticTaskEngine
+from relay_agent.call_capabilities import CallCapability, CallCapabilityStore, redact_capabilities
 from relay_agent.context_store import ContextStore, InvalidContext
 from relay_agent.credentials import CredentialStore, RelayCredentials
 from relay_agent.event_log import EventLog, default_data_dir
@@ -70,6 +71,7 @@ def create_app(
     twilio_client_factory: Callable | None = None,
     tts_renderer: LocalTTSRenderer | None = None,
     model_settings_store: ModelSettingsStore | None = None,
+    capability_store: CallCapabilityStore | None = None,
 ) -> FastAPI:
     mode = os.environ.get("RELAY_MODE", "standard")
     events = EventLog()
@@ -98,7 +100,12 @@ def create_app(
     engine = build_engine()
     port = int(os.environ.get("RELAY_PORT", "8765"))
     tunnel = tunnel_manager or TunnelManager(port)
-    telephony = TelephonyService(resolved_credentials, tunnel, twilio_client_factory)
+    telephony = TelephonyService(
+        resolved_credentials,
+        tunnel,
+        twilio_client_factory,
+        capabilities=capability_store,
+    )
     realtime = RealtimeSessionHub(
         resolved_credentials,
         lambda task_id, queue_index: engine.call_context(task_id, queue_index),
@@ -114,15 +121,44 @@ def create_app(
     def setup_required() -> bool:
         return mode != "demo" and not resolved_credentials().complete
 
-    async def validated_twilio_parameters(request: Request) -> dict[str, str]:
+    async def validated_twilio_parameters(
+        request: Request,
+        scope: str,
+    ) -> tuple[dict[str, str], CallCapability]:
         signature = request.headers.get("X-Twilio-Signature", "")
         form = await request.form()
         parameters = {str(key): str(value) for key, value in form.items()}
+        capability_token = request.query_params.get("capability", "")
+        capability = telephony.capabilities.authenticate(
+            scope,
+            capability_token,
+            parameters.get("AccountSid", ""),
+            parameters.get("CallSid", ""),
+        )
+        query_task_id = request.query_params.get("task_id", "")
+        query_queue_index = request.query_params.get("queue_index", "")
+        identity_matches = capability is not None
+        if capability is not None and query_task_id and query_task_id != capability.task_id:
+            identity_matches = False
+        if capability is not None and query_queue_index:
+            identity_matches = identity_matches and query_queue_index.isdigit()
+            identity_matches = identity_matches and int(query_queue_index) == capability.queue_index
+        if not identity_matches or capability is None:
+            events.append(
+                "twilio.capability_rejected",
+                {
+                    "path": request.url.path,
+                    "scope": scope,
+                    "parameter_names": sorted({str(key) for key, _ in form.multi_items()}),
+                    "capability_present": bool(capability_token),
+                },
+            )
+            raise HTTPException(status_code=403, detail="Twilio request authentication failed.")
         try:
             external_url = tunnel.url(request.url.path, request.url.query)
         except Exception as error:
             raise HTTPException(status_code=403, detail="Twilio request validation failed.") from error
-        if not validate_twilio_signature(
+        if signature and not validate_twilio_signature(
             resolved_credentials().twilio_auth_token,
             external_url,
             form,
@@ -137,17 +173,17 @@ def create_app(
                 {
                     "path": request.url.path,
                     "parameter_names": sorted({str(key) for key, _ in form.multi_items()}),
-                    "external_url": external_url,
-                    "raw_query_string": request.url.query,
+                    "external_url": redact_capabilities(external_url),
+                    "raw_query_string": redact_capabilities(request.url.query),
                     "received_signature": signature,
-                    "url_with_port": url_with_port,
+                    "url_with_port": redact_capabilities(url_with_port),
                     "computed_signature_with_port": validator.compute_signature(url_with_port, form),
-                    "url_without_port": url_without_port,
+                    "url_without_port": redact_capabilities(url_without_port),
                     "computed_signature_without_port": validator.compute_signature(url_without_port, form),
                 },
             )
             raise HTTPException(status_code=403, detail="Twilio request validation failed.")
-        return parameters
+        return parameters, capability
 
     def execute_next_call(task_id: str) -> dict:
         if not isinstance(engine, AgenticTaskEngine):
@@ -386,46 +422,53 @@ def create_app(
 
     @app.post("/api/twilio/voice")
     async def twilio_voice(request: Request) -> Response:
-        await validated_twilio_parameters(request)
+        _, capability = await validated_twilio_parameters(request, "voice")
         from twilio.twiml.voice_response import VoiceResponse
 
-        task_id = request.query_params.get("task_id", "")
-        queue_index = request.query_params.get("queue_index", "")
-        if not task_id or not queue_index.isdigit():
+        if not capability.task_id:
             raise HTTPException(status_code=422, detail="This call is not attached to an approved Relay task.")
-        stream_url = tunnel.url("/api/twilio/media").replace("https://", "wss://", 1)
+        stream_url = tunnel.url(f"/api/twilio/media/{capability.media_token}").replace("https://", "wss://", 1)
         response = VoiceResponse()
         stream = response.connect().stream(url=stream_url)
-        stream.parameter(name="task_id", value=task_id)
-        stream.parameter(name="queue_index", value=queue_index)
+        stream.parameter(name="task_id", value=capability.task_id)
+        stream.parameter(name="queue_index", value=str(capability.queue_index))
         return Response(content=str(response), media_type="application/xml")
 
     @app.post("/api/twilio/status")
     async def twilio_status(request: Request) -> dict[str, bool]:
-        parameters = await validated_twilio_parameters(request)
+        parameters, capability = await validated_twilio_parameters(request, "status")
         if parameters.get("CallStatus", "").lower() in TERMINAL_CALL_STATUSES:
-            task_id = request.query_params.get("task_id", "")
+            task_id = capability.task_id
             call_sid = parameters.get("CallSid", "")
-            if task_id and call_sid and isinstance(engine, AgenticTaskEngine):
-                active = engine.get(task_id).get("current_call") or {}
-                if active.get("call_sid") == call_sid:
-                    try:
+            try:
+                if task_id and call_sid and isinstance(engine, AgenticTaskEngine):
+                    active = engine.get(task_id).get("current_call") or {}
+                    if active.get("call_sid") == call_sid:
                         finished = engine.finish_call(task_id, call_sid, parameters["CallStatus"].lower())
                         if finished.get("stage") == "execution_ready":
                             execute_next_call(task_id)
-                    finally:
-                        tunnel.release()
+            finally:
+                telephony.capabilities.revoke(call_sid)
+                tunnel.release()
         return {"accepted": True}
 
     @app.websocket("/api/twilio/media")
-    async def twilio_media(websocket: WebSocket) -> None:
+    async def twilio_media_without_capability(websocket: WebSocket) -> None:
+        await websocket.close(code=1008)
+
+    @app.websocket("/api/twilio/media/{capability_token}")
+    async def twilio_media(websocket: WebSocket, capability_token: str) -> None:
+        capability = telephony.capabilities.authenticate("media", capability_token)
+        if capability is None:
+            await websocket.close(code=1008)
+            return
         signature = websocket.headers.get("X-Twilio-Signature", "")
         try:
-            external_url = tunnel.url("/api/twilio/media").replace("https://", "wss://", 1)
+            external_url = tunnel.url(f"/api/twilio/media/{capability_token}").replace("https://", "wss://", 1)
         except Exception:
             await websocket.close(code=1008)
             return
-        if not validate_twilio_signature(
+        if signature and not validate_twilio_signature(
             resolved_credentials().twilio_auth_token,
             external_url,
             {},
@@ -433,7 +476,12 @@ def create_app(
         ):
             await websocket.close(code=1008)
             return
-        await realtime.bridge(websocket)
+        await realtime.bridge(
+            websocket,
+            expected_task_id=capability.task_id,
+            expected_queue_index=capability.queue_index,
+            expected_call_sid=capability.call_sid,
+        )
 
     @app.get("/")
     async def dashboard() -> FileResponse:

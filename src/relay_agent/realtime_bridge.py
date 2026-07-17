@@ -262,7 +262,13 @@ class RealtimeSessionHub:
             {"task_id": task_id, "field": field_name},
         )
 
-    async def bridge(self, twilio: WebSocket) -> None:
+    async def bridge(
+        self,
+        twilio: WebSocket,
+        expected_task_id: str = "",
+        expected_queue_index: int | None = None,
+        expected_call_sid: str = "",
+    ) -> None:
         realtime = None
         await twilio.accept()
         try:
@@ -276,6 +282,13 @@ class RealtimeSessionHub:
         task_id = str(parameters.get("task_id", ""))
         try:
             queue_index = int(parameters.get("queue_index", ""))
+            call_sid = str(start["start"].get("callSid", ""))
+            if expected_task_id and task_id != expected_task_id:
+                raise ValueError("Media task identity does not match the approved call.")
+            if expected_queue_index is not None and queue_index != expected_queue_index:
+                raise ValueError("Media queue identity does not match the approved call.")
+            if expected_call_sid and call_sid != expected_call_sid:
+                raise ValueError("Media call identity does not match the approved call.")
             context = self._context_reader(task_id, queue_index)
         except Exception:
             await twilio.close(code=1008)

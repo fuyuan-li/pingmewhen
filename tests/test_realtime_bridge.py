@@ -146,11 +146,14 @@ class BlockingTwilio(FakeTwilio):
         raise RuntimeError("Twilio receive unexpectedly resumed")
 
 
-def start_message(task_id="task-1"):
+def start_message(task_id="task-1", call_sid="CA1"):
     return {
         "event": "start",
         "streamSid": "MZ1",
-        "start": {"customParameters": {"task_id": task_id, "queue_index": "0"}},
+        "start": {
+            "callSid": call_sid,
+            "customParameters": {"task_id": task_id, "queue_index": "0"},
+        },
     }
 
 
@@ -374,6 +377,32 @@ def test_bridge_twilio_stop_cancels_realtime_and_cleans_up_session(tmp_path):
     assert realtime.cancelled is True
     assert "task-1" not in hub._sessions
     assert [event["event"] for event in events] == ["realtime.connected", "realtime.disconnected"]
+
+
+def test_bridge_rejects_media_start_that_does_not_match_approved_call(tmp_path):
+    realtime = FakeRealtime()
+    connector = FakeConnector(realtime)
+    twilio = FakeTwilio([start_message(call_sid="CAwrong")])
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        connector=connector,
+    )
+
+    asyncio.run(
+        hub.bridge(
+            twilio,
+            expected_task_id="task-1",
+            expected_queue_index=0,
+            expected_call_sid="CAexpected",
+        )
+    )
+
+    assert twilio.accepted is True
+    assert twilio.close_codes == [1008]
+    assert connector.calls == []
 
 
 def test_bridge_realtime_error_is_reported_and_never_leaves_a_stale_session(tmp_path):

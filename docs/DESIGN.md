@@ -17,7 +17,7 @@ Local FastAPI service ------ local JSONL events/transcripts
    |          +-- context and approvals
    |          +-- call plan and outcomes
    |
-   +------ on-demand pycloudflared tunnel ------ Twilio webhooks
+   +------ session-long pycloudflared tunnel --- Twilio webhooks
    |                                                |
    |                                                +-- bidirectional PCMU Media Stream
    |
@@ -35,7 +35,7 @@ Standard mode resolves `OPENAI_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKE
 
 The production HTTPS tunnel is session-long. Relay starts `pycloudflared` in the background with the localhost dashboard, obtains one `trycloudflare.com` URL, and keeps a persistent lease so DNS and routing can settle while the user plans. Approved calls reuse that URL for voice and status callbacks. Twilio console webhook configuration and `RELAY_PUBLIC_BASE_URL` are not required. Per-call leases are released by terminal callbacks, while the persistent lease keeps the hostname stable until process shutdown tears it down.
 
-Every inbound Twilio HTTP webhook is validated before handling with the Twilio SDK's `RequestValidator`, the exact public URL, submitted form parameters, the `X-Twilio-Signature` header, and the local user's Auth Token. Missing or invalid signatures receive HTTP 403.
+Every approved call receives separate random capability tokens for its voice, status, and media endpoints. Voice and status capabilities travel in callback query strings; the media capability travels in the WebSocket path because Twilio Media Streams do not support query strings. Relay binds each capability to the approved task, queue action, Twilio Account SID, and Call SID, and revokes all three at terminal call status. Missing or incorrect capabilities are rejected. When `X-Twilio-Signature` is present, Relay also validates it with the Twilio SDK, exact public URL, submitted form parameters, and local Auth Token; an invalid provided signature is rejected. A missing signature is accepted only when the scoped capability and call identity match. Capability tokens are redacted from event and server access logs.
 
 Standard `relay` uses the Responses API with a Pydantic Structured Output schema for private planning. The model may ask for missing context, use hosted web search for current official contacts, and propose typed actions, but application code owns approval transitions and execution permissions. A phone action is executable only with an E.164 number whose source is classified: researched contacts require an official HTTP(S) source URL, while a number directly supplied by the user is trusted as user-sourced and requires no artificial URL. After approval, application code queues those calls, gives each call a new Realtime session, passes Twilio's PCMU audio in both directions, persists completed transcript turns, and advances the queue. `relay demo` selects the deterministic insurance engine instead. Both engines persist complete namespaced task snapshots in SQLite.
 

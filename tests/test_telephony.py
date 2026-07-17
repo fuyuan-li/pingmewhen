@@ -1,6 +1,8 @@
 import json
+import logging
 from types import SimpleNamespace
 import time
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +11,12 @@ from starlette.websockets import WebSocketDisconnect
 from twilio.request_validator import RequestValidator
 
 from relay_agent.app import create_app
+from relay_agent.call_capabilities import (
+    CapabilityAccessLogFilter,
+    CallCapabilityStore,
+    redact_capabilities,
+)
+from relay_agent.cli import relay_log_config
 from relay_agent.credentials import CredentialStore, RelayCredentials
 from relay_agent.planner import PlanAction, PlanningTurn
 from relay_agent.telephony import TelephonyService
@@ -78,8 +86,13 @@ def test_tunnel_url_is_used_for_per_call_webhooks(tmp_path):
 
     assert result == {"sid": "CA123", "status": "queued"}
     assert launches == [8765]
-    assert calls.arguments["url"] == "https://relay.trycloudflare.com/api/twilio/voice"
-    assert calls.arguments["status_callback"] == "https://relay.trycloudflare.com/api/twilio/status"
+    voice_url = urlparse(calls.arguments["url"])
+    status_url = urlparse(calls.arguments["status_callback"])
+    assert voice_url._replace(query="").geturl() == "https://relay.trycloudflare.com/api/twilio/voice"
+    assert status_url._replace(query="").geturl() == "https://relay.trycloudflare.com/api/twilio/status"
+    assert len(parse_qs(voice_url.query)["capability"][0]) >= 32
+    assert len(parse_qs(status_url.query)["capability"][0]) >= 32
+    assert parse_qs(voice_url.query)["capability"] != parse_qs(status_url.query)["capability"]
     assert calls.arguments["from_"] == "+12025550123"
     assert "method" not in calls.arguments
     assert "status_callback_method" not in calls.arguments
@@ -160,8 +173,13 @@ def test_task_identity_is_attached_to_per_call_webhooks(tmp_path):
 
     service.place_call("+12025550199", "task-123", 2)
 
-    assert calls.arguments["url"].endswith("/api/twilio/voice?task_id=task-123&queue_index=2")
-    assert calls.arguments["status_callback"].endswith("/api/twilio/status?task_id=task-123&queue_index=2")
+    voice_query = parse_qs(urlparse(calls.arguments["url"]).query)
+    status_query = parse_qs(urlparse(calls.arguments["status_callback"]).query)
+    assert voice_query["task_id"] == ["task-123"]
+    assert voice_query["queue_index"] == ["2"]
+    assert status_query["task_id"] == ["task-123"]
+    assert status_query["queue_index"] == ["2"]
+    assert voice_query["capability"] != status_query["capability"]
 
 
 def test_approved_agentic_plan_places_the_verified_call(monkeypatch, tmp_path):
@@ -191,76 +209,165 @@ def test_approved_agentic_plan_places_the_verified_call(monkeypatch, tmp_path):
     assert approved.status_code == 200
     assert approved.json()["phase"] == "calling"
     assert calls.arguments["to"] == "+12025550199"
-    assert f"task_id={task['id']}" in calls.arguments["url"]
+    assert parse_qs(urlparse(calls.arguments["url"]).query)["task_id"] == [task["id"]]
 
 
-def test_twilio_webhook_signature_accepts_valid_and_rejects_invalid_or_missing(monkeypatch, tmp_path):
+def test_terminal_status_callback_revokes_the_call_capabilities(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
-    store = configured_store(tmp_path)
+    calls = FakeCalls()
+    capabilities = CallCapabilityStore()
+    tunnel = TunnelManager(
+        8765,
+        launcher=lambda port: SimpleNamespace(tunnel="https://relay.trycloudflare.com"),
+        terminator=lambda port: None,
+    )
+    client = TestClient(
+        create_app(
+            planner=ExecutablePlanner(),
+            credential_store=configured_store(tmp_path),
+            tunnel_manager=tunnel,
+            twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
+            capability_store=capabilities,
+        )
+    )
+    task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
+    client.post(f"/api/tasks/{task['id']}/actions", json={"action": "answer", "value": "approve"})
+    status_path = urlparse(calls.arguments["status_callback"]).path + "?" + urlparse(
+        calls.arguments["status_callback"]
+    ).query
+    parameters = {
+        "AccountSid": "ACtest",
+        "CallSid": "CA123",
+        "CallStatus": "completed",
+    }
+
+    completed = client.post(status_path, data=parameters)
+    replay = client.post(status_path, data=parameters)
+
+    assert completed.status_code == 200
+    assert replay.status_code == 403
+    assert client.get(f"/api/tasks/{task['id']}").json()["stage"] == "execution_failed"
+
+
+def capability_client(monkeypatch, tmp_path):
+    monkeypatch.setenv("RELAY_MODE", "standard")
+    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     tunnel = TunnelManager(
         8765,
         launcher=lambda port: SimpleNamespace(tunnel="https://relay.trycloudflare.com"),
         terminator=lambda port: None,
     )
     tunnel.acquire()
-    client = TestClient(create_app(credential_store=store, tunnel_manager=tunnel))
-    url = "https://relay.trycloudflare.com/api/twilio/voice?task_id=task-123&queue_index=0"
-    parameters = {"CallSid": "CA123", "From": "+12025550199"}
+    capabilities = CallCapabilityStore()
+    capability = capabilities.issue("task-123", 0, "ACtest")
+    capabilities.bind(capability, "CA123")
+    client = TestClient(
+        create_app(
+            credential_store=configured_store(tmp_path),
+            tunnel_manager=tunnel,
+            capability_store=capabilities,
+        )
+    )
+    return client, capability, capabilities
+
+
+def voice_request(capability, extra_query=""):
+    query = f"capability={capability.voice_token}&task_id=task-123&queue_index=0{extra_query}"
+    return f"/api/twilio/voice?{query}", f"https://relay.trycloudflare.com/api/twilio/voice?{query}"
+
+
+def webhook_parameters(**overrides):
+    return {"AccountSid": "ACtest", "CallSid": "CA123", "From": "+12025550199", **overrides}
+
+
+def test_voice_accepts_correct_capability_with_missing_or_valid_signature(monkeypatch, tmp_path):
+    client, capability, _ = capability_client(monkeypatch, tmp_path)
+    path, url = voice_request(capability)
+    parameters = webhook_parameters()
+
+    unsigned = client.post(path, data=parameters)
     signature = RequestValidator("test-auth-token").compute_signature(url, parameters)
+    signed = client.post(path, data=parameters, headers={"X-Twilio-Signature": signature})
 
-    path = "/api/twilio/voice?task_id=task-123&queue_index=0"
-    valid = client.post(path, data=parameters, headers={"X-Twilio-Signature": signature})
+    assert unsigned.status_code == 200
+    assert signed.status_code == 200
+    assert f"wss://relay.trycloudflare.com/api/twilio/media/{capability.media_token}" in unsigned.text
+    assert 'name="task_id" value="task-123"' in unsigned.text
+
+
+@pytest.mark.parametrize("query", ["", "capability=wrong&task_id=task-123&queue_index=0"])
+def test_voice_rejects_missing_or_wrong_capability(monkeypatch, tmp_path, query):
+    client, _, _ = capability_client(monkeypatch, tmp_path)
+    response = client.post(f"/api/twilio/voice{f'?{query}' if query else ''}", data=webhook_parameters())
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"AccountSid": "ACother"},
+        {"CallSid": "CAother"},
+    ],
+)
+def test_voice_binds_capability_to_account_and_call(monkeypatch, tmp_path, overrides):
+    client, capability, _ = capability_client(monkeypatch, tmp_path)
+    path, _ = voice_request(capability)
+
+    response = client.post(path, data=webhook_parameters(**overrides))
+
+    assert response.status_code == 403
+
+
+def test_valid_capability_with_invalid_signature_is_rejected_and_token_is_not_logged(monkeypatch, tmp_path):
+    client, capability, _ = capability_client(monkeypatch, tmp_path)
+    path, url = voice_request(capability)
+    parameters = webhook_parameters()
+
     invalid = client.post(path, data=parameters, headers={"X-Twilio-Signature": "invalid"})
-    missing = client.post(path, data=parameters)
-
-    assert valid.status_code == 200
-    assert valid.headers["content-type"].startswith("application/xml")
-    assert "wss://relay.trycloudflare.com/api/twilio/media" in valid.text
-    assert 'name="task_id" value="task-123"' in valid.text
     assert invalid.status_code == 403
-    assert missing.status_code == 403
 
-    records = [
-        json.loads(line)
-        for line in (tmp_path / "runtime" / "logs" / "events.jsonl").read_text().splitlines()
-    ]
+    log_text = (tmp_path / "runtime" / "logs" / "events.jsonl").read_text()
+    assert capability.voice_token not in log_text
+    assert capability.status_token not in log_text
+    assert capability.media_token not in log_text
+    records = [json.loads(line) for line in log_text.splitlines()]
     rejected = [record for record in records if record["event"] == "twilio.signature_rejected"]
-    invalid_diagnostic = next(record["payload"] for record in rejected if record["payload"]["received_signature"])
+    invalid_diagnostic = rejected[-1]["payload"]
     validator = RequestValidator("test-auth-token")
     assert invalid_diagnostic == {
         "path": "/api/twilio/voice",
-        "parameter_names": ["CallSid", "From"],
-        "external_url": url,
-        "raw_query_string": "task_id=task-123&queue_index=0",
+        "parameter_names": ["AccountSid", "CallSid", "From"],
+        "external_url": redact_capabilities(url),
+        "raw_query_string": redact_capabilities(urlparse(url).query),
         "received_signature": "invalid",
-        "url_with_port": "https://relay.trycloudflare.com:443/api/twilio/voice?task_id=task-123&queue_index=0",
+        "url_with_port": redact_capabilities(url.replace(".com/", ".com:443/")),
         "computed_signature_with_port": validator.compute_signature(
-            "https://relay.trycloudflare.com:443/api/twilio/voice?task_id=task-123&queue_index=0",
+            url.replace(".com/", ".com:443/"),
             parameters,
         ),
-        "url_without_port": url,
+        "url_without_port": redact_capabilities(url),
         "computed_signature_without_port": validator.compute_signature(url, parameters),
     }
 
 
 def test_twilio_voice_signature_preserves_repeated_form_values(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
-    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
-    tunnel = TunnelManager(
-        8765,
-        launcher=lambda port: SimpleNamespace(tunnel="https://relay.trycloudflare.com"),
-        terminator=lambda port: None,
+    client, capability, _ = capability_client(monkeypatch, tmp_path)
+    path, url = voice_request(capability)
+    parameters = FormData(
+        [
+            ("AccountSid", "ACtest"),
+            ("CallSid", "CA123"),
+            ("Repeated", "first"),
+            ("Repeated", "second"),
+        ]
     )
-    tunnel.acquire()
-    client = TestClient(create_app(credential_store=configured_store(tmp_path), tunnel_manager=tunnel))
-    url = "https://relay.trycloudflare.com/api/twilio/voice?task_id=task-123&queue_index=0"
-    parameters = FormData([("CallSid", "CA123"), ("Repeated", "first"), ("Repeated", "second")])
     signature = RequestValidator("test-auth-token").compute_signature(url, parameters)
 
     response = client.post(
-        "/api/twilio/voice?task_id=task-123&queue_index=0",
-        content="CallSid=CA123&Repeated=first&Repeated=second",
+        path,
+        content="AccountSid=ACtest&CallSid=CA123&Repeated=first&Repeated=second",
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
             "X-Twilio-Signature": signature,
@@ -270,25 +377,40 @@ def test_twilio_voice_signature_preserves_repeated_form_values(monkeypatch, tmp_
     assert response.status_code == 200
 
 
-def media_websocket_client(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
-    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
-    tunnel = TunnelManager(
-        8765,
-        launcher=lambda port: SimpleNamespace(tunnel="https://relay.trycloudflare.com"),
-        terminator=lambda port: None,
-    )
-    tunnel.acquire()
-    return TestClient(create_app(credential_store=configured_store(tmp_path), tunnel_manager=tunnel))
+def test_status_accepts_correct_capability_without_signature_and_rejects_wrong_or_missing(monkeypatch, tmp_path):
+    client, capability, _ = capability_client(monkeypatch, tmp_path)
+    parameters = webhook_parameters(CallStatus="ringing")
+    valid_path = f"/api/twilio/status?capability={capability.status_token}&task_id=task-123&queue_index=0"
+
+    valid = client.post(valid_path, data=parameters)
+    wrong = client.post("/api/twilio/status?capability=wrong", data=parameters)
+    missing = client.post("/api/twilio/status", data=parameters)
+
+    assert valid.status_code == 200
+    assert wrong.status_code == 403
+    assert missing.status_code == 403
 
 
-def test_twilio_media_websocket_accepts_valid_signature(monkeypatch, tmp_path):
-    client = media_websocket_client(monkeypatch, tmp_path)
-    url = "wss://relay.trycloudflare.com/api/twilio/media"
+def test_status_accepts_correct_capability_and_valid_signature(monkeypatch, tmp_path):
+    client, capability, _ = capability_client(monkeypatch, tmp_path)
+    path = f"/api/twilio/status?capability={capability.status_token}&task_id=task-123&queue_index=0"
+    url = f"https://relay.trycloudflare.com{path}"
+    parameters = webhook_parameters(CallStatus="ringing")
+    signature = RequestValidator("test-auth-token").compute_signature(url, parameters)
+
+    response = client.post(path, data=parameters, headers={"X-Twilio-Signature": signature})
+
+    assert response.status_code == 200
+
+
+def test_twilio_media_websocket_accepts_correct_capability_with_valid_signature(monkeypatch, tmp_path):
+    client, capability, _ = capability_client(monkeypatch, tmp_path)
+    path = f"/api/twilio/media/{capability.media_token}"
+    url = f"wss://relay.trycloudflare.com{path}"
     signature = RequestValidator("test-auth-token").compute_signature(url, {})
 
     with client.websocket_connect(
-        "/api/twilio/media",
+        path,
         headers={"X-Twilio-Signature": signature},
     ) as websocket:
         websocket.send_json({"event": "stop"})
@@ -298,12 +420,98 @@ def test_twilio_media_websocket_accepts_valid_signature(monkeypatch, tmp_path):
     assert disconnected.value.code == 1008
 
 
-@pytest.mark.parametrize("headers", [{"X-Twilio-Signature": "invalid"}, {}])
-def test_twilio_media_websocket_rejects_invalid_or_missing_signature(monkeypatch, tmp_path, headers):
-    client = media_websocket_client(monkeypatch, tmp_path)
+def test_twilio_media_websocket_accepts_correct_capability_without_signature(monkeypatch, tmp_path):
+    client, capability, _ = capability_client(monkeypatch, tmp_path)
+
+    with client.websocket_connect(f"/api/twilio/media/{capability.media_token}") as websocket:
+        websocket.send_json({"event": "stop"})
+        with pytest.raises(WebSocketDisconnect) as disconnected:
+            websocket.receive_json()
+
+    assert disconnected.value.code == 1008
+
+
+@pytest.mark.parametrize("path", ["/api/twilio/media", "/api/twilio/media/wrong"])
+def test_twilio_media_websocket_rejects_missing_or_wrong_capability(monkeypatch, tmp_path, path):
+    client, _, _ = capability_client(monkeypatch, tmp_path)
 
     with pytest.raises(WebSocketDisconnect) as disconnected:
-        with client.websocket_connect("/api/twilio/media", headers=headers):
+        with client.websocket_connect(path):
             pass
 
     assert disconnected.value.code == 1008
+
+
+def test_twilio_media_websocket_rejects_valid_capability_with_invalid_signature(monkeypatch, tmp_path):
+    client, capability, _ = capability_client(monkeypatch, tmp_path)
+
+    with pytest.raises(WebSocketDisconnect) as disconnected:
+        with client.websocket_connect(
+            f"/api/twilio/media/{capability.media_token}",
+            headers={"X-Twilio-Signature": "invalid"},
+        ):
+            pass
+
+    assert disconnected.value.code == 1008
+
+
+def test_revoked_call_capabilities_cannot_be_replayed(monkeypatch, tmp_path):
+    client, capability, capabilities = capability_client(monkeypatch, tmp_path)
+    capabilities.revoke("CA123")
+    voice_path, _ = voice_request(capability)
+
+    voice = client.post(voice_path, data=webhook_parameters())
+    status = client.post(
+        f"/api/twilio/status?capability={capability.status_token}",
+        data=webhook_parameters(CallStatus="ringing"),
+    )
+    with pytest.raises(WebSocketDisconnect) as disconnected:
+        with client.websocket_connect(f"/api/twilio/media/{capability.media_token}"):
+            pass
+
+    assert voice.status_code == 403
+    assert status.status_code == 403
+    assert disconnected.value.code == 1008
+
+
+def test_capability_access_log_filter_redacts_http_and_media_tokens():
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        '%s - "%s %s HTTP/%s" %d',
+        (
+            "127.0.0.1:1234",
+            "POST",
+            "/api/twilio/voice?capability=voice-secret&task_id=task-123",
+            "1.1",
+            200,
+        ),
+        None,
+    )
+    media_record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        "%s",
+        ("/api/twilio/media/media-secret",),
+        None,
+    )
+    access_filter = CapabilityAccessLogFilter()
+
+    access_filter.filter(record)
+    access_filter.filter(media_record)
+
+    assert "voice-secret" not in record.getMessage()
+    assert "media-secret" not in media_record.getMessage()
+    assert "[REDACTED]" in record.getMessage()
+    assert "[REDACTED]" in media_record.getMessage()
+
+
+def test_uvicorn_access_handler_installs_capability_redaction():
+    config = relay_log_config()
+
+    assert config["filters"]["relay_capabilities"]["()"] is CapabilityAccessLogFilter
+    assert "relay_capabilities" in config["handlers"]["access"]["filters"]
