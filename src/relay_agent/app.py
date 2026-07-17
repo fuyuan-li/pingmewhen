@@ -17,8 +17,10 @@ from relay_agent.call_capabilities import CallCapability, CallCapabilityStore, r
 from relay_agent.context_store import ContextStore, InvalidContext
 from relay_agent.credentials import CredentialStore, RelayCredentials
 from relay_agent.event_log import EventLog, default_data_dir
+from relay_agent.gatekeeper import Gatekeeper, OpenAIGatekeeper
 from relay_agent.local_tts import LocalTTSRenderer, is_allowed_fake_value
 from relay_agent.model_settings import (
+    GATEKEEPER_MODELS,
     PLANNING_MODELS,
     REALTIME_MODELS,
     TRANSCRIPTION_MODELS,
@@ -60,6 +62,7 @@ class SecureFieldRequest(BaseModel):
 
 class ModelSettingsRequest(BaseModel):
     planning_model: str
+    gatekeeper_model: str
     realtime_model: str
     transcription_model: str
 
@@ -72,6 +75,7 @@ def create_app(
     tts_renderer: LocalTTSRenderer | None = None,
     model_settings_store: ModelSettingsStore | None = None,
     capability_store: CallCapabilityStore | None = None,
+    gatekeeper: Gatekeeper | None = None,
 ) -> FastAPI:
     mode = os.environ.get("RELAY_MODE", "standard")
     events = EventLog()
@@ -106,11 +110,16 @@ def create_app(
         twilio_client_factory,
         capabilities=capability_store,
     )
+    active_gatekeeper = gatekeeper or OpenAIGatekeeper(
+        lambda: resolved_credentials().openai_api_key,
+        lambda: model_settings.load().gatekeeper_model,
+    )
     realtime = RealtimeSessionHub(
         resolved_credentials,
         lambda task_id, queue_index: engine.call_context(task_id, queue_index),
         lambda task_id, speaker, text: engine.append_transcript(task_id, speaker, text),
         events,
+        gatekeeper=active_gatekeeper,
         secure_requester=lambda task_id, field_name: engine.request_secure_field(task_id, field_name),
         user_input_requester=lambda task_id, question, input_kind, blocking: engine.request_user_input(
             task_id, question, input_kind, blocking
@@ -243,6 +252,7 @@ def create_app(
             "workflow": "deterministic-insurance-preview" if mode == "demo" else "agentic-private-planning",
             "planner_ready": True if mode == "demo" else active_planner.ready,
             "planner_model": "deterministic" if mode == "demo" else active_planner.model,
+            "gatekeeper_model": "deterministic" if mode == "demo" else selected_models.gatekeeper_model,
             "realtime_model": "deterministic" if mode == "demo" else selected_models.realtime_model,
             "transcription_model": "deterministic" if mode == "demo" else selected_models.transcription_model,
             "setup_required": setup_required(),
@@ -259,6 +269,7 @@ def create_app(
             **selected.__dict__,
             "options": {
                 "planning": list(PLANNING_MODELS),
+                "gatekeeper": list(GATEKEEPER_MODELS),
                 "realtime": list(REALTIME_MODELS),
                 "transcription": list(TRANSCRIPTION_MODELS),
             },
@@ -269,6 +280,7 @@ def create_app(
         nonlocal active_planner, engine
         selected = ModelSettings(
             planning_model=request.planning_model.strip(),
+            gatekeeper_model=request.gatekeeper_model.strip(),
             realtime_model=request.realtime_model.strip(),
             transcription_model=request.transcription_model.strip(),
         )

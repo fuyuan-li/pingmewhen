@@ -468,11 +468,13 @@ class AgenticTaskEngine:
                 return self._snapshot(task)
             connected = task.get("call_state") in {
                 "CONNECTED",
+                "WAITING_FOR_USER",
                 "SECURE_HANDOFF_PENDING",
                 "SECURE_LOCAL",
                 "HUMAN_TAKEOVER",
             }
-            successful = status == "completed" and connected
+            ended_while_waiting = task.get("call_state") == "WAITING_FOR_USER"
+            successful = status == "completed" and connected and not ended_while_waiting
             item["status"] = "complete" if successful else "failed"
             task["current_call"] = None
             task.update(
@@ -481,7 +483,9 @@ class AgenticTaskEngine:
                 call_state="COMPLETED" if successful else "FAILED",
             )
             if not successful:
-                if status == "completed" and not connected:
+                if status == "completed" and ended_while_waiting:
+                    reason = "The call ended while Relay was waiting for your answer"
+                elif status == "completed" and not connected:
                     reason = "Relay never connected to the call audio"
                 else:
                     reason = f"Twilio ended the call with status {status}"
@@ -491,8 +495,13 @@ class AgenticTaskEngine:
                     "message",
                     speaker="relay_private",
                     text=(
-                        "The phone call ended before Relay completed a conversation. No conversation transcript was "
-                        "captured. Check the call connection error before retrying."
+                        "The phone call ended before Relay completed the conversation. Review the retained transcript "
+                        "and call status before deciding whether to retry."
+                        if connected
+                        else (
+                            "The phone call ended before Relay completed a conversation. No conversation transcript "
+                            "was captured. Check the call connection error before retrying."
+                        )
                     ),
                 )
                 task.update(phase="planning", stage="execution_failed", status="waiting_for_user")

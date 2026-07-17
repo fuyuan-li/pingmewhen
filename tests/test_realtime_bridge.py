@@ -3,6 +3,7 @@ import json
 
 from relay_agent.credentials import RelayCredentials
 from relay_agent.event_log import EventLog
+from relay_agent.gatekeeper import GatekeeperVerdict
 from relay_agent.realtime_bridge import (
     ActiveRealtimeSession,
     RealtimeSessionHub,
@@ -43,12 +44,13 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert "Do not ask whether the representative is comfortable continuing" in instructions
     assert "never repeat the disclosure" in instructions
     assert "Never deny being an AI if asked" in instructions
-    assert "then call request_user_input" in instructions
-    assert "The tool call, not a spoken phrase" in instructions
+    assert "backend Gatekeeper reviews each representative turn" in instructions
+    assert "request_user_input tool is fallback only" in instructions
     assert "ask the representative to supply the user's missing fact" in instructions
     assert "Do not provide payment-card data or a full Social Security number" in instructions
     assert "Do not choose a regulated product for the user" in instructions
     assert update["session"]["tool_choice"] == "auto"
+    assert update["session"]["audio"]["input"]["turn_detection"]["create_response"] is False
     tool = update["session"]["tools"][0]
     assert tool["type"] == "function"
     assert tool["name"] == "request_user_input"
@@ -151,6 +153,28 @@ class FakeConnector:
         return False
 
 
+class SequenceGatekeeper:
+    def __init__(self, verdicts):
+        self.verdicts = list(verdicts)
+        self.requests = []
+
+    async def classify(self, request):
+        self.requests.append(request)
+        return self.verdicts.pop(0)
+
+
+class BlockingGatekeeper:
+    def __init__(self, verdict):
+        self.verdict = verdict
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def classify(self, request):
+        self.started.set()
+        await self.release.wait()
+        return self.verdict
+
+
 class BlockingRealtime(FakeRealtime):
     def __init__(self):
         super().__init__()
@@ -222,6 +246,90 @@ def test_live_instruction_is_injected_and_requests_a_natural_response(tmp_path):
     response_instruction = realtime.sent[-1]["response"]["instructions"]
     assert "Continue speaking to the representative you called" in response_instruction
     assert "Do not acknowledge or answer the private person aloud" in response_instruction
+
+
+def test_speaker_waits_for_answerable_gatekeeper_verdict_before_responding(tmp_path):
+    gatekeeper = BlockingGatekeeper(GatekeeperVerdict(verdict="answerable"))
+    realtime = FakeRealtime(
+        [
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "transcript": "What plans are available?",
+            }
+        ]
+    )
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        gatekeeper=gatekeeper,
+    )
+
+    async def run():
+        forwarding = asyncio.create_task(hub._openai_to_twilio(session, "task-1"))
+        await gatekeeper.started.wait()
+        assert not any(event.get("type") == "response.create" for event in realtime.sent)
+        gatekeeper.release.set()
+        await forwarding
+
+    asyncio.run(run())
+
+    assert [event["type"] for event in realtime.sent] == ["response.create"]
+
+
+def test_unanswerable_gatekeeper_turn_waits_then_accumulates_user_updates(tmp_path):
+    gatekeeper = SequenceGatekeeper(
+        [
+            GatekeeperVerdict(verdict="unanswerable", question="What is your apartment number?"),
+            GatekeeperVerdict(verdict="unanswerable", question="What installation date works?"),
+        ]
+    )
+    prompts = []
+    realtime = FakeRealtime()
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        gatekeeper=gatekeeper,
+        user_input_requester=lambda task_id, question, kind, blocking: prompts.append(
+            (question, kind, blocking)
+        )
+        or {},
+    )
+
+    async def run():
+        await hub._gate_representative_turn(session, "task-1", "What is the apartment number?")
+        session.hold_response_active = False
+        session.hold_complete.set()
+        hub._sessions["task-1"] = session
+        assert await hub.inject("task-1", "Apartment 4B") is True
+        await hub._gate_representative_turn(session, "task-1", "What installation date works?")
+        session.hold_response_active = False
+        session.hold_complete.set()
+        assert await hub.inject("task-1", "Friday afternoon") is True
+
+    asyncio.run(run())
+
+    assert prompts == [
+        ("What is your apartment number?", "text", True),
+        ("What installation date works?", "text", True),
+    ]
+    assert session.waiting_for_user is False
+    assert session.updates_from_user == ["Apartment 4B", "Friday afternoon"]
+    assert gatekeeper.requests[0].updates_from_user == ()
+    assert gatekeeper.requests[1].updates_from_user == ("Apartment 4B",)
+    assert [event["type"] for event in realtime.sent] == [
+        "response.create",
+        "conversation.item.create",
+        "response.create",
+        "response.create",
+        "conversation.item.create",
+        "response.create",
+    ]
 
 
 def test_request_user_input_tool_pauses_audio_and_notifies_task_state(tmp_path):
@@ -297,6 +405,7 @@ def test_answering_request_user_input_resumes_and_delivers_answer(tmp_path):
     assert asyncio.run(run()) is True
     assert session.waiting_for_user is False
     assert session.pending_tool_call_id is None
+    assert session.updates_from_user == ["Apartment 4B"]
     assert [event["type"] for event in realtime.sent] == [
         "conversation.item.create",
         "conversation.item.create",
@@ -382,7 +491,7 @@ def test_sensitive_request_disconnects_realtime_before_accepting_a_field(tmp_pat
     assert requested == [("task-1", "card_number")]
     assert transcripts == []
     assert [message["event"] for message in twilio.sent] == ["clear"]
-    assert [event["type"] for event in realtime.sent] == ["response.cancel", "input_audio_buffer.clear"]
+    assert [event["type"] for event in realtime.sent] == ["input_audio_buffer.clear"]
 
 
 def test_last_four_ssn_question_remains_in_normal_transcript_flow(tmp_path):
@@ -411,6 +520,7 @@ def test_last_four_ssn_question_remains_in_normal_transcript_flow(tmp_path):
     assert session.expected_field is None
     assert requested == []
     assert transcripts == [("task-1", "representative", "What are the last four digits of your SSN?")]
+    assert [event["type"] for event in realtime.sent] == ["response.create"]
 
 
 def test_resume_from_takeover_reuses_session_and_injects_fresh_instruction(tmp_path):
@@ -515,6 +625,47 @@ def test_bridge_twilio_stop_cancels_realtime_and_cleans_up_session(tmp_path):
     assert realtime.cancelled is True
     assert "task-1" not in hub._sessions
     assert [event["event"] for event in events] == ["realtime.connected", "realtime.disconnected"]
+
+
+def test_bridge_debug_trace_captures_exact_speaker_and_gatekeeper_inputs(monkeypatch, tmp_path):
+    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "relay-data"))
+    monkeypatch.setenv("RELAY_DEBUG_CALL_CONTEXT", "1")
+    gatekeeper = SequenceGatekeeper([GatekeeperVerdict(verdict="answerable")])
+    realtime = FakeRealtime(
+        [
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "transcript": "What is the installation address?",
+            }
+        ]
+    )
+    twilio = BlockingTwilio([start_message()])
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: {
+            **sample_context(),
+            "caller_name": "David",
+            "private_messages": ["Install at 1079 Commonwealth Ave"],
+        },
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        connector=FakeConnector(realtime),
+        gatekeeper=gatekeeper,
+    )
+
+    asyncio.run(hub.bridge(twilio))
+
+    debug_path = next((tmp_path / "relay-data" / "debug" / "calls").glob("*.jsonl"))
+    records = [json.loads(line) for line in debug_path.read_text().splitlines()]
+    assert [record["event"] for record in records] == [
+        "speaker.context",
+        "gatekeeper.request",
+        "gatekeeper.verdict",
+    ]
+    assert records[0]["payload"]["context"]["caller_name"] == "David"
+    assert records[0]["payload"]["session_update"]["session"]["instructions"]
+    assert records[1]["payload"]["latest_utterance"] == "What is the installation address?"
+    assert "1079 Commonwealth Ave" in json.dumps(records[1], ensure_ascii=False)
 
 
 def test_bridge_rejects_media_start_that_does_not_match_approved_call(tmp_path):

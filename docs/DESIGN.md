@@ -88,6 +88,8 @@ The transcript is the primary live representation. Summaries are produced betwee
 
 Task memory persists across the complete goal, but representative conversation context resets at every new call. Each representative hears a fresh AI disclosure, purpose, and the relevant known facts before Relay requests a quote or resumes an application.
 
+Production call-time reasoning is split between two roles. Speaker is the sole Realtime audio model and the only model Twilio hears. Gatekeeper is a text-only structured classifier that consumes completed representative transcripts, the approved goal/action context, and all private updates supplied during the current call. Server VAD remains enabled with automatic response creation disabled. The backend sends `response.create` only after an answerable verdict. An unanswerable verdict produces one brief Speaker hold line, transitions the durable task to `WAITING_FOR_USER`, and reuses the existing call prompt; the answer is retained in the session's user-update list and injected into Speaker before conversation resumes. Speaker's own `request_user_input` tool is fallback, not the primary gate.
+
 The deterministic simulator keeps future turns in a backend queue. The UI requests one turn at a time. A user barge-in is placed at the front of that queue as a private user message, a contextually reformulated Relay utterance, and a simulated representative response. The pending script then resumes.
 
 ### Real takeover media path
@@ -144,6 +146,8 @@ PREPARING
 ```
 
 Only explicit events may change state. Every transition is logged.
+
+Gatekeeper verdict and latency metadata may enter the redacted event log, but classifier input does not. When `RELAY_DEBUG_CALL_CONTEXT=1` is explicitly set, the exact private Speaker and Gatekeeper payloads are written instead to an owner-only per-call file under `RELAY_DATA_DIR/debug/calls/`; this facility is disabled by default.
 
 ### Structured interactions
 

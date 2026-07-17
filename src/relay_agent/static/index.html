@@ -190,6 +190,11 @@
               <span class="settings-help">Private task reasoning, structured plans, and web research.</span>
             </div>
             <div class="settings-field">
+              <label for="gatekeeper-model">Gatekeeper</label>
+              <select id="gatekeeper-model"></select>
+              <span class="settings-help">Fast text-only check before Relay answers each representative turn.</span>
+            </div>
+            <div class="settings-field">
               <label for="realtime-model">Realtime voice</label>
               <select id="realtime-model"></select>
               <span class="settings-help">Live speech-to-speech conversation during phone calls.</span>
@@ -348,6 +353,7 @@
       function renderModelSettings(settings) {
         currentModelSettings = settings;
         fillModelSelect('#planning-model', settings.options.planning, settings.planning_model);
+        fillModelSelect('#gatekeeper-model', settings.options.gatekeeper, settings.gatekeeper_model);
         fillModelSelect('#realtime-model', settings.options.realtime, settings.realtime_model);
         fillModelSelect('#transcription-model', settings.options.transcription, settings.transcription_model);
       }
@@ -406,6 +412,7 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
               planning_model: document.querySelector('#planning-model').value,
+              gatekeeper_model: document.querySelector('#gatekeeper-model').value,
               realtime_model: document.querySelector('#realtime-model').value,
               transcription_model: document.querySelector('#transcription-model').value,
             }),

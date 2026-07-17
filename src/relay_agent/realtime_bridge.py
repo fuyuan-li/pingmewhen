@@ -6,14 +6,23 @@ import re
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
+from time import monotonic
 from typing import Any
 from uuid import uuid4
 
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.asyncio.client import connect
 
+from relay_agent.call_debug import CallDebugTrace
 from relay_agent.credentials import RelayCredentials
 from relay_agent.event_log import EventLog
+from relay_agent.gatekeeper import (
+    AllowAllGatekeeper,
+    Gatekeeper,
+    GatekeeperRequest,
+    GatekeeperVerdict,
+    gatekeeper_request,
+)
 from relay_agent.local_tts import LocalTTSRenderer, MacOSLocalTTS
 
 
@@ -51,6 +60,11 @@ class ActiveRealtimeSession:
     pending_tool_call_id: str | None = None
     expected_field: str | None = None
     mark_events: dict[str, asyncio.Event] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
+    updates_from_user: list[str] = field(default_factory=list)
+    hold_response_active: bool = False
+    hold_complete: asyncio.Event = field(default_factory=asyncio.Event)
+    debug_trace: CallDebugTrace | None = None
 
 
 def realtime_session_update(
@@ -84,12 +98,13 @@ def realtime_session_update(
         "GOAL: Pursue only this approved purpose: "
         f"{action['purpose']}. The overall user goal is: {context['goal']}. Continue each turn naturally from the "
         "immediately preceding conversation.\n\n"
-        "WHEN YOU ARE MISSING A FACT: if the representative asks for a fact or decision that is not explicitly "
-        "available in your context, first say one brief natural hold line such as 'Let me check on that one "
-        "second,' then call request_user_input with the exact concise question the user needs to answer, "
-        "input_kind='text', and blocking=true. The tool call, not a spoken phrase, is the required signal that you "
-        "need the user. Do not continue until the tool result arrives. Do not fill time, restart the introduction, "
-        "fabricate an answer, or ask the representative to supply the user's missing fact.\n\n"
+        "TURN CONTROL: The backend Gatekeeper reviews each representative turn and creates your response only when "
+        "you may answer from known context. Do not second-guess an approved turn merely because you would phrase it "
+        "differently. The request_user_input tool is fallback only: use it if, despite Gatekeeper approval, you "
+        "discover a critical missing fact or decision. In that fallback, first say one brief natural hold line, then "
+        "call request_user_input with the exact concise private question, input_kind='text', and blocking=true. Do "
+        "not continue until the tool result arrives. Never fabricate an answer or ask the representative to supply "
+        "the user's missing fact.\n\n"
         "BOUNDARIES: Never claim to be the user. Do not provide payment-card data or a full Social Security number. "
         "Do not choose a regulated product for the user. Be concise and natural.\n\n"
         "CONTEXT — the user's private task messages are:\n"
@@ -131,7 +146,7 @@ def realtime_session_update(
                     "transcription": {"model": transcription_model, "language": "en"},
                     "turn_detection": {
                         "type": "server_vad",
-                        "create_response": True,
+                        "create_response": False,
                         "interrupt_response": True,
                     },
                 },
@@ -197,6 +212,7 @@ class RealtimeSessionHub:
         transcript_writer: Callable[[str, str, str], dict[str, Any]],
         events: EventLog,
         connector: Callable[..., Any] = connect,
+        gatekeeper: Gatekeeper | None = None,
         secure_requester: Callable[[str, str], dict[str, Any]] | None = None,
         user_input_requester: Callable[[str, str, str, bool], dict[str, Any]] | None = None,
         call_connected: Callable[[str], dict[str, Any]] | None = None,
@@ -210,6 +226,7 @@ class RealtimeSessionHub:
         self._transcript_writer = transcript_writer
         self._events = events
         self._connector = connector
+        self._gatekeeper = gatekeeper or AllowAllGatekeeper()
         self._secure_requester = secure_requester
         self._user_input_requester = user_input_requester
         self._call_connected = call_connected
@@ -227,9 +244,7 @@ class RealtimeSessionHub:
             return False
         waiting_for_user = session.waiting_for_user
         pending_call_id = session.pending_tool_call_id
-        if waiting_for_user and not pending_call_id:
-            return False
-        if waiting_for_user:
+        if waiting_for_user and pending_call_id:
             await session.realtime.send(
                 json.dumps(
                     {
@@ -242,6 +257,13 @@ class RealtimeSessionHub:
                     }
                 )
             )
+        if session.hold_response_active:
+            try:
+                await asyncio.wait_for(session.hold_complete.wait(), timeout=3)
+            except TimeoutError:
+                await session.realtime.send(json.dumps({"type": "response.cancel"}))
+            session.hold_response_active = False
+            session.hold_complete.set()
         await session.realtime.send(json.dumps(private_instruction(text)))
         session.waiting_for_user = False
         session.pending_tool_call_id = None
@@ -274,6 +296,7 @@ class RealtimeSessionHub:
             session.waiting_for_user = waiting_for_user
             session.pending_tool_call_id = pending_call_id
             raise
+        session.updates_from_user.append(text)
         self._events.append("realtime.instruction_injected", {"task_id": task_id})
         return True
 
@@ -359,7 +382,6 @@ class RealtimeSessionHub:
         session.secure_mode = True
         session.expected_field = field_name
         await session.twilio.send_json({"event": "clear", "streamSid": session.stream_sid})
-        await session.realtime.send(json.dumps({"type": "response.cancel"}))
         await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
         state = self._secure_requester(task_id, field_name) if self._secure_requester else {}
         self._events.append(
@@ -440,12 +462,20 @@ class RealtimeSessionHub:
                 additional_headers={"Authorization": f"Bearer {credentials.openai_api_key}"},
             ) as realtime:
                 session = ActiveRealtimeSession(realtime=realtime, twilio=twilio, stream_sid=stream_sid)
+                session.context = context
+                session.debug_trace = CallDebugTrace(task_id, call_sid)
                 async with self._lock:
                     self._sessions[task_id] = session
                 if self._call_connected:
                     self._call_connected(task_id)
-                await realtime.send(json.dumps(realtime_session_update(context, self._transcription_model())))
-                await realtime.send(json.dumps(initial_response(context)))
+                session_update = realtime_session_update(context, self._transcription_model())
+                opening = initial_response(context)
+                session.debug_trace.append(
+                    "speaker.context",
+                    {"context": context, "session_update": session_update, "initial_response": opening},
+                )
+                await realtime.send(json.dumps(session_update))
+                await realtime.send(json.dumps(opening))
                 self._events.append("realtime.connected", {"task_id": task_id, "model": model})
                 to_openai = asyncio.create_task(self._twilio_to_openai(session))
                 to_twilio = asyncio.create_task(self._openai_to_twilio(session, task_id))
@@ -499,7 +529,7 @@ class RealtimeSessionHub:
             event = json.loads(raw)
             event_type = event.get("type")
             if event_type == "response.output_audio.delta":
-                if not session.secure_mode and not session.waiting_for_user:
+                if not session.secure_mode and (not session.waiting_for_user or session.hold_response_active):
                     await session.twilio.send_json(
                         {
                             "event": "media",
@@ -515,6 +545,9 @@ class RealtimeSessionHub:
                 await session.twilio.send_json({"event": "clear", "streamSid": session.stream_sid})
             if event_type == "response.function_call_arguments.done":
                 await self._handle_function_call(session, task_id, event)
+            if event_type == "response.done" and session.hold_response_active:
+                session.hold_response_active = False
+                session.hold_complete.set()
             transcript = transcript_from_realtime_event(event)
             if transcript and transcript[1].strip() and not session.secure_mode:
                 sensitive_field = requested_sensitive_field(transcript[1])
@@ -522,12 +555,71 @@ class RealtimeSessionHub:
                     await self._enter_secure_mode(task_id, session, sensitive_field)
                 else:
                     self._transcript_writer(task_id, transcript[0], transcript[1])
+                    if transcript[0] == "representative" and not session.waiting_for_user:
+                        await self._gate_representative_turn(session, task_id, transcript[1])
             if event_type == "error":
                 detail = event.get("error", {})
                 self._events.append(
                     "realtime.protocol_error",
                     {"task_id": task_id, "type": detail.get("type"), "code": detail.get("code")},
                 )
+
+    async def _gate_representative_turn(
+        self,
+        session: ActiveRealtimeSession,
+        task_id: str,
+        utterance: str,
+    ) -> None:
+        request = gatekeeper_request(utterance, session.context, session.updates_from_user)
+        session.debug_trace and session.debug_trace.append("gatekeeper.request", gatekeeper_debug_payload(request))
+        started = monotonic()
+        try:
+            verdict = await self._gatekeeper.classify(request)
+        except Exception as error:
+            latency_ms = round((monotonic() - started) * 1000)
+            self._events.append(
+                "gatekeeper.failed",
+                {"task_id": task_id, "reason": type(error).__name__, "latency_ms": latency_ms},
+            )
+            verdict = GatekeeperVerdict(
+                verdict="unanswerable",
+                question=f'The representative said: "{utterance}" What should Relay say?',
+            )
+        else:
+            latency_ms = round((monotonic() - started) * 1000)
+        session.debug_trace and session.debug_trace.append(
+            "gatekeeper.verdict",
+            {"verdict": verdict.model_dump(), "latency_ms": latency_ms},
+        )
+        self._events.append(
+            "gatekeeper.verdict",
+            {"task_id": task_id, "verdict": verdict.verdict, "latency_ms": latency_ms},
+        )
+        if verdict.verdict == "answerable":
+            await session.realtime.send(json.dumps({"type": "response.create"}))
+            return
+        question = verdict.question.strip() or f'How should Relay answer: "{utterance}"?'
+        session.waiting_for_user = True
+        session.pending_tool_call_id = None
+        session.hold_response_active = True
+        session.hold_complete.clear()
+        if self._user_input_requester is not None:
+            self._user_input_requester(task_id, question, "text", True)
+        await session.realtime.send(
+            json.dumps(
+                {
+                    "type": "response.create",
+                    "response": {
+                        "instructions": (
+                            "Say exactly one brief natural hold line to the representative, such as "
+                            "'Let me check on that one second.' Do not answer the question, ask another question, "
+                            "restart the introduction, or call a tool."
+                        )
+                    },
+                }
+            )
+        )
+        self._events.append("realtime.user_input_requested", {"task_id": task_id, "source": "gatekeeper"})
 
     async def _handle_function_call(
         self,
@@ -564,3 +656,13 @@ class RealtimeSessionHub:
         session.pending_tool_call_id = call_id
         await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
         self._events.append("realtime.user_input_requested", {"task_id": task_id, "input_kind": input_kind})
+
+
+def gatekeeper_debug_payload(request: GatekeeperRequest) -> dict[str, Any]:
+    return {
+        "instructions": request.instructions,
+        "latest_utterance": request.latest_utterance,
+        "context": request.context,
+        "updates_from_user": list(request.updates_from_user),
+        "messages": request.messages(),
+    }

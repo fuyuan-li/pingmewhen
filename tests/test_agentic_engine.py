@@ -217,6 +217,60 @@ def test_completed_twilio_call_without_media_connection_is_reported_as_failed(tm
     assert any("No conversation transcript was captured" in event.get("text", "") for event in task["events"])
 
 
+def test_call_ending_while_waiting_is_connected_but_incomplete(tmp_path):
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    engine.begin_call(task["id"], pending["index"], "CA123")
+    engine.mark_call_connected(task["id"])
+    engine.append_transcript(task["id"], "representative", "What is the apartment number?")
+    engine.request_user_input(task["id"], "What is your apartment number?", "text", True)
+
+    ended = engine.finish_call(task["id"], "CA123", "completed")
+
+    assert ended["stage"] == "execution_failed"
+    assert ended["execution_queue"][0]["status"] == "failed"
+    status = next(event for event in reversed(ended["events"]) if event["type"] == "status")
+    assert "waiting for your answer" in status["text"]
+    assert "never connected" not in status["text"]
+    assert any("retained transcript" in event.get("text", "") for event in ended["events"])
+
+
+def test_phone_action_requires_concrete_known_facts_in_purpose():
+    with pytest.raises(ValueError, match="inline concrete known facts"):
+        PlanAction(
+            kind="phone_call",
+            label="Call Verizon",
+            purpose="Discuss internet service at the provided Boston address.",
+            target="Alex at Verizon",
+            needs_lookup=False,
+            phone_number="+12027010927",
+            contact_provided_by="user",
+            contact_source_url="",
+        )
+
+    action = PlanAction(
+        kind="phone_call",
+        label="Call Verizon",
+        purpose="Discuss internet service at 1079 Commonwealth Ave, Boston, MA 02215.",
+        target="Alex at Verizon",
+        known_facts=["Installation address: 1079 Commonwealth Ave, Boston, MA 02215"],
+        needs_lookup=False,
+        phone_number="+12027010927",
+        contact_provided_by="user",
+        contact_source_url="",
+    )
+
+    assert "1079 Commonwealth Ave" in action.purpose
+    assert "1079 Commonwealth Ave" in action.known_facts[0]
+
+
 def test_approval_refuses_an_unsourced_phone_action(tmp_path):
     class UnsourcedPlanner:
         ready = True

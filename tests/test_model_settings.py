@@ -35,6 +35,7 @@ def test_model_settings_store_defaults_persists_and_reloads(tmp_path):
 
     selected = ModelSettings(
         planning_model="gpt-5.6",
+        gatekeeper_model="gpt-5.4-mini",
         realtime_model="gpt-realtime-2.1",
         transcription_model="gpt-4o-transcribe",
     )
@@ -51,14 +52,17 @@ def test_dashboard_model_settings_update_runtime_and_reject_unknown_models(monke
 
     defaults = client.get("/api/model-settings").json()
     assert defaults["planning_model"] == "gpt-5.4-mini"
+    assert defaults["gatekeeper_model"] == "gpt-5.4-nano"
     assert defaults["realtime_model"] == "gpt-realtime-2.1-mini"
     assert defaults["transcription_model"] == "gpt-4o-mini-transcribe"
     assert defaults["options"]["planning"] == ["gpt-5.4-mini", "gpt-5.4", "gpt-5.6"]
+    assert defaults["options"]["gatekeeper"] == ["gpt-5.4-nano", "gpt-5.4-mini"]
 
     saved = client.put(
         "/api/model-settings",
         json={
             "planning_model": "gpt-5.4",
+            "gatekeeper_model": "gpt-5.4-mini",
             "realtime_model": "gpt-realtime-2.1",
             "transcription_model": "gpt-4o-transcribe",
         },
@@ -67,6 +71,7 @@ def test_dashboard_model_settings_update_runtime_and_reject_unknown_models(monke
     assert saved.status_code == 200
     runtime = client.get("/api/runtime").json()
     assert runtime["planner_model"] == "gpt-5.4"
+    assert runtime["gatekeeper_model"] == "gpt-5.4-mini"
     assert runtime["realtime_model"] == "gpt-realtime-2.1"
     assert runtime["transcription_model"] == "gpt-4o-transcribe"
     assert ModelSettingsStore(path).load().planning_model == "gpt-5.4"
@@ -75,6 +80,7 @@ def test_dashboard_model_settings_update_runtime_and_reject_unknown_models(monke
         "/api/model-settings",
         json={
             "planning_model": "made-up-model",
+            "gatekeeper_model": "gpt-5.4-nano",
             "realtime_model": "gpt-realtime-2.1-mini",
             "transcription_model": "gpt-4o-mini-transcribe",
         },

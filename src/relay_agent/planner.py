@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class PlannerError(RuntimeError):
@@ -13,8 +14,18 @@ class PlannerError(RuntimeError):
 class PlanAction(BaseModel):
     kind: Literal["phone_call", "research", "document_review", "other"]
     label: str
-    purpose: str
+    purpose: str = Field(
+        description=(
+            "Concrete call briefing with every already-known fact needed for the call written literally, including "
+            "full addresses, dates, names, constraints, and requested outcomes; never vague placeholders such as "
+            "'the provided address'."
+        )
+    )
     target: str
+    known_facts: list[str] = Field(
+        default_factory=list,
+        description="Concrete facts already established for this action, copied literally rather than paraphrased.",
+    )
     needs_lookup: bool
     phone_number: str = Field(description="Exact E.164 number for executable phone calls, otherwise an empty string.")
     contact_provided_by: Literal["user", "research"] = Field(
@@ -23,6 +34,24 @@ class PlanAction(BaseModel):
     contact_source_url: str = Field(
         description="Official source URL for a researched phone number; empty for a user-provided number."
     )
+
+    @model_validator(mode="after")
+    def reject_vague_phone_facts(self) -> "PlanAction":
+        if self.kind != "phone_call":
+            return self
+        vague_fact = re.search(
+            r"\b(?:"
+            r"provided(?:\s+\w+){0,3}\s+(?:address|date|details?|information)|"
+            r"(?:address|date|details?|information)\s+provided|"
+            r"(?:above|aforementioned)\s+(?:address|date|details?|information)|"
+            r"the\s+user'?s\s+(?:details?|information)"
+            r")\b",
+            self.purpose,
+            re.IGNORECASE,
+        )
+        if vague_fact:
+            raise ValueError("Phone-call purpose must inline concrete known facts instead of vague placeholders.")
+        return self
 
 
 class PlanningTurn(BaseModel):
@@ -89,6 +118,11 @@ class OpenAIPlanner:
                     "+12027010927 — confirm?' Do not state a specific technical defect in a phone number unless it is "
                     "actually true. "
                     "Create one phone_call action per organization and per separate phone conversation. "
+                    "For every phone_call, inline all concrete facts already known from the goal, documents, and "
+                    "conversation directly into purpose and known_facts. Preserve exact full addresses, dates, names, "
+                    "amounts, constraints, and requested outcomes. Never replace a known value with vague wording such "
+                    "as 'the provided address', 'the address above', 'the requested date', or 'the user's details'. "
+                    "The call-time models must be able to execute from the action without rediscovering known facts. "
                     "Before returning plan_ready with any phone_call action, make sure you know the display name or "
                     "nickname Relay should use when introducing the person it represents. If it is not already clear "
                     "from the full conversation, return needs_input and ask once, warmly and in the user's language. "

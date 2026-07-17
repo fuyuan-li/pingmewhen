@@ -56,6 +56,8 @@ Exit: `relay demo` completes three distinct dynamic quote conversations and wait
 - [x] Stream completed transcripts and speaker identity into durable task state and the local UI.
 - [x] Implement AI disclosure and a fresh purpose statement at every call start.
 - [x] Send private user responses into the active Realtime conversation.
+- [x] Gate every representative turn through a text-only classifier before manually creating the Speaker response.
+- [x] Accumulate call-local user updates and reuse the existing waiting prompt for unanswerable turns.
 - Add interruption, timeout, disconnect, and retry handling.
 - Log tool calls, latency, errors, and transcript turns.
 

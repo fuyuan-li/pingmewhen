@@ -9,6 +9,7 @@ from relay_agent.event_log import default_data_dir
 
 
 PLANNING_MODELS = ("gpt-5.4-mini", "gpt-5.4", "gpt-5.6")
+GATEKEEPER_MODELS = ("gpt-5.4-nano", "gpt-5.4-mini")
 REALTIME_MODELS = ("gpt-realtime-2.1-mini", "gpt-realtime-2.1")
 TRANSCRIPTION_MODELS = ("gpt-4o-mini-transcribe", "gpt-4o-transcribe")
 
@@ -16,12 +17,14 @@ TRANSCRIPTION_MODELS = ("gpt-4o-mini-transcribe", "gpt-4o-transcribe")
 @dataclass(frozen=True)
 class ModelSettings:
     planning_model: str = PLANNING_MODELS[0]
+    gatekeeper_model: str = GATEKEEPER_MODELS[0]
     realtime_model: str = REALTIME_MODELS[0]
     transcription_model: str = TRANSCRIPTION_MODELS[0]
 
     def validate(self) -> None:
         allowed = {
             "planning_model": PLANNING_MODELS,
+            "gatekeeper_model": GATEKEEPER_MODELS,
             "realtime_model": REALTIME_MODELS,
             "transcription_model": TRANSCRIPTION_MODELS,
         }
