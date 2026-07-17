@@ -383,11 +383,12 @@ def test_bridge_rejects_media_start_that_does_not_match_approved_call(tmp_path):
     realtime = FakeRealtime()
     connector = FakeConnector(realtime)
     twilio = FakeTwilio([start_message(call_sid="CAwrong")])
+    log_path = tmp_path / "events.jsonl"
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
         lambda task_id, speaker, text: {},
-        EventLog(tmp_path / "events.jsonl"),
+        EventLog(log_path),
         connector=connector,
     )
 
@@ -401,6 +402,47 @@ def test_bridge_rejects_media_start_that_does_not_match_approved_call(tmp_path):
     )
 
     assert twilio.accepted is True
+    assert twilio.close_codes == [1008]
+    assert connector.calls == []
+    rejection = logged_events(log_path)[0]
+    assert rejection["event"] == "media.identity_rejected"
+    assert rejection["payload"] == {
+        "check": "call_sid",
+        "reason": "ValueError",
+        "expected_task_id": "task-1",
+        "received_task_id": "task-1",
+        "expected_queue_index": 0,
+        "received_queue_index": "0",
+        "expected_call_sid": "CAexpected",
+        "received_call_sid": "CAwrong",
+    }
+
+
+def test_bridge_logs_media_start_failure_before_realtime_connection(tmp_path):
+    connector = FakeConnector(FakeRealtime())
+    twilio = FakeTwilio([{"event": "stop"}])
+    log_path = tmp_path / "events.jsonl"
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(log_path),
+        connector=connector,
+    )
+
+    asyncio.run(
+        hub.bridge(
+            twilio,
+            expected_task_id="task-1",
+            expected_queue_index=0,
+            expected_call_sid="CAexpected",
+        )
+    )
+
+    failure = logged_events(log_path)[0]
+    assert failure["event"] == "media.start_failed"
+    assert failure["payload"]["reason"] == "ValueError"
+    assert failure["payload"]["expected_call_sid"] == "CAexpected"
     assert twilio.close_codes == [1008]
     assert connector.calls == []
 

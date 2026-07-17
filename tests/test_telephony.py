@@ -441,6 +441,17 @@ def test_twilio_media_websocket_rejects_missing_or_wrong_capability(monkeypatch,
 
     assert disconnected.value.code == 1008
 
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "runtime" / "logs" / "events.jsonl").read_text().splitlines()
+    ]
+    assert [record["event"] for record in records[-2:]] == [
+        "media.connection_attempt",
+        "media.capability_rejected",
+    ]
+    assert records[-1]["payload"]["capability_present"] == (path != "/api/twilio/media")
+    assert "wrong" not in json.dumps(records[-2:])
+
 
 def test_twilio_media_websocket_rejects_valid_capability_with_invalid_signature(monkeypatch, tmp_path):
     client, capability, _ = capability_client(monkeypatch, tmp_path)

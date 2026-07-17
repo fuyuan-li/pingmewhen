@@ -273,24 +273,57 @@ class RealtimeSessionHub:
         await twilio.accept()
         try:
             start = await self._receive_start(twilio)
-        except (WebSocketDisconnect, ValueError):
+        except (WebSocketDisconnect, ValueError) as error:
+            self._events.append(
+                "media.start_failed",
+                {
+                    "reason": type(error).__name__,
+                    "detail": str(error),
+                    "expected_task_id": expected_task_id,
+                    "expected_queue_index": expected_queue_index,
+                    "expected_call_sid": expected_call_sid,
+                },
+            )
             with suppress(RuntimeError):
                 await twilio.close(code=1008)
             return
-        stream_sid = start["streamSid"]
-        parameters = start["start"].get("customParameters", {})
-        task_id = str(parameters.get("task_id", ""))
+        task_id = ""
+        queue_index_raw = ""
+        call_sid = ""
+        failure_check = "start_payload"
         try:
-            queue_index = int(parameters.get("queue_index", ""))
+            stream_sid = str(start["streamSid"])
+            parameters = start["start"].get("customParameters", {})
+            task_id = str(parameters.get("task_id", ""))
+            queue_index_raw = str(parameters.get("queue_index", ""))
             call_sid = str(start["start"].get("callSid", ""))
+            failure_check = "queue_index_format"
+            queue_index = int(queue_index_raw)
+            failure_check = "task_id"
             if expected_task_id and task_id != expected_task_id:
                 raise ValueError("Media task identity does not match the approved call.")
+            failure_check = "queue_index"
             if expected_queue_index is not None and queue_index != expected_queue_index:
                 raise ValueError("Media queue identity does not match the approved call.")
+            failure_check = "call_sid"
             if expected_call_sid and call_sid != expected_call_sid:
                 raise ValueError("Media call identity does not match the approved call.")
+            failure_check = "context_reader"
             context = self._context_reader(task_id, queue_index)
-        except Exception:
+        except Exception as error:
+            self._events.append(
+                "media.identity_rejected",
+                {
+                    "check": failure_check,
+                    "reason": type(error).__name__,
+                    "expected_task_id": expected_task_id,
+                    "received_task_id": task_id,
+                    "expected_queue_index": expected_queue_index,
+                    "received_queue_index": queue_index_raw,
+                    "expected_call_sid": expected_call_sid,
+                    "received_call_sid": call_sid,
+                },
+            )
             await twilio.close(code=1008)
             return
         credentials = self._credentials()

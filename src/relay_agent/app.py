@@ -454,12 +454,29 @@ def create_app(
 
     @app.websocket("/api/twilio/media")
     async def twilio_media_without_capability(websocket: WebSocket) -> None:
+        events.append(
+            "media.connection_attempt",
+            {"path": websocket.url.path, "capability_present": False},
+        )
+        events.append(
+            "media.capability_rejected",
+            {"path": websocket.url.path, "capability_present": False, "reason": "missing"},
+        )
         await websocket.close(code=1008)
 
     @app.websocket("/api/twilio/media/{capability_token}")
     async def twilio_media(websocket: WebSocket, capability_token: str) -> None:
+        redacted_path = redact_capabilities(websocket.url.path)
+        events.append(
+            "media.connection_attempt",
+            {"path": redacted_path, "capability_present": bool(capability_token)},
+        )
         capability = telephony.capabilities.authenticate("media", capability_token)
         if capability is None:
+            events.append(
+                "media.capability_rejected",
+                {"path": redacted_path, "capability_present": bool(capability_token), "reason": "not_active"},
+            )
             await websocket.close(code=1008)
             return
         signature = websocket.headers.get("X-Twilio-Signature", "")
