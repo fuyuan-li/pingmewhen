@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 GATEKEEPER_INSTRUCTIONS = (
@@ -21,8 +21,8 @@ GATEKEEPER_INSTRUCTIONS = (
     "street address does not make an unknown apartment number answerable. For unanswerable, write one concise question "
     "to show privately to the represented user in the same language as the representative's latest utterance. The "
     "private question must ask only for the fact or decision requested in that latest utterance; never pull in a phone "
-    "number, contact, dialing step, or unrelated planning detail. Do not answer the representative and do not add "
-    "explanations."
+    "number, contact, dialing step, or unrelated planning detail. Address the represented user identified by "
+    "caller_name, never the target or representative. Do not answer the representative and do not add explanations."
 )
 
 
@@ -45,15 +45,6 @@ class PrivateMessageRoute(BaseModel):
     disposition: Literal["answer", "context_update", "call_instruction", "private_meta"]
     speaker_update: ContextUpdate | None = None
     private_reply: str = ""
-
-    @model_validator(mode="after")
-    def validate_route(self) -> "PrivateMessageRoute":
-        if self.disposition == "private_meta":
-            if self.speaker_update is not None or not self.private_reply.strip():
-                raise ValueError("Private meta messages require a private reply and no Speaker update.")
-        elif self.speaker_update is None:
-            raise ValueError("Representative-facing messages require a structured Speaker update.")
-        return self
 
 
 @dataclass(frozen=True)
@@ -110,7 +101,9 @@ class PrivateMessageRequest:
                     "call_instruction for a direction Relay should carry out aloud now. Reformulate any Speaker update "
                     "as neutral representative-facing information; never include private chatter or an acknowledgement "
                     "such as 'Got it.' A question addressed to Relay itself, testing message, unrelated aside, or other "
-                    "meta conversation is private_meta: answer it briefly in private_reply and provide no Speaker update."
+                    "meta conversation is private_meta: answer it briefly in private_reply and provide no Speaker update. "
+                    "When disposition is answer, speaker_update is mandatory: copy the factual meaning of the private "
+                    "message into its value and summary instead of restating that the answer is missing."
                 ),
             },
             {
@@ -197,7 +190,31 @@ class OpenAIGatekeeper:
             raise RuntimeError("Gatekeeper returned no private-message route.")
         if route.disposition == "answer" and not request.waiting_for_user:
             raise RuntimeError("Gatekeeper marked a message as an answer when no answer was pending.")
-        return route
+        if route.disposition == "private_meta":
+            return route.model_copy(
+                update={
+                    "speaker_update": None,
+                    "private_reply": route.private_reply.strip() or "I kept that message in our private workspace.",
+                }
+            )
+        if route.disposition == "answer":
+            return route.model_copy(
+                update={
+                    "speaker_update": ContextUpdate(
+                        kind="fact",
+                        key="pending_question_answer",
+                        value=request.text.strip(),
+                        summary=(
+                            "The represented person supplied this answer to the pending question: "
+                            f"{request.text.strip()}"
+                        ),
+                    ),
+                    "private_reply": "",
+                }
+            )
+        if route.speaker_update is not None:
+            return route
+        raise RuntimeError("Gatekeeper omitted the required Speaker update.")
 
     def _client_for_key(self, api_key: str):
         with self._client_lock:

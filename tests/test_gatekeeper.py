@@ -104,8 +104,83 @@ def test_gatekeeper_routes_private_meta_without_speaker_update_and_answers_with_
 
     assert meta.disposition == "private_meta"
     assert meta.speaker_update is None
-    assert answer.speaker_update.key == "apartment_number"
+    assert answer.speaker_update == ContextUpdate(
+        kind="fact",
+        key="pending_question_answer",
+        value="It is 4B.",
+        summary="The represented person supplied this answer to the pending question: It is 4B.",
+    )
     assert responses.calls[0]["text_format"] is PrivateMessageRoute
+
+
+def test_gatekeeper_repairs_answer_that_omits_speaker_update():
+    class IncompleteRoutingResponses:
+        def parse(self, **arguments):
+            return SimpleNamespace(
+                output_parsed=PrivateMessageRoute(
+                    disposition="answer",
+                    private_reply="The apartment number is still missing.",
+                )
+            )
+
+    gatekeeper = OpenAIGatekeeper(
+        lambda: "sk-test",
+        lambda: "gpt-5.4-nano",
+        client_factory=lambda **kwargs: SimpleNamespace(responses=IncompleteRoutingResponses()),
+    )
+    request = PrivateMessageRequest(
+        text="30C",
+        context={},
+        context_updates=(),
+        waiting_for_user=True,
+        pending_question="What is the apartment or unit number?",
+    )
+
+    route = asyncio.run(gatekeeper.route_private_message(request))
+
+    assert route.disposition == "answer"
+    assert route.private_reply == ""
+    assert route.speaker_update == ContextUpdate(
+        kind="fact",
+        key="pending_question_answer",
+        value="30C",
+        summary="The represented person supplied this answer to the pending question: 30C",
+    )
+
+
+def test_gatekeeper_keeps_private_meta_isolated_when_model_returns_an_update():
+    class UnsafeMetaRoutingResponses:
+        def parse(self, **arguments):
+            return SimpleNamespace(
+                output_parsed=PrivateMessageRoute(
+                    disposition="private_meta",
+                    speaker_update=ContextUpdate(
+                        kind="fact",
+                        key="private_message",
+                        value="Who are you?",
+                        summary="The represented person asked who Relay is.",
+                    ),
+                )
+            )
+
+    gatekeeper = OpenAIGatekeeper(
+        lambda: "sk-test",
+        lambda: "gpt-5.4-nano",
+        client_factory=lambda **kwargs: SimpleNamespace(responses=UnsafeMetaRoutingResponses()),
+    )
+    request = PrivateMessageRequest(
+        text="Who are you?",
+        context={},
+        context_updates=(),
+        waiting_for_user=False,
+        pending_question="",
+    )
+
+    route = asyncio.run(gatekeeper.route_private_message(request))
+
+    assert route.disposition == "private_meta"
+    assert route.speaker_update is None
+    assert route.private_reply == "I kept that message in our private workspace."
 
 
 def test_gatekeeper_reuses_the_client_for_the_same_api_key():
