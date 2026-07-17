@@ -33,6 +33,14 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert initial_response()["type"] == "response.create"
 
 
+def test_realtime_session_uses_configured_transcription_model(monkeypatch):
+    monkeypatch.setenv("RELAY_TRANSCRIPTION_MODEL", "gpt-4o-transcribe")
+
+    update = realtime_session_update(sample_context())
+
+    assert update["session"]["audio"]["input"]["transcription"]["model"] == "gpt-4o-transcribe"
+
+
 def test_private_instruction_is_context_only_and_transcripts_are_classified():
     instruction = private_instruction("Ask about a multi-policy discount.")
 

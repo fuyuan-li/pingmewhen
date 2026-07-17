@@ -43,7 +43,22 @@ Use `relay demo` to test the complete simulated workflow without credentials. St
 - `TWILIO_AUTH_TOKEN`
 - `TWILIO_FROM_NUMBER`
 
-Environment variables take precedence, so a local `.env` remains supported. Otherwise the dashboard stores the values in `~/.relay/credentials.json` with owner-only permissions. Relay's maintainers never receive them and pay none of the user's provider costs. `OPENAI_MODEL` can override the default `gpt-5.6` planner model.
+Environment variables take precedence, so a local `.env` remains supported. Otherwise the dashboard stores credentials in `~/.relay/credentials.json` with owner-only permissions. Relay's maintainers never receive them and pay none of the user's provider costs.
+
+The three model roles are independently configurable:
+
+```env
+# Responses API planning: gpt-5.4-mini, gpt-5.4, or gpt-5.6
+OPENAI_MODEL=gpt-5.4-mini
+
+# Realtime speech-to-speech: gpt-realtime-2.1-mini or gpt-realtime-2.1
+RELAY_REALTIME_MODEL=gpt-realtime-2.1-mini
+
+# Live input transcription: gpt-4o-mini-transcribe or gpt-4o-transcribe
+RELAY_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
+```
+
+These are passed through as model IDs rather than restricted to a fixed allowlist, so advanced users can select later compatible models without a Relay release. Text-only GPT-5.4 and GPT-5.6 models cannot be used for `RELAY_REALTIME_MODEL`.
 
 An approved task phone action starts `pycloudflared` on demand, uses its HTTPS address for that call's Twilio voice/status callbacks and WSS media endpoint, and stops the tunnel when no calls remain or Relay exits. There is no `RELAY_PUBLIC_BASE_URL` setup step. Every inbound Twilio HTTP or WebSocket request is checked with Twilio's SDK and the local `TWILIO_AUTH_TOKEN`. Audio remains PCMU end to end between Twilio Media Streams and OpenAI Realtime; the dashboard polls durable local task state to show completed transcript turns.
 

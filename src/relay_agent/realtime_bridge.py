@@ -54,6 +54,7 @@ class ActiveRealtimeSession:
 
 def realtime_session_update(context: dict[str, Any]) -> dict[str, Any]:
     action = context["action"]
+    transcription_model = os.environ.get("RELAY_TRANSCRIPTION_MODEL", "gpt-4o-mini-transcribe").strip()
     private_context = "\n".join(context.get("private_messages", [])[-20:])
     document_context = context.get("document_context", "")
     prior_calls = context.get("prior_call_transcript", "")
@@ -78,7 +79,7 @@ def realtime_session_update(context: dict[str, Any]) -> dict[str, Any]:
             "audio": {
                 "input": {
                     "format": {"type": "audio/pcmu"},
-                    "transcription": {"model": "gpt-4o-mini-transcribe", "language": "en"},
+                    "transcription": {"model": transcription_model, "language": "en"},
                     "turn_detection": {
                         "type": "server_vad",
                         "create_response": True,
