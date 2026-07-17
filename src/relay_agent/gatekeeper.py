@@ -16,8 +16,10 @@ GATEKEEPER_INSTRUCTIONS = (
     "from the supplied task context and user updates, or when no private fact, preference, decision, or authority is "
     "needed, including greetings, acknowledgements, and questions about facts the representative owns. Return "
     "unanswerable only when responding requires guessing or inventing the user's personal fact, preference, decision, "
-    "or authority. For unanswerable, write one concise question to show privately to the represented user. Do not "
-    "answer the representative and do not add explanations."
+    "or authority. A representative's direct request for a personal, account, property, scheduling, or preference "
+    "detail is unanswerable unless that exact detail is explicit; a related fact is not a substitute. For example, a "
+    "street address does not make an unknown apartment number answerable. For unanswerable, write one concise question "
+    "to show privately to the represented user. Do not answer the representative and do not add explanations."
 )
 
 
