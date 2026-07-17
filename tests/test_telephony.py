@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 import time
 
@@ -219,6 +220,28 @@ def test_twilio_webhook_signature_accepts_valid_and_rejects_invalid_or_missing(m
     assert 'name="task_id" value="task-123"' in valid.text
     assert invalid.status_code == 403
     assert missing.status_code == 403
+
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "runtime" / "logs" / "events.jsonl").read_text().splitlines()
+    ]
+    rejected = [record for record in records if record["event"] == "twilio.signature_rejected"]
+    invalid_diagnostic = next(record["payload"] for record in rejected if record["payload"]["received_signature"])
+    validator = RequestValidator("test-auth-token")
+    assert invalid_diagnostic == {
+        "path": "/api/twilio/voice",
+        "parameter_names": ["CallSid", "From"],
+        "external_url": url,
+        "raw_query_string": "task_id=task-123&queue_index=0",
+        "received_signature": "invalid",
+        "url_with_port": "https://relay.trycloudflare.com:443/api/twilio/voice?task_id=task-123&queue_index=0",
+        "computed_signature_with_port": validator.compute_signature(
+            "https://relay.trycloudflare.com:443/api/twilio/voice?task_id=task-123&queue_index=0",
+            parameters,
+        ),
+        "url_without_port": url,
+        "computed_signature_without_port": validator.compute_signature(url, parameters),
+    }
 
 
 def test_twilio_voice_signature_preserves_repeated_form_values(monkeypatch, tmp_path):

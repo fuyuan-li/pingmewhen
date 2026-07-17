@@ -5,10 +5,12 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
+from twilio.request_validator import RequestValidator, add_port, remove_port
 
 from relay_agent.agentic_engine import AgenticTaskEngine
 from relay_agent.context_store import ContextStore, InvalidContext
@@ -126,11 +128,22 @@ def create_app(
             form,
             signature,
         ):
+            validator = RequestValidator(resolved_credentials().twilio_auth_token)
+            parsed_external_url = urlparse(external_url)
+            url_with_port = add_port(parsed_external_url)
+            url_without_port = remove_port(parsed_external_url)
             events.append(
                 "twilio.signature_rejected",
                 {
                     "path": request.url.path,
                     "parameter_names": sorted({str(key) for key, _ in form.multi_items()}),
+                    "external_url": external_url,
+                    "raw_query_string": request.url.query,
+                    "received_signature": signature,
+                    "url_with_port": url_with_port,
+                    "computed_signature_with_port": validator.compute_signature(url_with_port, form),
+                    "url_without_port": url_without_port,
+                    "computed_signature_without_port": validator.compute_signature(url_without_port, form),
                 },
             )
             raise HTTPException(status_code=403, detail="Twilio request validation failed.")
