@@ -71,12 +71,85 @@ class FakeTwilio:
     def __init__(self, incoming=None):
         self.sent = []
         self.incoming = list(incoming or [])
+        self.accepted = False
+        self.close_codes = []
+
+    async def accept(self):
+        self.accepted = True
+
+    async def close(self, code):
+        self.close_codes.append(code)
 
     async def send_json(self, value):
         self.sent.append(value)
 
     async def receive_json(self):
         return self.incoming.pop(0)
+
+
+class FakeConnector:
+    def __init__(self, realtime):
+        self.realtime = realtime
+        self.calls = []
+
+    def __call__(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self
+
+    async def __aenter__(self):
+        return self.realtime
+
+    async def __aexit__(self, exception_type, exception, traceback):
+        return False
+
+
+class BlockingRealtime(FakeRealtime):
+    def __init__(self):
+        super().__init__()
+        self.cancelled = False
+        self._blocked = asyncio.Event()
+
+    async def __anext__(self):
+        try:
+            await self._blocked.wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        raise StopAsyncIteration
+
+
+class FailingRealtime(FakeRealtime):
+    async def __anext__(self):
+        raise RuntimeError("Realtime transport failed")
+
+
+class BlockingTwilio(FakeTwilio):
+    def __init__(self, incoming=None):
+        super().__init__(incoming)
+        self.cancelled = False
+        self._blocked = asyncio.Event()
+
+    async def receive_json(self):
+        if self.incoming:
+            return self.incoming.pop(0)
+        try:
+            await self._blocked.wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        raise RuntimeError("Twilio receive unexpectedly resumed")
+
+
+def start_message(task_id="task-1"):
+    return {
+        "event": "start",
+        "streamSid": "MZ1",
+        "start": {"customParameters": {"task_id": task_id, "queue_index": "0"}},
+    }
+
+
+def logged_events(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
 
 
 def test_live_instruction_is_injected_and_requests_a_natural_response(tmp_path):
@@ -208,3 +281,54 @@ def test_secure_local_tts_sends_one_field_to_twilio_then_resumes(tmp_path):
     assert [message["event"] for message in twilio.sent] == ["media", "mark"]
     assert session.secure_mode is False
     assert [event["type"] for event in realtime.sent] == ["input_audio_buffer.clear", "response.create"]
+
+
+def test_bridge_twilio_stop_cancels_realtime_and_cleans_up_session(tmp_path):
+    realtime = BlockingRealtime()
+    connector = FakeConnector(realtime)
+    twilio = FakeTwilio([start_message(), {"event": "stop"}])
+    connected = []
+    log_path = tmp_path / "events.jsonl"
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(log_path),
+        connector=connector,
+        call_connected=lambda task_id: connected.append(task_id) or {},
+    )
+
+    asyncio.run(hub.bridge(twilio))
+
+    events = logged_events(log_path)
+    assert twilio.accepted is True
+    assert twilio.close_codes == []
+    assert connected == ["task-1"]
+    assert realtime.cancelled is True
+    assert "task-1" not in hub._sessions
+    assert [event["event"] for event in events] == ["realtime.connected", "realtime.disconnected"]
+
+
+def test_bridge_realtime_error_is_reported_and_never_leaves_a_stale_session(tmp_path):
+    realtime = FailingRealtime()
+    connector = FakeConnector(realtime)
+    twilio = BlockingTwilio([start_message()])
+    log_path = tmp_path / "events.jsonl"
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(log_path),
+        connector=connector,
+    )
+
+    asyncio.run(hub.bridge(twilio))
+
+    events = logged_events(log_path)
+    failed = next(event for event in events if event["event"] == "realtime.failed")
+    assert twilio.accepted is True
+    assert twilio.cancelled is True
+    assert twilio.close_codes == [1011]
+    assert failed["payload"]["reason"] == "RuntimeError"
+    assert "task-1" not in hub._sessions
+    assert events[-1]["event"] == "realtime.disconnected"

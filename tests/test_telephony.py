@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 from twilio.request_validator import RequestValidator
 
 from relay_agent.app import create_app
@@ -154,3 +156,42 @@ def test_twilio_webhook_signature_accepts_valid_and_rejects_invalid_or_missing(m
     assert 'name="task_id" value="task-123"' in valid.text
     assert invalid.status_code == 403
     assert missing.status_code == 403
+
+
+def media_websocket_client(monkeypatch, tmp_path):
+    monkeypatch.setenv("RELAY_MODE", "standard")
+    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
+    tunnel = TunnelManager(
+        8765,
+        launcher=lambda port: SimpleNamespace(tunnel="https://relay.trycloudflare.com"),
+        terminator=lambda port: None,
+    )
+    tunnel.acquire()
+    return TestClient(create_app(credential_store=configured_store(tmp_path), tunnel_manager=tunnel))
+
+
+def test_twilio_media_websocket_accepts_valid_signature(monkeypatch, tmp_path):
+    client = media_websocket_client(monkeypatch, tmp_path)
+    url = "wss://relay.trycloudflare.com/api/twilio/media"
+    signature = RequestValidator("test-auth-token").compute_signature(url, {})
+
+    with client.websocket_connect(
+        "/api/twilio/media",
+        headers={"X-Twilio-Signature": signature},
+    ) as websocket:
+        websocket.send_json({"event": "stop"})
+        with pytest.raises(WebSocketDisconnect) as disconnected:
+            websocket.receive_json()
+
+    assert disconnected.value.code == 1008
+
+
+@pytest.mark.parametrize("headers", [{"X-Twilio-Signature": "invalid"}, {}])
+def test_twilio_media_websocket_rejects_invalid_or_missing_signature(monkeypatch, tmp_path, headers):
+    client = media_websocket_client(monkeypatch, tmp_path)
+
+    with pytest.raises(WebSocketDisconnect) as disconnected:
+        with client.websocket_connect("/api/twilio/media", headers=headers):
+            pass
+
+    assert disconnected.value.code == 1008
