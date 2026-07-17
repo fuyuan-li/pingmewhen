@@ -178,7 +178,9 @@ The simulated representative will not intentionally repeat fake card data. A rep
 
 ## Authentication and model access
 
-ChatGPT/Codex login cannot be treated as authorization for arbitrary OpenAI Realtime API calls. P0 therefore does not request an OpenAI API key from demo users and does not route the voice loop through Codex.
+Codex is used as Relay's repository-scale engineering agent, guided by `AGENTS.md`, the PRD, this design, and the implementation plan. It implements, reviews, and verifies the cross-cutting product slice. GPT-5.6 has a distinct runtime role: standard `relay` uses it through the Responses API and Pydantic Structured Outputs for private planning, while application code owns approval and execution permissions.
+
+ChatGPT/Codex login authorizes Codex workloads; it cannot be treated as authorization for arbitrary OpenAI Realtime API calls. P0 therefore does not request an OpenAI API key from demo users. The voice media path uses the limited hosted gateway rather than tunneling Realtime traffic through Codex. This is a credential and transport boundary, not the project's Codex usage story.
 
 Local development of standard model planning reads `OPENAI_API_KEY` only in the backend process. The browser never receives or asks for it. This developer setup does not replace the hosted gateway design.
 

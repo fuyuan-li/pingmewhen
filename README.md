@@ -12,6 +12,17 @@ The standard `relay` mode now has a model-driven private planning loop backed by
 
 `relay demo` remains the deterministic end-to-end insurance preview. The **Private Workspace** holds task memory; the **Call Console** presents paced simulated calls, barge-in, approval gates, per-call history, and the field-by-field fake payment handoff.
 
+## How Codex and GPT-5.6 are used
+
+Relay is built with Codex as the repository-scale engineering agent. The repo-level [`AGENTS.md`](AGENTS.md) gives Codex the durable product, safety, architecture, and verification contract; Codex uses that contract together with the PRD and design docs to implement, review, and test changes across the application rather than generating isolated snippets. Concrete results include the schema-validated planner, application-owned approval state machine, persistent task store, redacted event log, deterministic call simulator, and their tests.
+
+The two OpenAI layers have deliberately different jobs:
+
+- **Codex builds and verifies Relay:** it works across the repository, keeps implementation aligned with the product constraints, runs the test suite, and records key decisions in the docs.
+- **GPT-5.6 runs Relay's private planner:** standard `relay` calls the Responses API with Pydantic Structured Outputs to clarify goals and produce typed action plans; application code, not model output, owns approval and execution boundaries.
+
+Codex is therefore central to the engineering workflow, but it is not an audio transport or a substitute credential for the Realtime API. The submission's Codex Session ID identifies the session in which the core functionality was built.
+
 ## Commands
 
 ```bash
@@ -68,4 +79,4 @@ By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `.
 - Browser TTS currently plays on the user device. Injecting local TTS only into the representative’s phone leg requires the planned shared media gateway.
 - Only fake card and identity data are used in the demo.
 - PDF context is stored locally under `.relay/contexts/`. Standard production planning sends bounded extracted text to the configured model; deterministic demo mode does not.
-- ChatGPT/Codex authentication does not currently authorize third-party Realtime API use. The hackathon demo uses a limited hosted backend for Realtime and telephony.
+- ChatGPT/Codex authentication is used only for Codex workloads; Relay does not reuse it as a third-party Realtime API credential. The hosted demo backend owns any Realtime and telephony credentials. This media/authentication boundary is separate from the Codex engineering workflow described above.
