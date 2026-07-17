@@ -37,6 +37,7 @@ class FakePlanner:
                     target="Three user-approved providers",
                     needs_lookup=True,
                     phone_number="",
+                    contact_provided_by="research",
                     contact_source_url="",
                 ),
                 PlanAction(
@@ -46,6 +47,7 @@ class FakePlanner:
                     target="Example Provider",
                     needs_lookup=False,
                     phone_number="+12025550199",
+                    contact_provided_by="research",
                     contact_source_url="https://example.com/contact",
                 ),
             ],
@@ -112,6 +114,7 @@ def test_approval_refuses_an_unsourced_phone_action(tmp_path):
                         target="Provider",
                         needs_lookup=True,
                         phone_number="",
+                        contact_provided_by="research",
                         contact_source_url="",
                     )
                 ],
@@ -128,6 +131,83 @@ def test_approval_refuses_an_unsourced_phone_action(tmp_path):
 
     assert task["stage"] == "execution_blocked"
     assert task["execution_queue"] == []
+
+
+def test_user_provided_contact_without_source_url_is_executable(tmp_path):
+    class UserContactPlanner:
+        ready = True
+        model = "test"
+
+        def plan(self, goal, messages, contexts):
+            return PlanningTurn(
+                status="plan_ready",
+                message="Review this plan.",
+                plan_summary="Call the user's personal contact.",
+                actions=[
+                    PlanAction(
+                        kind="phone_call",
+                        label="Call Alex",
+                        purpose="Ask about the requested service.",
+                        target="Alex",
+                        needs_lookup=False,
+                        phone_number="+12027010927",
+                        contact_provided_by="user",
+                        contact_source_url="",
+                    )
+                ],
+            )
+
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        UserContactPlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call my contact Alex at +12027010927.")
+    task = engine.act(task["id"], "answer", "approve")
+
+    assert task["stage"] == "execution_ready"
+    assert task["execution_queue"][0]["action"]["contact_provided_by"] == "user"
+    assert task["execution_queue"][0]["action"]["contact_source_url"] == ""
+
+
+def test_researched_contact_without_source_url_remains_blocked(tmp_path):
+    class UnverifiedResearchPlanner:
+        ready = True
+        model = "test"
+
+        def plan(self, goal, messages, contexts):
+            return PlanningTurn(
+                status="plan_ready",
+                message="Review this plan.",
+                plan_summary="Call a researched service number.",
+                actions=[
+                    PlanAction(
+                        kind="phone_call",
+                        label="Call provider",
+                        purpose="Ask about service.",
+                        target="Example Provider",
+                        needs_lookup=False,
+                        phone_number="+12025550199",
+                        contact_provided_by="research",
+                        contact_source_url="",
+                    )
+                ],
+            )
+
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        UnverifiedResearchPlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call Example Provider.")
+    task = engine.act(task["id"], "answer", "approve")
+    status = next(event for event in reversed(task["events"]) if event["type"] == "status")
+
+    assert task["stage"] == "execution_blocked"
+    assert task["execution_queue"] == []
+    assert "official contact source URL is missing or invalid" in status["text"]
 
 
 def test_approval_normalizes_human_formatted_phone_number_to_e164(tmp_path):
@@ -148,6 +228,7 @@ def test_approval_normalizes_human_formatted_phone_number_to_e164(tmp_path):
                         target="Example Insurance",
                         needs_lookup=False,
                         phone_number="+1 (202) 701-0927",
+                        contact_provided_by="research",
                         contact_source_url="https://example.com/contact",
                     )
                 ],
@@ -185,6 +266,7 @@ def test_malformed_phone_number_block_names_the_offending_action(tmp_path):
                         target="Example Telecom",
                         needs_lookup=False,
                         phone_number="202-CALL-NOW",
+                        contact_provided_by="research",
                         contact_source_url="https://example.com/contact",
                     )
                 ],

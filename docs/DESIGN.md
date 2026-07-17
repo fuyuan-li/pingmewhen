@@ -37,7 +37,7 @@ The HTTPS tunnel is lazy. An explicitly approved call acquisition starts `pyclou
 
 Every inbound Twilio HTTP webhook is validated before handling with the Twilio SDK's `RequestValidator`, the exact public URL, submitted form parameters, the `X-Twilio-Signature` header, and the local user's Auth Token. Missing or invalid signatures receive HTTP 403.
 
-Standard `relay` uses the Responses API with a Pydantic Structured Output schema for private planning. The model may ask for missing context, use hosted web search for current official contacts, and propose typed actions, but application code owns approval transitions and execution permissions. A phone action is executable only with a sourced E.164 number. After approval, application code queues those calls, gives each call a new Realtime session, passes Twilio's PCMU audio in both directions, persists completed transcript turns, and advances the queue. `relay demo` selects the deterministic insurance engine instead. Both engines persist complete namespaced task snapshots in SQLite.
+Standard `relay` uses the Responses API with a Pydantic Structured Output schema for private planning. The model may ask for missing context, use hosted web search for current official contacts, and propose typed actions, but application code owns approval transitions and execution permissions. A phone action is executable only with an E.164 number whose source is classified: researched contacts require an official HTTP(S) source URL, while a number directly supplied by the user is trusted as user-sourced and requires no artificial URL. After approval, application code queues those calls, gives each call a new Realtime session, passes Twilio's PCMU audio in both directions, persists completed transcript turns, and advances the queue. `relay demo` selects the deterministic insurance engine instead. Both engines persist complete namespaced task snapshots in SQLite.
 
 ## Components
 
@@ -112,7 +112,7 @@ For the safe hackathon demo, the representative can be a simulated voice partici
 
 The orchestrator owns the goal and may schedule zero, one, or several calls. The insurance demo is a task recipe, not a special product mode in the core domain.
 
-The production execution slice supports approved phone-call actions. Approval is durably recorded, and application code refuses to dial unsourced or non-E.164 targets. Non-phone actions remain planning artifacts and are not executed. This prevents the planning model from turning an unimplemented action into a fake success.
+The production execution slice supports approved phone-call actions. Approval is durably recorded, and application code refuses to dial non-E.164 targets or researched contacts without an official source URL. User-provided contacts are explicitly marked as such and do not require a URL. Non-phone actions remain planning artifacts and are not executed. This prevents the planning model from turning an unimplemented action into a fake success.
 
 Core state:
 

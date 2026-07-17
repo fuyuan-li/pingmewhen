@@ -38,6 +38,10 @@
       .lede { max-width: 800px; margin: 0; color: #606772; font-size: 17px; line-height: 1.55; }
       .panel { overflow: hidden; border: 1px solid #dde1e7; border-radius: 22px; background: white; box-shadow: 0 20px 60px rgba(30, 35, 50, .09); }
       .intake { padding: 24px; }
+      .start-progress { display: none; align-items: center; gap: 11px; margin-top: 14px; padding: 12px 14px; border: 1px solid #d9ddff; border-radius: 12px; color: #424b9f; background: #f2f3ff; font-size: 12px; font-weight: 650; line-height: 1.4; }
+      .start-progress.visible { display: flex; }
+      .spinner { flex: 0 0 auto; width: 17px; height: 17px; border: 2px solid #c9cdf8; border-top-color: #5865f2; border-radius: 50%; animation: spin .8s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
       .setup-panel { max-width: 720px; margin: 54px auto 0; padding: 26px; }
       .setup-panel h1 { margin-bottom: 10px; font-size: clamp(28px, 4vw, 40px); }
       .setup-copy { margin: 0 0 22px; color: #606772; line-height: 1.55; }
@@ -236,10 +240,14 @@
           <h1>Delegate the call. Keep the control.</h1>
           <p class="lede">Give Relay a goal and the relevant context. It handles the phone calls, keeps you informed visually, and brings you in only when your knowledge, approval, or voice is needed.</p>
         </div>
-        <section class="panel intake">
+        <section id="intake-panel" class="panel intake">
           <label for="goal">What should Relay accomplish?</label>
           <textarea id="goal" placeholder="Describe your goal and constraints…"></textarea>
           <div id="intake-error" class="error"></div>
+          <div id="start-progress" class="start-progress" role="status" aria-live="polite">
+            <span class="spinner" aria-hidden="true"></span>
+            <span>Relay is researching your goal and building a reviewable plan. Web research can take several seconds.</span>
+          </div>
           <div class="file-row">
             <label class="file-button" for="context-file">Attach PDF context</label>
             <input id="context-file" type="file" accept="application/pdf,.pdf" />
@@ -451,7 +459,9 @@
 
       startButton.addEventListener('click', async () => {
         startButton.disabled = true;
-        startButton.textContent = 'Starting…';
+        startButton.textContent = 'Researching…';
+        document.querySelector('#intake-panel').setAttribute('aria-busy', 'true');
+        document.querySelector('#start-progress').classList.add('visible');
         document.querySelector('#intake-error').style.display = 'none';
         try {
           const contexts = [];
@@ -475,6 +485,8 @@
           const intakeError = document.querySelector('#intake-error');
           intakeError.textContent = error.message;
           intakeError.style.display = 'block';
+          document.querySelector('#intake-panel').removeAttribute('aria-busy');
+          document.querySelector('#start-progress').classList.remove('visible');
           startButton.disabled = false;
           startButton.textContent = 'Start task';
         }
@@ -785,7 +797,7 @@
       function agentPlanMarkup(event) {
         const actions = (event.actions || []).map(action => `<div class="plan-row">
           <div><strong>${escapeHtml(action.label)}</strong><div class="agent-plan-target">${escapeHtml(action.purpose)}</div></div>
-          <span class="plan-phone">${escapeHtml(action.target)}${action.phone_number ? ` · ${escapeHtml(action.phone_number)}` : ''}${action.contact_source_url ? ` · ${escapeHtml(action.contact_source_url)}` : ''}${action.needs_lookup ? ' · lookup required' : ''}</span>
+          <span class="plan-phone">${escapeHtml(action.target)}${action.phone_number ? ` · ${escapeHtml(action.phone_number)}` : ''}${action.contact_provided_by === 'user' ? ' · user-provided contact' : ''}${action.contact_source_url ? ` · ${escapeHtml(action.contact_source_url)}` : ''}${action.needs_lookup ? ' · lookup required' : ''}</span>
         </div>`).join('');
         const assumptions = event.assumptions?.length
           ? `<div class="agent-plan-target"><strong>Assumptions</strong></div><ul class="plan-questions">${event.assumptions.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`

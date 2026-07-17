@@ -17,7 +17,12 @@ class PlanAction(BaseModel):
     target: str
     needs_lookup: bool
     phone_number: str = Field(description="Exact E.164 number for executable phone calls, otherwise an empty string.")
-    contact_source_url: str = Field(description="Official source URL for the phone number, otherwise an empty string.")
+    contact_provided_by: Literal["user", "research"] = Field(
+        description="Whether the phone number came directly from the user or from Relay's research."
+    )
+    contact_source_url: str = Field(
+        description="Official source URL for a researched phone number; empty for a user-provided number."
+    )
 
 
 class PlanningTurn(BaseModel):
@@ -67,9 +72,18 @@ class OpenAIPlanner:
                     "You are Relay's private task planner. Turn the user's goal and documents into a concrete, "
                     "reviewable plan. Ask only for genuinely blocking information. Never invent contact details, "
                     "facts, completed research, or completed calls. Use web search when current contact details are "
-                    "needed, prefer the organization's official website, and record the official source URL. A "
-                    "phone_call is executable only when phone_number is an exact E.164 number and needs_lookup is "
-                    "false; otherwise leave phone_number empty and make contact discovery an explicit research step. "
+                    "needed, prefer the organization's official website, set contact_provided_by to research, and "
+                    "record the official source URL. When the user directly supplies a personal or business phone "
+                    "number, set contact_provided_by to user and leave contact_source_url empty; do not invent or seek "
+                    "a URL merely to justify a number the user provided. Set needs_lookup to false only when the number "
+                    "is ready to call. A phone_call is executable only when phone_number is exact E.164; otherwise ask "
+                    "for honest clarification or make contact discovery an explicit research step. Read the entire "
+                    "conversation when interpreting phone numbers and combine fragments supplied across turns. A "
+                    "10-digit US or Canadian national number is complete and needs a +1 country prefix; never claim it "
+                    "is missing a digit. If the user later supplies '+1', combine it with the prior 10-digit number. If "
+                    "country context still needs confirmation, ask explicitly, for example: 'I'll treat this as "
+                    "+12027010927 — confirm?' Do not state a specific technical defect in a phone number unless it is "
+                    "actually true. "
                     "Create one phone_call action per organization and per separate phone conversation. "
                     "Phone calls are actions, not the product boundary. Consequential actions always require user "
                     "approval. For regulated choices, organize factual options but do not choose for the user. "

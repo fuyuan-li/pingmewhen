@@ -38,6 +38,7 @@ class ExecutablePlanner:
                     target="Example Provider",
                     needs_lookup=False,
                     phone_number="+12025550199",
+                    contact_provided_by="research",
                     contact_source_url="https://example.com/contact",
                 )
             ],

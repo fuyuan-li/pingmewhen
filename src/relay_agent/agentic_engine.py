@@ -222,8 +222,13 @@ class AgenticTaskEngine:
                 reasons.append(f'phone number "{supplied_number}" does not resolve to valid E.164')
             if action.get("needs_lookup", True):
                 reasons.append("contact verification is still marked as requiring lookup")
-            if not action.get("contact_source_url", "").startswith(("https://", "http://")):
+            contact_provided_by = action.get("contact_provided_by", "research")
+            if contact_provided_by == "research" and not action.get("contact_source_url", "").startswith(
+                ("https://", "http://")
+            ):
                 reasons.append("official contact source URL is missing or invalid")
+            elif contact_provided_by not in {"user", "research"}:
+                reasons.append("contact source must identify the user or Relay research")
             if reasons:
                 identity = action.get("label") or action.get("target") or "Unnamed phone call"
                 target = action.get("target", "").strip()
