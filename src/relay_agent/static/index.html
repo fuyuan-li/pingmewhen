@@ -208,8 +208,13 @@
       .masked-field { display: flex; gap: 8px; align-items: stretch; margin: 10px 0; }
       .masked-field input { flex: 1 1 auto; min-width: 0; padding: 11px 12px; border: 1px solid #cbd1da; border-radius: 10px; font: 600 16px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .38em; }
       .masked-field input[type="date"], .masked-field input[type="month"] { letter-spacing: normal; font-family: inherit; }
-      .masked-field .reveal { flex: 0 0 auto; width: 44px; border: 1px solid #cbd1da; border-radius: 10px; background: #f4f5f7; font-size: 16px; }
-      .masked-field .reveal.on { border-color: #7580e8; background: #e9ebff; }
+      .masked-field .reveal { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 44px; border: 1px solid #cbd1da; border-radius: 10px; color: #4f5660; background: #f4f5f7; }
+      .masked-field .reveal.on { border-color: #7580e8; color: #3540a1; background: #e9ebff; }
+      .otp-field { display: flex; gap: 9px; align-items: center; margin: 10px 0; }
+      .otp-boxes { display: flex; gap: 8px; flex-wrap: wrap; }
+      .otp-boxes input { width: 38px; height: 46px; padding: 0; text-align: center; border: 1px solid #cbd1da; border-radius: 10px; font: 500 20px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: #17191c; background: #fff; outline: none; }
+      .otp-boxes input:focus { border-color: #5966ef; box-shadow: 0 0 0 3px rgba(89,102,239,.14); }
+      .otp-boxes .otp-group-gap { margin-left: 8px; }
       .error { display: none; margin: 0 0 10px; padding: 9px 11px; border-radius: 9px; color: #9b342d; background: #fff0ef; font-size: 12px; }
       @media (max-width: 650px) {
         .shell { width: min(100% - 16px, 1120px); padding: 12px 0; }
@@ -1156,60 +1161,112 @@
         updateListenButton();
       }
 
+      const EYE_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>';
       const TAKEOVER_FIELD_META = {
         card_number: {label: 'card number', maxlen: 19, min: 13},
-        cvv: {label: 'security code', maxlen: 4, min: 3},
-        full_ssn: {label: 'Social Security number', maxlen: 9, min: 9},
-        ssn_last_four: {label: 'last four of the SSN', maxlen: 4, min: 4},
+        cvv: {label: 'security code', boxes: 4, min: 3, gaps: []},
+        full_ssn: {label: 'Social Security number', boxes: 9, min: 9, gaps: [3, 5]},
+        ssn_last_four: {label: 'last four of the SSN', boxes: 4, min: 4, gaps: []},
       };
+      const TAKEOVER_HINT = 'Typed here, spoken to the representative by local voice only — never sent to the AI or logged.';
+
+      function makeRevealButton(onToggle) {
+        const reveal = document.createElement('button');
+        reveal.className = 'reveal';
+        reveal.type = 'button';
+        reveal.title = 'Show value';
+        reveal.setAttribute('aria-label', 'Show value');
+        reveal.innerHTML = EYE_ICON;
+        reveal.onclick = () => reveal.classList.toggle('on', onToggle());
+        return reveal;
+      }
 
       function renderTakeoverFieldInput(promptBox, field) {
-        const wrap = document.createElement('div');
-        wrap.className = 'masked-field';
-        const input = document.createElement('input');
-        input.autocomplete = 'off';
-        input.setAttribute('aria-label', 'Value spoken locally to the representative');
         const speak = document.createElement('button');
         speak.className = 'choice';
         speak.textContent = 'Speak to the representative';
+        const hint = document.createElement('div');
+        hint.className = 'hint';
+        hint.textContent = TAKEOVER_HINT;
 
         if (field === 'date_of_birth' || field === 'expiration') {
+          const wrap = document.createElement('div');
+          wrap.className = 'masked-field';
+          const input = document.createElement('input');
           input.type = field === 'expiration' ? 'month' : 'date';
+          input.setAttribute('aria-label', 'Value spoken locally to the representative');
           wrap.appendChild(input);
           speak.onclick = () => {
             const value = input.value.trim();
             if (!value) return showError('Pick a date first.');
             sendTakeoverText(value);
           };
-          promptBox.append(wrap, speak);
+          promptBox.append(wrap, speak, hint);
           return;
         }
 
         const meta = TAKEOVER_FIELD_META[field] || {label: 'value', maxlen: 19, min: 1};
+
+        if (meta.boxes) {
+          const wrap = document.createElement('div');
+          wrap.className = 'otp-field';
+          const boxesWrap = document.createElement('div');
+          boxesWrap.className = 'otp-boxes';
+          const boxes = [];
+          for (let i = 0; i < meta.boxes; i += 1) {
+            const box = document.createElement('input');
+            box.type = 'password';
+            box.inputMode = 'numeric';
+            box.maxLength = 1;
+            box.autocomplete = 'off';
+            box.setAttribute('aria-label', `${meta.label} digit ${i + 1}`);
+            if (meta.gaps.includes(i)) box.classList.add('otp-group-gap');
+            box.addEventListener('input', () => {
+              box.value = box.value.replace(/\D/g, '').slice(0, 1);
+              if (box.value && i < boxes.length - 1) boxes[i + 1].focus();
+            });
+            box.addEventListener('keydown', event => {
+              if (event.key === 'Backspace' && !box.value && i > 0) boxes[i - 1].focus();
+            });
+            boxes.push(box);
+            boxesWrap.appendChild(box);
+          }
+          const reveal = makeRevealButton(() => {
+            const showing = boxes[0].type === 'text';
+            boxes.forEach(box => { box.type = showing ? 'password' : 'text'; });
+            return !showing;
+          });
+          wrap.append(boxesWrap, reveal);
+          speak.onclick = () => {
+            const digits = boxes.map(box => box.value.replace(/\D/g, '')).join('');
+            if (digits.length < meta.min) return showError(`Enter the full ${meta.label} first.`);
+            sendTakeoverText(digits);
+          };
+          promptBox.append(wrap, speak, hint);
+          return;
+        }
+
+        const wrap = document.createElement('div');
+        wrap.className = 'masked-field';
+        const input = document.createElement('input');
+        input.autocomplete = 'off';
+        input.setAttribute('aria-label', 'Value spoken locally to the representative');
         input.type = 'password';
         input.inputMode = 'numeric';
         input.maxLength = meta.maxlen;
         input.placeholder = `Enter the ${meta.label}`;
         input.oninput = () => { input.value = input.value.replace(/\D/g, '').slice(0, meta.maxlen); };
-        const reveal = document.createElement('button');
-        reveal.className = 'reveal';
-        reveal.type = 'button';
-        reveal.textContent = '👁';
-        reveal.title = 'Show value';
-        reveal.onclick = () => {
-          const shown = input.type === 'text';
-          input.type = shown ? 'password' : 'text';
-          reveal.classList.toggle('on', !shown);
-        };
+        const reveal = makeRevealButton(() => {
+          const showing = input.type === 'text';
+          input.type = showing ? 'password' : 'text';
+          return !showing;
+        });
         wrap.append(input, reveal);
         speak.onclick = () => {
           const digits = input.value.replace(/\D/g, '');
           if (digits.length < meta.min) return showError(`Enter the full ${meta.label} first.`);
           sendTakeoverText(digits);
         };
-        const hint = document.createElement('div');
-        hint.className = 'hint';
-        hint.textContent = 'Typed here, spoken to the representative by local voice only — never sent to the AI or logged.';
         promptBox.append(wrap, speak, hint);
       }
 
