@@ -461,9 +461,80 @@
         });
       }
 
-      loadRuntime().catch(() => {
-        document.querySelector('#mode').textContent = 'Runtime unavailable';
-      });
+      function mountTakeoverPreview() {
+        setup.style.display = 'none';
+        landing.style.display = 'none';
+        workspace.style.display = 'block';
+        runtimeMode = 'standard';
+        document.querySelector('#model-settings-open').style.display = 'none';
+        document.querySelector('#mode').textContent = 'Takeover UI preview';
+        const callingBoard = document.querySelector('#calling-board');
+        if (callingBoard) callingBoard.style.display = 'none';
+        window.sendTakeoverText = value => setPreviewStatus('Spoken locally to the representative → ' + JSON.stringify(value));
+
+        const timeline = document.querySelector('#planning-timeline');
+        timeline.innerHTML = '';
+        const bar = document.createElement('div');
+        bar.style.cssText = 'display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;';
+        const status = document.createElement('div');
+        status.style.cssText = 'font-size:13px; color:var(--text-secondary,#5a616c); min-height:20px;';
+        function setPreviewStatus(text) { status.textContent = text; }
+
+        const fields = [
+          ['Date of birth', 'date_of_birth'],
+          ['Expiration', 'expiration'],
+          ['Card number', 'card_number'],
+          ['CVV', 'cvv'],
+          ['SSN', 'full_ssn'],
+          ['SSN last 4', 'ssn_last_four'],
+          ['General text', '__general__'],
+        ];
+        const promptBox = document.querySelector('#planning-prompt');
+        function showField(field) {
+          setPreviewStatus('');
+          promptBox.style.display = 'block';
+          promptBox.innerHTML = '';
+          planningInstruction.disabled = field !== '__general__';
+          const q = document.createElement('div');
+          q.className = 'prompt-question';
+          if (field === '__general__') {
+            q.textContent = 'General takeover — type anything below; it is spoken to the representative.';
+            promptBox.appendChild(q);
+            planningInstruction.placeholder = 'Type what you want to say to the representative…';
+            planningInstruction.focus();
+            return;
+          }
+          q.textContent = 'Take over: enter the ' + field.replace(/_/g, ' ');
+          promptBox.appendChild(q);
+          renderTakeoverFieldInput(promptBox, field);
+        }
+        fields.forEach(([label, field]) => {
+          const button = document.createElement('button');
+          button.className = 'choice';
+          button.textContent = label;
+          button.onclick = () => showField(field);
+          bar.appendChild(button);
+        });
+        const dark = document.createElement('button');
+        dark.className = 'choice';
+        dark.textContent = 'Toggle private (dark) mode';
+        dark.onclick = () => {
+          const on = document.body.classList.toggle('private-takeover');
+          workspace.classList.toggle('takeover-active', on);
+        };
+        bar.appendChild(dark);
+        timeline.append(bar, status);
+        showField('card_number');
+      }
+
+      if (new URLSearchParams(location.search).get('preview') === 'takeover') {
+        // Defer to the next tick so the field-rendering consts declared later in this script are initialized.
+        setTimeout(mountTakeoverPreview, 0);
+      } else {
+        loadRuntime().catch(() => {
+          document.querySelector('#mode').textContent = 'Runtime unavailable';
+        });
+      }
 
       document.querySelector('#model-settings-open').addEventListener('click', () => {
         if (currentModelSettings) renderModelSettings(currentModelSettings);

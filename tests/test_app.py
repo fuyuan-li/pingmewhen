@@ -137,6 +137,8 @@ def test_dashboard_keeps_private_speakers_left_and_restores_failed_text():
     assert 'id="listen"' in source
     assert "/listen-capability" in source
     assert "decodeMuLaw" in source
+    assert "mountTakeoverPreview" in source
+    assert "preview') === 'takeover'" in source
     assert "playMuLawFrame" in source
     assert ".send(" not in source[source.index("async function startListening"):source.index("function stopListening")]
     assert "/secure-fields" not in source
