@@ -74,6 +74,7 @@ Exit: the demo is driven by actual voice runtime events rather than scripted UI 
 - [x] Add field-by-field simulated secure-mode transitions and deliberate transcript gaps.
 - [x] Use the browser/OS local speech facility separately for fake card number, expiration, and CVV in the deterministic preview.
 - [x] Inject locally synthesized PCMU only into the representative call leg while both Realtime directions are gated.
+- [x] Accept locally validated real card, expiration, CVV, and full-SSN values in production typed takeover without cloud or log exposure.
 - [x] Route repeated protected-field requests to `HUMAN_TAKEOVER` without repeating the value.
 - [x] Resume Relay only after Twilio confirms local playback and capture only non-sensitive content.
 
@@ -92,7 +93,7 @@ Exit: a judge can run the complete flow reliably without source edits or private
 
 ## Deferred
 
-- Real insurers, cards, or SSNs
+- Real insurers
 - Production insurance/legal review
 - Cross-platform TTS or downloadable voices
 - Additional task demos

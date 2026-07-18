@@ -31,6 +31,22 @@ def is_allowed_fake_value(field: str, value: str) -> bool:
     return "".join(character for character in value if character.isdigit()) == FAKE_SENSITIVE_VALUES.get(field)
 
 
+def is_valid_sensitive_value(field: str, value: str) -> bool:
+    digits = "".join(character for character in value if character.isdigit())
+    if field == "card_number":
+        return 13 <= len(digits) <= 19
+    if field == "expiration":
+        if len(digits) not in {4, 6}:
+            return False
+        month = int(digits[:2])
+        return 1 <= month <= 12
+    if field == "cvv":
+        return len(digits) in {3, 4}
+    if field == "full_ssn":
+        return len(digits) == 9
+    return False
+
+
 def looks_like_protected_value(value: str) -> bool:
     digits = "".join(character for character in value if character.isdigit())
     return bool(

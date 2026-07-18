@@ -728,7 +728,7 @@
             ? task.takeover_sensitive
               ? task.secure_expected_field === 'verification_request'
                 ? 'Type a non-sensitive response · protected values will be rejected…'
-                : 'Type the displayed fake protected value to speak locally…'
+                : 'Type the protected value to speak locally…'
               : 'Type what you want to say to the representative…'
             : 'Message Relay privately · answer, update context, or change call strategy…'
           : 'Reply to Relay or revise the plan…';
@@ -903,13 +903,6 @@
         question.className = 'prompt-question';
         question.textContent = prompt.question;
         promptBox.appendChild(question);
-
-        if (prompt.kind === 'takeover_required' && prompt.fake_value) {
-          const testValue = document.createElement('div');
-          testValue.className = 'hint';
-          testValue.textContent = `P0 fake data only. After taking over, type this test value: ${prompt.fake_value}`;
-          promptBox.appendChild(testValue);
-        }
 
         if (prompt.kind === 'secure_field') {
           const warning = document.createElement('div');

@@ -9,7 +9,6 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from relay_agent.event_log import EventLog
-from relay_agent.local_tts import FAKE_SENSITIVE_VALUES
 from relay_agent.names import normalize_display_name
 from relay_agent.planner import Planner, PlannerError, PlanningTurn
 from relay_agent.task_engine import InvalidAction, TaskNotFound
@@ -441,7 +440,6 @@ class AgenticTaskEngine:
                 "options": [],
                 "field": field_name,
                 "repeated": repeated,
-                "fake_value": FAKE_SENSITIVE_VALUES.get(field_name, ""),
             }
             self._append(task, "status", text=f"Typed takeover required · protected {field_name} request")
             self._append(task, "secure_gap", text="Protected audio and transcript content are suppressed.")

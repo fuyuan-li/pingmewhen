@@ -79,6 +79,75 @@ def test_realtime_session_has_no_persistent_opening_obligation():
     assert "OPENING (say once" not in instructions
 
 
+def test_duplicate_transcript_events_for_one_response_are_written_and_played_once(tmp_path):
+    transcript_event = {
+        "type": "response.output_audio_transcript.done",
+        "response_id": "resp-1",
+        "item_id": "item-1",
+        "output_index": 0,
+        "content_index": 0,
+        "transcript": "Let me check on that for one second.",
+    }
+    realtime = FakeRealtime(
+        [
+            {"type": "response.created", "response": {"id": "resp-1"}},
+            {"type": "response.output_audio.delta", "response_id": "resp-1", "delta": "audio-1"},
+            transcript_event,
+            dict(transcript_event),
+            {"type": "response.done", "response": {"id": "resp-1", "status": "completed"}},
+        ]
+    )
+    twilio = FakeTwilio()
+    transcripts = []
+    log_path = tmp_path / "events.jsonl"
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: transcripts.append((speaker, text)) or {},
+        EventLog(log_path),
+    )
+
+    asyncio.run(hub._openai_to_twilio(ActiveRealtimeSession(realtime, twilio, "MZ1"), "task-1"))
+
+    assert transcripts == [("relay", "Let me check on that for one second.")]
+    assert twilio.sent == [{"event": "media", "streamSid": "MZ1", "media": {"payload": "audio-1"}}]
+    assert "realtime.duplicate_transcript_event_suppressed" in log_path.read_text()
+
+
+def test_consecutive_identical_responses_suppress_second_audio_and_transcript(tmp_path):
+    def response_events(response_id, item_id, audio):
+        return [
+            {"type": "response.created", "response": {"id": response_id}},
+            {"type": "response.output_audio.delta", "response_id": response_id, "delta": audio},
+            {
+                "type": "response.output_audio_transcript.done",
+                "response_id": response_id,
+                "item_id": item_id,
+                "output_index": 0,
+                "content_index": 0,
+                "transcript": "I’m an AI assistant speaking for David.",
+            },
+            {"type": "response.done", "response": {"id": response_id, "status": "completed"}},
+        ]
+
+    realtime = FakeRealtime(response_events("resp-1", "item-1", "audio-1") + response_events("resp-2", "item-2", "audio-2"))
+    twilio = FakeTwilio()
+    transcripts = []
+    log_path = tmp_path / "events.jsonl"
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: transcripts.append((speaker, text)) or {},
+        EventLog(log_path),
+    )
+
+    asyncio.run(hub._openai_to_twilio(ActiveRealtimeSession(realtime, twilio, "MZ1"), "task-1"))
+
+    assert transcripts == [("relay", "I’m an AI assistant speaking for David.")]
+    assert twilio.sent == [{"event": "media", "streamSid": "MZ1", "media": {"payload": "audio-1"}}]
+    assert "realtime.duplicate_response_suppressed" in log_path.read_text()
+
+
 def test_transcripts_are_classified():
     assert transcript_from_realtime_event(
         {"type": "response.output_audio_transcript.done", "transcript": "Hello"}
@@ -1240,12 +1309,16 @@ def test_sensitive_takeover_resume_adds_only_content_free_context(tmp_path):
 
     assert update is None
     item_text = realtime.sent[1]["item"]["content"][0]["text"]
-    assert "completed a protected exchange" in item_text
+    assert "No local speech was played" in item_text
+    assert "Do not imply that the field was provided" in item_text
     assert "card_number" not in item_text
     assert "4242" not in json.dumps(realtime.sent)
+    resume_instructions = realtime.sent[-1]["response"]["instructions"]
+    assert "has not provided that protected detail yet" in resume_instructions
+    assert "do not claim refusal or discomfort" in resume_instructions.lower()
 
 
-def test_sensitive_typed_takeover_sends_one_fake_field_only_through_local_tts(tmp_path):
+def test_sensitive_typed_takeover_sends_real_field_only_locally_and_resumes_with_context(tmp_path):
     class FakeRenderer:
         def __init__(self):
             self.calls = []
@@ -1265,6 +1338,7 @@ def test_sensitive_typed_takeover_sends_one_fake_field_only_through_local_tts(tm
         expected_field="card_number",
         typed_takeover=True,
         takeover_sensitive=True,
+        context={**sample_context(), "caller_name": "David"},
     )
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
@@ -1277,19 +1351,24 @@ def test_sensitive_typed_takeover_sends_one_fake_field_only_through_local_tts(tm
 
     async def run():
         hub._sessions["task-1"] = session
-        speaking = asyncio.create_task(hub.speak_takeover_text("task-1", "4242424242424242"))
+        speaking = asyncio.create_task(hub.speak_takeover_text("task-1", "4111111111111111"))
         while not session.mark_events:
             await asyncio.sleep(0)
         next(iter(session.mark_events.values())).set()
         await speaking
+        await hub.exit_typed_takeover("task-1")
 
     asyncio.run(run())
 
-    assert renderer.calls == [("card_number", "4242424242424242")]
+    assert renderer.calls == [("card_number", "4111111111111111")]
     assert [message["event"] for message in twilio.sent] == ["media", "mark"]
-    assert session.secure_mode is True
-    assert realtime.sent == []
-    assert "4242424242424242" not in (tmp_path / "events.jsonl").read_text()
+    assert session.secure_mode is False
+    item_text = realtime.sent[1]["item"]["content"][0]["text"]
+    assert "David supplied the requested card number" in item_text
+    resume_instructions = realtime.sent[-1]["response"]["instructions"]
+    assert "David has provided the card number" in resume_instructions
+    assert "4111111111111111" not in json.dumps(realtime.sent)
+    assert "4111111111111111" not in (tmp_path / "events.jsonl").read_text()
 
 
 def test_bridge_twilio_stop_cancels_realtime_and_cleans_up_session(tmp_path):

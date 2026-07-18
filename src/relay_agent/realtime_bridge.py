@@ -40,6 +40,14 @@ SENSITIVE_FIELD_PATTERNS = {
     ),
 }
 
+SENSITIVE_FIELD_LABELS = {
+    "card_number": "card number",
+    "expiration": "expiration date",
+    "cvv": "security code",
+    "full_ssn": "Social Security number",
+    "verification_request": "protected information",
+}
+
 TRIVIAL_ACKNOWLEDGEMENTS = {
     "ah",
     "alright",
@@ -166,6 +174,13 @@ class ActiveRealtimeSession:
     takeover_exchange: list[dict[str, str]] = field(default_factory=list)
     takeover_speech_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     secure_handoff_field: str | None = None
+    takeover_speech_count: int = 0
+    response_audio_buffers: dict[str, list[str]] = field(default_factory=dict)
+    seen_output_transcript_parts: set[tuple[str, str, int, int]] = field(default_factory=set)
+    suppressed_response_ids: set[str] = field(default_factory=set)
+    last_forwarded_relay_transcript: str = ""
+    last_forwarded_relay_response_id: str = ""
+    discard_response_audio: bool = False
 
 
 @dataclass(frozen=True)
@@ -357,6 +372,7 @@ class RealtimeSessionHub:
                     session.response_request_id = request_id
                     session.response_server_id = ""
                     session.response_purpose = purpose
+                    session.discard_response_audio = False
                     session.response_complete.clear()
                     try:
                         await session.realtime.send(json.dumps(request))
@@ -433,10 +449,12 @@ class RealtimeSessionHub:
             try:
                 await asyncio.wait_for(session.hold_complete.wait(), timeout=3)
             except TimeoutError:
+                self._discard_buffered_response_audio(session)
                 await session.realtime.send(json.dumps({"type": "response.cancel"}))
             session.hold_response_active = False
             session.hold_complete.set()
         if session.keepalive_response_active:
+            self._discard_buffered_response_audio(session)
             await session.realtime.send(json.dumps({"type": "response.cancel"}))
             session.keepalive_response_active = False
             session.keepalive_complete.set()
@@ -540,6 +558,7 @@ class RealtimeSessionHub:
         except Exception as error:
             if isinstance(error, TimeoutError):
                 with suppress(Exception):
+                    self._discard_buffered_response_audio(session)
                     await session.realtime.send(json.dumps({"type": "response.cancel"}))
             if waiting_for_user:
                 session.waiting_for_user = True
@@ -562,6 +581,7 @@ class RealtimeSessionHub:
     async def _cancel_active_response(self, session: ActiveRealtimeSession) -> None:
         if not session.response_pending:
             return
+        self._discard_buffered_response_audio(session)
         await session.realtime.send(json.dumps({"type": "response.cancel"}))
         try:
             await asyncio.wait_for(session.response_complete.wait(), timeout=2)
@@ -623,6 +643,7 @@ class RealtimeSessionHub:
                 await self._play_local_tts(session, chunks, "typed-takeover")
                 session.takeover_exchange.append({"speaker": "user", "text": cleaned})
                 cleaned = ""
+            session.takeover_speech_count += 1
         self._events.append(
             "call.takeover_speech_completed",
             {"task_id": task_id, "sensitive": session.takeover_sensitive},
@@ -641,6 +662,7 @@ class RealtimeSessionHub:
         session.typed_takeover = True
         session.takeover_sensitive = bool(sensitive or session.secure_mode)
         session.takeover_exchange.clear()
+        session.takeover_speech_count = 0
         if session.response_pending:
             with suppress(Exception):
                 await self._cancel_active_response(session)
@@ -659,14 +681,36 @@ class RealtimeSessionHub:
         if session is None or not session.typed_takeover:
             raise RuntimeError("Typed takeover is not active for this call.")
         sensitive = session.takeover_sensitive
+        speech_count = session.takeover_speech_count
+        protected_field = session.expected_field or "protected information"
+        protected_label = SENSITIVE_FIELD_LABELS.get(protected_field, "protected information")
+        caller_name = normalize_display_name(str(session.context.get("caller_name", ""))) or "the caller"
         update_record = None
         await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
         if sensitive:
-            item_text = (
-                "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND\n"
-                "The represented person completed a protected exchange through local voice. Continue naturally "
-                "without identifying, requesting, or repeating any protected value."
-            )
+            if speech_count:
+                item_text = (
+                    "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND\n"
+                    f"{caller_name} supplied the requested {protected_label} through local voice. Treat that field "
+                    "as already provided. Never identify, infer, request, or repeat its value."
+                )
+                resume_guidance = (
+                    f"Say one brief transition conveying: 'All right, {caller_name} has provided the "
+                    f"{protected_label}. Let's continue.' Do not mention the private interface and do not identify, "
+                    "infer, ask for, or repeat the value."
+                )
+            else:
+                item_text = (
+                    "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND\n"
+                    f"No local speech was played during the protected {protected_label} takeover. Do not imply "
+                    "that the field was provided, and do not claim that the represented person refused or was "
+                    "uncomfortable."
+                )
+                resume_guidance = (
+                    f"Say one brief factual transition conveying: '{caller_name} has not provided that protected "
+                    "detail yet. How would you like to proceed?' Do not claim refusal or discomfort, do not mention "
+                    "the private interface, and do not ask for or repeat the protected value."
+                )
         else:
             lines = []
             for turn in session.takeover_exchange[-16:]:
@@ -686,6 +730,11 @@ class RealtimeSessionHub:
                 "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND\n"
                 f"Meaning: {update_record['summary']}\n"
                 "This is a backend-confirmed continuity note, not speech currently coming from the representative."
+            )
+            resume_guidance = (
+                "Control has just returned to you after a typed takeover. Continue the current phone conversation "
+                "naturally from the newest confirmed backend context. Do not reintroduce yourself, repeat the "
+                "disclosure, or mention the private interface."
             )
         item_id = uuid4().hex
         session.pending_context_item_id = item_id
@@ -713,6 +762,7 @@ class RealtimeSessionHub:
         session.typed_takeover = False
         session.takeover_sensitive = False
         session.takeover_exchange.clear()
+        session.takeover_speech_count = 0
         await self._send_response_create(
             session,
             {
@@ -720,16 +770,17 @@ class RealtimeSessionHub:
                 "response": {
                     "instructions": (
                         speaker_addressing_preamble(session.context)
-                        + "Control has just returned to you after a typed takeover. Continue the current phone "
-                        "conversation naturally from the newest confirmed backend context. Do not reintroduce "
-                        "yourself, repeat the disclosure, mention the private interface, or repeat protected data."
+                        + resume_guidance
                     )
                 },
             },
             wait_for_available=True,
             purpose="takeover_resume",
         )
-        self._events.append("call.takeover_context_applied", {"task_id": task_id, "sensitive": sensitive})
+        self._events.append(
+            "call.takeover_context_applied",
+            {"task_id": task_id, "sensitive": sensitive, "local_speech_count": speech_count},
+        )
         return update_record
 
     async def _enter_secure_mode(self, task_id: str, session: ActiveRealtimeSession, field_name: str) -> None:
@@ -738,6 +789,7 @@ class RealtimeSessionHub:
         session.expected_field = field_name
         await session.twilio.send_json({"event": "clear", "streamSid": session.stream_sid})
         if session.response_pending:
+            self._discard_buffered_response_audio(session)
             await session.realtime.send(json.dumps({"type": "response.cancel"}))
             return
         caller_name = normalize_display_name(str(session.context.get("caller_name", ""))) or "the caller"
@@ -783,6 +835,7 @@ class RealtimeSessionHub:
         session.secure_mode = True
         session.expected_field = field_name
         session.takeover_exchange.clear()
+        session.takeover_speech_count = 0
         await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
         state = self._secure_requester(task_id, field_name) if self._secure_requester else {}
         self._events.append(
@@ -935,6 +988,35 @@ class RealtimeSessionHub:
             elif event == "stop":
                 return
 
+    def _response_id(self, session: ActiveRealtimeSession, event: dict[str, Any]) -> str:
+        response = event.get("response", {})
+        return str(
+            event.get("response_id")
+            or response.get("id", "")
+            or session.response_server_id
+            or session.response_request_id
+            or "active-response"
+        )
+
+    def _discard_buffered_response_audio(self, session: ActiveRealtimeSession) -> None:
+        session.discard_response_audio = True
+        session.response_audio_buffers.clear()
+
+    async def _forward_buffered_response_audio(
+        self,
+        session: ActiveRealtimeSession,
+        response_id: str,
+    ) -> None:
+        chunks = session.response_audio_buffers.pop(response_id, [])
+        if session.discard_response_audio or response_id in session.suppressed_response_ids:
+            chunks.clear()
+            return
+        for payload in chunks:
+            await session.twilio.send_json(
+                {"event": "media", "streamSid": session.stream_sid, "media": {"payload": payload}}
+            )
+        chunks.clear()
+
     async def _openai_to_twilio(self, session: ActiveRealtimeSession, task_id: str) -> None:
         async for raw in session.realtime:
             event = json.loads(raw)
@@ -960,24 +1042,24 @@ class RealtimeSessionHub:
                     or session.hold_response_active
                     or session.keepalive_response_active
                 ):
-                    await session.twilio.send_json(
-                        {
-                            "event": "media",
-                            "streamSid": session.stream_sid,
-                            "media": {"payload": event["delta"]},
-                        }
-                    )
+                    response_id = self._response_id(session, event)
+                    session.response_audio_buffers.setdefault(response_id, []).append(event["delta"])
             elif (
                 event_type == "input_audio_buffer.speech_started"
                 and not session.secure_mode
                 and not session.typed_takeover
                 and not session.waiting_for_user
             ):
+                self._discard_buffered_response_audio(session)
                 await session.twilio.send_json({"event": "clear", "streamSid": session.stream_sid})
             if event_type == "response.done":
                 response = event.get("response", {})
                 completed_purpose = session.response_purpose
                 completed_response_id = str(response.get("id", "")) or session.response_server_id
+                if str(response.get("status", "")) == "completed":
+                    await self._forward_buffered_response_audio(session, completed_response_id)
+                else:
+                    session.response_audio_buffers.pop(completed_response_id, None)
                 payload = {
                     "task_id": task_id,
                     "purpose": session.response_purpose,
@@ -991,6 +1073,7 @@ class RealtimeSessionHub:
                 session.response_request_id = ""
                 session.response_server_id = ""
                 session.response_purpose = ""
+                session.discard_response_audio = False
                 session.response_complete.set()
                 if session.hold_response_active:
                     session.hold_response_active = False
@@ -1016,6 +1099,40 @@ class RealtimeSessionHub:
                     await self._gate_representative_turn(session, task_id, utterance)
             transcript = transcript_from_realtime_event(event)
             if transcript and transcript[1].strip() and not session.secure_mode:
+                if transcript[0] == "relay":
+                    response_id = self._response_id(session, event)
+                    transcript_part = (
+                        response_id,
+                        str(event.get("item_id", "")),
+                        int(event.get("output_index", 0)),
+                        int(event.get("content_index", 0)),
+                    )
+                    if transcript_part in session.seen_output_transcript_parts:
+                        self._events.append(
+                            "realtime.duplicate_transcript_event_suppressed",
+                            {"task_id": task_id, "response_id": response_id},
+                        )
+                        continue
+                    session.seen_output_transcript_parts.add(transcript_part)
+                    normalized = " ".join(transcript[1].split())
+                    if normalized == session.last_forwarded_relay_transcript:
+                        session.suppressed_response_ids.add(response_id)
+                        session.response_audio_buffers.pop(response_id, None)
+                        self._events.append(
+                            "realtime.duplicate_response_suppressed",
+                            {
+                                "task_id": task_id,
+                                "response_id": response_id,
+                                "previous_response_id": session.last_forwarded_relay_response_id,
+                            },
+                        )
+                        continue
+                    await self._forward_buffered_response_audio(session, response_id)
+                    if not session.typed_takeover:
+                        self._transcript_writer(task_id, "relay", transcript[1])
+                    session.last_forwarded_relay_transcript = normalized
+                    session.last_forwarded_relay_response_id = response_id
+                    continue
                 if session.secure_handoff_field and transcript[0] == "representative":
                     continue
                 sensitive_field = requested_sensitive_field(transcript[1])
@@ -1277,6 +1394,7 @@ class RealtimeSessionHub:
                         timeout=max(self._waiting_keepalive_interval, 5),
                     )
                 except TimeoutError:
+                    self._discard_buffered_response_audio(session)
                     await session.realtime.send(json.dumps({"type": "response.cancel"}))
                     session.keepalive_response_active = False
                     session.keepalive_complete.set()

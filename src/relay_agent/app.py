@@ -18,7 +18,7 @@ from relay_agent.context_store import ContextStore, InvalidContext
 from relay_agent.credentials import CredentialStore, RelayCredentials
 from relay_agent.event_log import EventLog, default_data_dir
 from relay_agent.gatekeeper import Gatekeeper, OpenAIGatekeeper
-from relay_agent.local_tts import LocalTTSRenderer, is_allowed_fake_value, looks_like_protected_value
+from relay_agent.local_tts import LocalTTSRenderer, is_valid_sensitive_value, looks_like_protected_value
 from relay_agent.model_settings import (
     GATEKEEPER_MODELS,
     PLANNING_MODELS,
@@ -520,8 +520,8 @@ def create_app(
                 field = str(task.get("secure_expected_field") or "")
                 if field == "verification_request" and looks_like_protected_value(text):
                     raise InvalidAction("Relay will not repeat a protected value. Type a non-sensitive response instead.")
-                if field != "verification_request" and not is_allowed_fake_value(field, text):
-                    raise InvalidAction("P0 protected type-to-speak accepts only the displayed fake test value.")
+                if field != "verification_request" and not is_valid_sensitive_value(field, text):
+                    raise InvalidAction("Enter a valid value for the protected field Relay detected.")
             elif looks_like_protected_value(text):
                 raise InvalidAction("That looks like protected data. Use the protected takeover flow instead.")
             events.append(

@@ -662,7 +662,7 @@ def test_malformed_phone_number_block_names_the_offending_action(tmp_path):
     assert "Call billing support (Example Telecom)" in reply["text"]
 
 
-def test_sensitive_request_requires_typed_takeover_and_fake_value_form_is_deprecated(tmp_path):
+def test_sensitive_request_requires_typed_takeover_without_exposing_a_value(tmp_path):
     log_path = tmp_path / "events.jsonl"
     engine = AgenticTaskEngine(
         EventLog(log_path),
@@ -681,7 +681,7 @@ def test_sensitive_request_requires_typed_takeover_and_fake_value_form_is_deprec
     assert task["takeover_active"] is False
     assert task["takeover_sensitive"] is True
     assert task["prompt"]["kind"] == "takeover_required"
-    assert task["prompt"]["fake_value"] == "4242424242424242"
+    assert "fake_value" not in task["prompt"]
     event_count = len(task["events"])
     engine.append_transcript(task["id"], "representative", "4242 4242 4242 4242")
     assert len(engine.get(task["id"])["events"]) == event_count

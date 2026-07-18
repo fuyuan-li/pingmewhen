@@ -96,7 +96,7 @@ The deterministic simulator keeps future turns in a backend queue. The UI reques
 
 Production P0 takeover is type-to-speak, not browser microphone audio. The localhost backend cancels and gates Speaker output, pauses Gatekeeper decisions, synthesizes the user's text with macOS AVSpeechSynthesizer, converts it to PCMU, and publishes it directly into the existing Twilio Media Stream. The typed text is not submitted to Speaker as a conversation message.
 
-During ordinary typed takeover, representative audio continues to reach Realtime transcription so the user can read the Call Console, but the backend never requests a Speaker response. On handback, Relay appends one sanitized backend-confirmed continuity item and explicitly resumes Speaker without another introduction. During protected takeover, both Realtime audio directions and content logging remain gated; handback supplies only a content-free marker that the protected exchange finished.
+During ordinary typed takeover, representative audio continues to reach Realtime transcription so the user can read the Call Console, but the backend never requests a Speaker response. On handback, Relay appends one sanitized backend-confirmed continuity item and explicitly resumes Speaker without another introduction. During protected takeover, both Realtime audio directions and content logging remain gated. Handback reveals only whether local speech successfully played and the requested field type; it never includes the protected value. If no local speech played, Speaker is explicitly told not to imply that the field was supplied.
 
 The deterministic preview does not connect phone audio. Browser microphone/conference takeover remains a future extension and is not part of P0.
 
@@ -173,9 +173,9 @@ Secure-mode invariants:
 3. Sensitive form values remain in local process memory only.
 4. Values are cleared after use.
 5. The user can take over at any time.
-6. P0 accepts fake values only.
+6. The deterministic demo accepts fake values only; production accepts locally validated real card, expiration, CVV, and full-SSN shapes.
 
-Payment is a field-by-field state machine, not one combined form: the representative asks for one field; Relay speaks a brief handoff line; the dashboard requires typed takeover; local TTS speaks only the scoped fake field; and the user hands control back before the next field can be detected. The old production `SECURE_LOCAL` fake-value form and `/secure-fields` endpoint are deprecated. The deterministic browser preview may retain its simulated form. The production bridge gates both Realtime directions, generates speech in memory with macOS AVSpeechSynthesizer, converts it to PCMU, publishes it only to the representative leg, and waits for Twilio's playback mark.
+Payment is a field-by-field state machine, not one combined form: the representative asks for one field; Relay speaks a brief handoff line; the dashboard requires typed takeover; local TTS speaks only that field; and the user hands control back before the next field can be detected. The old production `SECURE_LOCAL` fake-value form and `/secure-fields` endpoint are deprecated. The deterministic browser preview retains fake values. Production validates the expected field shape locally, gates both Realtime directions, generates speech in memory with macOS AVSpeechSynthesizer, converts it to PCMU, publishes it only to the representative leg, waits for Twilio's playback mark, and clears the value without logging or cloud submission.
 
 The simulated representative will not intentionally repeat fake card data. In production, a repeated protected-field request keeps the Realtime gate closed and transitions the durable call state to `HUMAN_TAKEOVER` rather than speaking the value again.
 

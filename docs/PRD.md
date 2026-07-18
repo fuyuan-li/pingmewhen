@@ -58,7 +58,7 @@ No other CLI commands are required in P0.
 8. The user selects an insurer and explicitly approves the callback in that planning conversation.
 9. Relay switches back to the live-call panel, calls the selected simulated insurer, and continues the application.
 10. The user personally confirms material representations and approves purchase.
-11. Relay enters secure mode for a fake payment: cloud AI muted, transcription paused, and card number, expiration, and CVV requested in separate local-TTS handoffs (or user takeover).
+11. Relay enters secure mode for payment: cloud AI muted, transcription paused, and card number, expiration, and CVV requested in separate local-TTS handoffs. The deterministic demo uses fake values; production may speak the user's real locally entered value without cloud or log exposure.
 12. Relay resumes between each requested field, then returns to planning and records only the non-sensitive policy outcome.
 
 ## Functional requirements
@@ -129,11 +129,11 @@ Relay begins calls with a concise disclosure such as:
 
 ### Secure mode
 
-- Trigger before a fake card number or fake full SSN is exchanged.
+- Trigger before a card number or full SSN is exchanged.
 - Mute or disconnect the cloud AI in both audio directions.
 - Pause transcript and content logging.
 - Offer macOS built-in on-device TTS and user takeover.
-- Use fake values only in P0.
+- Keep the deterministic demo fake-only; validate production values locally for the detected protected field.
 - Resume cloud AI only after the sensitive exchange ends.
 
 ### Logging and transcripts
@@ -166,7 +166,6 @@ Relay begins calls with a concise disclosure such as:
 ## P0 exclusions
 
 - Real insurance transactions or recommendations
-- Real payment or SSN data
 - Arbitrary public calling
 - Cross-platform local TTS
 - Downloadable voice models

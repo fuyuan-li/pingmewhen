@@ -1,6 +1,12 @@
 import base64
 
-from relay_agent.local_tts import _pcmu_chunks, is_allowed_fake_value, looks_like_protected_value, spoken_sensitive_value
+from relay_agent.local_tts import (
+    _pcmu_chunks,
+    is_allowed_fake_value,
+    is_valid_sensitive_value,
+    looks_like_protected_value,
+    spoken_sensitive_value,
+)
 
 
 def test_sensitive_values_are_spoken_as_individual_digits():
@@ -21,6 +27,15 @@ def test_protected_values_are_detected_before_general_type_to_speak():
     assert looks_like_protected_value("4242 4242 4242 4242") is True
     assert looks_like_protected_value("000-00-0000") is True
     assert looks_like_protected_value("Tuesday works for me") is False
+
+
+def test_production_sensitive_values_accept_real_field_shapes():
+    assert is_valid_sensitive_value("card_number", "4111 1111 1111 1111") is True
+    assert is_valid_sensitive_value("expiration", "12/29") is True
+    assert is_valid_sensitive_value("cvv", "987") is True
+    assert is_valid_sensitive_value("full_ssn", "123-45-6789") is True
+    assert is_valid_sensitive_value("expiration", "19/29") is False
+    assert is_valid_sensitive_value("full_ssn", "1234") is False
 
 
 def test_local_audio_is_chunked_as_twilio_pcmu_payloads():
