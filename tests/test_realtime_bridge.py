@@ -72,7 +72,7 @@ def test_realtime_session_has_no_persistent_opening_obligation():
     instructions = realtime_session_update(sample_context())["session"]["instructions"]
 
     assert "You never speak first" in instructions
-    assert "never repeat that disclosure later in the call" in instructions
+    assert "Never repeat the disclosure later in the call" in instructions
     assert "OPENING (say once" not in instructions
 
 
@@ -440,9 +440,7 @@ def test_first_representative_turn_bypasses_the_gatekeeper_regardless_of_content
     )
 
     assert gatekeeper.requests == []
-    assert len(realtime.sent) == 1
-    assert realtime.sent[0]["type"] == "response.create"
-    assert "AI assistant on behalf of" in realtime.sent[0]["response"]["instructions"]
+    assert realtime.sent == [{"type": "response.create"}]
     logged = logged_events(log_path)[0]
     assert logged["event"] == "gatekeeper.bypassed"
     assert logged["payload"]["reason"] == "first_turn"
@@ -1255,7 +1253,7 @@ def test_gatekeeper_identity_extracts_caller_and_target_with_fallbacks():
     assert default_representative == "the representative"
 
 
-def test_first_representative_turn_carries_the_ai_disclosure_once(tmp_path):
+def test_representative_turn_request_never_overrides_session_instructions(tmp_path):
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
@@ -1265,11 +1263,7 @@ def test_first_representative_turn_carries_the_ai_disclosure_once(tmp_path):
     session = ActiveRealtimeSession(FakeRealtime(), FakeTwilio(), "MZ1")
     session.context = {**sample_context(), "caller_name": "mina"}
 
-    request = hub._representative_turn_request(session)
-
-    assert request is not None
-    assert "Hi, Relay here — I'm an AI assistant on behalf of Mina." in request["response"]["instructions"]
+    assert session.has_disclosed is False
+    assert hub._representative_turn_request(session) is None
     assert session.has_disclosed is True
-    followup = hub._representative_turn_request(session)
-    assert followup is not None
-    assert "do not restate who you are" in followup["response"]["instructions"]
+    assert hub._representative_turn_request(session) is None

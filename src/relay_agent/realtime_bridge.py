@@ -174,9 +174,11 @@ def realtime_session_update(
         "speak — a greeting, 'hello,' or asking who is calling — before saying anything. If instead you hear hold "
         "music, an automated queue message, or silence, stay silent and keep waiting; never fill the silence, "
         "greet first, or ask if anyone is there. Once the representative actually speaks, your first reply must "
-        "open with a short AI disclosure before anything else; never repeat that disclosure later in the call, "
-        "and never restart it if interrupted — continue from what the representative said. Never deny being an AI "
-        "if asked.\n\n"
+        "open with a short AI disclosure and nothing else before it, then briefly state the reason for this call "
+        "(see GOAL below) in the same reply — never leave the representative wondering why you called or invite "
+        "generic small talk instead. Never repeat the disclosure later in the call, and never restart it if "
+        "interrupted — continue from what the representative said. Never deny being an AI if asked, and never deny "
+        "or forget that you placed this call for a specific reason.\n\n"
         "GOAL: Pursue only this approved purpose: "
         f"{action['purpose']}. The overall user goal is: {context['goal']}. Continue each turn naturally from the "
         "immediately preceding conversation.\n\n"
@@ -810,33 +812,13 @@ class RealtimeSessionHub:
                 )
 
     def _representative_turn_request(self, session: ActiveRealtimeSession) -> dict[str, Any] | None:
-        if session.has_disclosed:
-            return {
-                "type": "response.create",
-                "response": {
-                    "instructions": (
-                        "Continue the conversation naturally. You already gave your AI disclosure earlier in this "
-                        "call — do not restate who you are, that you're an AI, or who you represent in this reply, "
-                        "in any form or wording. Go straight to answering or reacting to what the representative "
-                        "just said."
-                    )
-                },
-            }
+        # Deliberately never attaches a response.instructions override here: that field replaces the entire
+        # session-level system instructions for this response, not just augments it. Every ongoing turn must keep
+        # the full goal, boundaries, and private context, so this only tracks disclosure state for the Gatekeeper
+        # bypass in _gate_representative_turn — the disclosure wording itself lives in the static session
+        # instructions (the FIRST TURN section), which stays in effect for every turn.
         session.has_disclosed = True
-        caller_name = normalize_display_name(str(session.context.get("caller_name", ""))) or "the user"
-        return {
-            "type": "response.create",
-            "response": {
-                "instructions": (
-                    "This is your first reply on this call. Open with exactly this short disclosure and nothing "
-                    f"else before it: 'Hi, Relay here — I'm an AI assistant on behalf of {caller_name}.' Add no "
-                    "other greeting, pleasantry, or small talk — do not also say things like 'nice to meet you' or "
-                    "'what's going on today.' Immediately after that one sentence, respond briefly to what the "
-                    "representative just said. Never repeat this disclosure again later in the call, even if this "
-                    "reply is interrupted."
-                )
-            },
-        }
+        return None
 
     async def _gate_representative_turn(
         self,
