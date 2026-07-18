@@ -9,9 +9,10 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from relay_agent.event_log import EventLog
+from relay_agent.local_tts import FAKE_SENSITIVE_VALUES
 from relay_agent.names import normalize_display_name
 from relay_agent.planner import Planner, PlannerError, PlanningTurn
-from relay_agent.task_engine import InvalidAction, TaskNotFound, secure_field_prompt
+from relay_agent.task_engine import InvalidAction, TaskNotFound
 from relay_agent.task_store import SQLiteTaskStore
 
 
@@ -36,6 +37,8 @@ class AgenticTaskEngine:
         self._tasks = store.load_all("production")
         for task in self._tasks.values():
             task.setdefault("context_updates", [])
+            task.setdefault("takeover_active", False)
+            task.setdefault("takeover_sensitive", False)
         self._lock = Lock()
 
     def create(self, goal: str, contexts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -61,6 +64,8 @@ class AgenticTaskEngine:
             "call_state": None,
             "secure_expected_field": None,
             "secure_fields_completed": [],
+            "takeover_active": False,
+            "takeover_sensitive": False,
             "caller_name": "",
             "context_updates": [],
         }
@@ -413,24 +418,78 @@ class AgenticTaskEngine:
                 raise InvalidAction("Secure local voice requires an active call.")
             task["secure_mode"] = True
             task["secure_expected_field"] = field_name
-            if field_name == "verification_request" or field_name in task.get("secure_fields_completed", []):
-                task.update(call_state="HUMAN_TAKEOVER", stage="human_takeover", status="waiting_for_user")
-                task["prompt"] = {
-                    "kind": "takeover_required",
-                    "question": (
-                        "The representative requested a protected field again. Relay and cloud transcription remain "
-                        "disconnected. Human takeover is required; Relay will not repeat the value."
-                    ),
-                    "options": [],
-                }
-                self._append(task, "status", text="Human takeover required · repeated protected-field request")
-                self._store.save("production", task)
-                return self._snapshot(task)
-            task["call_state"] = "SECURE_HANDOFF_PENDING"
-            self._append(task, "status", text=f"Secure handoff pending · {field_name}")
-            task.update(call_state="SECURE_LOCAL", stage=f"secure_{field_name}", status="waiting_for_user")
-            task["prompt"] = secure_field_prompt(field_name, simulated=False)
-            self._append(task, "secure_gap", text="Protected audio and transcript content are suppressed for this field.")
+            takeover_already_active = bool(task.get("takeover_active"))
+            task.update(
+                call_state="HUMAN_TAKEOVER",
+                stage="human_takeover" if takeover_already_active else "takeover_required",
+                status="waiting_for_user",
+                takeover_active=takeover_already_active,
+                takeover_sensitive=True,
+            )
+            repeated = field_name == "verification_request" or field_name in task.get("secure_fields_completed", [])
+            task["prompt"] = {
+                "kind": "takeover_required",
+                "question": (
+                    "You must take over now — click Take over and type a non-sensitive response. Relay will not "
+                    "repeat the protected value, and cloud transcription is paused."
+                    if repeated
+                    else (
+                        "You must take over now — click Take over to type this yourself. Relay and cloud "
+                        "transcription are paused for this protected exchange."
+                    )
+                ),
+                "options": [],
+                "field": field_name,
+                "repeated": repeated,
+                "fake_value": FAKE_SENSITIVE_VALUES.get(field_name, ""),
+            }
+            self._append(task, "status", text=f"Typed takeover required · protected {field_name} request")
+            self._append(task, "secure_gap", text="Protected audio and transcript content are suppressed.")
+            self._store.save("production", task)
+            return self._snapshot(task)
+
+    def begin_typed_takeover(self, task_id: str, sensitive: bool = False) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            if task["phase"] != "calling" or not task.get("current_call"):
+                raise InvalidAction("Typed takeover requires an active call.")
+            already_required = task.get("call_state") == "HUMAN_TAKEOVER" and task.get("stage") == "takeover_required"
+            if sensitive and not already_required:
+                raise InvalidAction("Protected takeover is not currently required.")
+            if task.get("takeover_active"):
+                raise InvalidAction("Typed takeover is already active.")
+            task.update(
+                call_state="HUMAN_TAKEOVER",
+                stage="human_takeover",
+                status="waiting_for_user",
+                takeover_active=True,
+                takeover_sensitive=bool(sensitive or task.get("takeover_sensitive")),
+                prompt=task.get("prompt") if sensitive else None,
+            )
+            self._append(task, "status", text="Typed takeover started · Relay is silent")
+            self._store.save("production", task)
+            snapshot = self._snapshot(task)
+        self._events.append(
+            "call.takeover_started",
+            {"task_id": task_id, "sensitive": snapshot["takeover_sensitive"]},
+        )
+        return snapshot
+
+    def mark_takeover_speech(self, task_id: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            if task.get("call_state") != "HUMAN_TAKEOVER" or not task.get("takeover_active"):
+                raise InvalidAction("Type-to-speak is available only during an active takeover.")
+            self._append(
+                task,
+                "status",
+                text=(
+                    "Protected value spoken locally"
+                    if task.get("takeover_sensitive")
+                    else "Your typed message was spoken locally to the representative"
+                ),
+                channel="private",
+            )
             self._store.save("production", task)
             return self._snapshot(task)
 
@@ -583,38 +642,28 @@ class AgenticTaskEngine:
         self._events.append("task.call_ended_by_user", {"task_id": task_id})
         return snapshot
 
-    def complete_secure_field(self, task_id: str, field_name: str) -> dict[str, Any]:
+    def resume_from_takeover(
+        self,
+        task_id: str,
+        context_update: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             task = self._require(task_id)
-            if (
-                task.get("call_state") != "SECURE_LOCAL"
-                or not task.get("secure_mode")
-                or task.get("secure_expected_field") != field_name
-            ):
-                raise InvalidAction("Relay is not waiting for that secure field.")
-            completed = task.setdefault("secure_fields_completed", [])
-            if field_name not in completed:
-                completed.append(field_name)
-            task.update(
-                secure_mode=False,
-                secure_expected_field=None,
-                call_state="CONNECTED",
-                stage="calling",
-                status="running",
-                prompt=None,
-            )
-            self._append(task, "status", text="Local secure voice completed · Relay returned to the line")
-            self._store.save("production", task)
-            return self._snapshot(task)
-
-    def resume_from_takeover(self, task_id: str) -> dict[str, Any]:
-        with self._lock:
-            task = self._require(task_id)
-            if task.get("call_state") != "HUMAN_TAKEOVER":
+            if task.get("call_state") != "HUMAN_TAKEOVER" or not task.get("takeover_active"):
                 raise InvalidAction("Relay can resume only after human takeover.")
+            sensitive = bool(task.get("takeover_sensitive"))
+            completed_field = task.get("secure_expected_field")
+            if context_update is not None and not sensitive:
+                task.setdefault("context_updates", []).append(deepcopy(context_update))
+            if sensitive and completed_field and completed_field != "verification_request":
+                completed = task.setdefault("secure_fields_completed", [])
+                if completed_field not in completed:
+                    completed.append(completed_field)
             task.update(
                 secure_mode=False,
                 secure_expected_field=None,
+                takeover_active=False,
+                takeover_sensitive=False,
                 call_state="CONNECTED",
                 stage="calling",
                 status="running",
@@ -622,7 +671,9 @@ class AgenticTaskEngine:
             )
             self._append(task, "status", text="Human takeover ended · Relay returned to the active call")
             self._store.save("production", task)
-            return self._snapshot(task)
+            snapshot = self._snapshot(task)
+        self._events.append("call.takeover_ended", {"task_id": task_id, "sensitive": sensitive})
+        return snapshot
 
     def finish_call(self, task_id: str, call_sid: str, status: str) -> dict[str, Any]:
         with self._lock:
@@ -633,8 +684,6 @@ class AgenticTaskEngine:
             connected = task.get("call_state") in {
                 "CONNECTED",
                 "WAITING_FOR_USER",
-                "SECURE_HANDOFF_PENDING",
-                "SECURE_LOCAL",
                 "HUMAN_TAKEOVER",
             }
             ended_while_waiting = task.get("call_state") == "WAITING_FOR_USER"
@@ -644,6 +693,8 @@ class AgenticTaskEngine:
             task.update(
                 secure_mode=False,
                 secure_expected_field=None,
+                takeover_active=False,
+                takeover_sensitive=False,
                 call_state="COMPLETED" if successful else "FAILED",
             )
             if not successful:

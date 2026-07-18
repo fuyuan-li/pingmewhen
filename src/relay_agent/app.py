@@ -18,7 +18,7 @@ from relay_agent.context_store import ContextStore, InvalidContext
 from relay_agent.credentials import CredentialStore, RelayCredentials
 from relay_agent.event_log import EventLog, default_data_dir
 from relay_agent.gatekeeper import Gatekeeper, OpenAIGatekeeper
-from relay_agent.local_tts import LocalTTSRenderer, is_allowed_fake_value
+from relay_agent.local_tts import LocalTTSRenderer, is_allowed_fake_value, looks_like_protected_value
 from relay_agent.model_settings import (
     GATEKEEPER_MODELS,
     PLANNING_MODELS,
@@ -55,9 +55,8 @@ class CredentialSetupRequest(BaseModel):
     openai_api_key: str = ""
 
 
-class SecureFieldRequest(BaseModel):
-    field: str
-    value: str
+class TakeoverSayRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
 
 
 class ModelSettingsRequest(BaseModel):
@@ -489,34 +488,59 @@ def create_app(
         except PlannerError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
 
-    @app.post("/api/tasks/{task_id}/secure-fields")
-    async def speak_secure_field(task_id: str, request: SecureFieldRequest) -> dict:
+    @app.post("/api/tasks/{task_id}/takeover")
+    async def begin_takeover(task_id: str) -> dict:
         if not isinstance(engine, AgenticTaskEngine):
-            raise HTTPException(status_code=409, detail="Real secure voice is available only during a production call.")
+            raise HTTPException(status_code=409, detail="Typed takeover is available only during a production call.")
         try:
             task = engine.get(task_id)
-            if (
-                not task.get("secure_mode")
-                or task.get("call_state") != "SECURE_LOCAL"
-                or task.get("secure_expected_field") != request.field
-            ):
-                raise InvalidAction("Relay is not waiting for that secure field.")
-            if not is_allowed_fake_value(request.field, request.value):
-                raise InvalidAction("P0 secure local voice accepts only the displayed fake test value.")
-            await realtime.speak_secure_field(task_id, request.field, request.value)
-            request.value = ""
-            await realtime.resume_after_secure_field(task_id)
-            return engine.complete_secure_field(task_id, request.field)
+            sensitive = bool(task.get("takeover_sensitive"))
+            if task.get("takeover_active"):
+                raise InvalidAction("Typed takeover is already active.")
+            await realtime.enter_typed_takeover(task_id, sensitive=sensitive)
+            return engine.begin_typed_takeover(task_id, sensitive=sensitive)
         except TaskNotFound as error:
-            request.value = ""
             raise HTTPException(status_code=404, detail="Task not found.") from error
-        except InvalidAction as error:
-            request.value = ""
+        except (InvalidAction, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/api/tasks/{task_id}/takeover-say")
+    async def takeover_say(task_id: str, request: TakeoverSayRequest) -> dict:
+        if not isinstance(engine, AgenticTaskEngine):
+            request.text = ""
+            raise HTTPException(status_code=409, detail="Typed takeover is available only during a production call.")
+        try:
+            task = engine.get(task_id)
+            text = request.text.strip()
+            if not text:
+                raise InvalidAction("Type something for the representative.")
+            if not task.get("takeover_active"):
+                raise InvalidAction("Take over the active call before using type-to-speak.")
+            if task.get("takeover_sensitive"):
+                field = str(task.get("secure_expected_field") or "")
+                if field == "verification_request" and looks_like_protected_value(text):
+                    raise InvalidAction("Relay will not repeat a protected value. Type a non-sensitive response instead.")
+                if field != "verification_request" and not is_allowed_fake_value(field, text):
+                    raise InvalidAction("P0 protected type-to-speak accepts only the displayed fake test value.")
+            elif looks_like_protected_value(text):
+                raise InvalidAction("That looks like protected data. Use the protected takeover flow instead.")
+            events.append(
+                "call.takeover_speech_started",
+                {"task_id": task_id, "sensitive": bool(task.get("takeover_sensitive"))},
+            )
+            await realtime.speak_takeover_text(task_id, text)
+            request.text = ""
+            return engine.mark_takeover_speech(task_id)
+        except TaskNotFound as error:
+            request.text = ""
+            raise HTTPException(status_code=404, detail="Task not found.") from error
+        except (InvalidAction, RuntimeError) as error:
+            request.text = ""
             raise HTTPException(status_code=409, detail=str(error)) from error
         except Exception as error:
-            request.value = ""
-            events.append("secure_mode.failed", {"task_id": task_id, "reason": type(error).__name__})
-            raise HTTPException(status_code=502, detail="The protected local voice exchange did not complete.") from error
+            request.text = ""
+            events.append("call.takeover_speech_failed", {"task_id": task_id, "reason": type(error).__name__})
+            raise HTTPException(status_code=502, detail="Local type-to-speak did not complete.") from error
 
     @app.post("/api/tasks/{task_id}/resume-takeover")
     async def resume_takeover(task_id: str) -> dict:
@@ -524,16 +548,19 @@ def create_app(
             raise HTTPException(status_code=409, detail="Real call takeover resume is available only in production.")
         try:
             task = engine.get(task_id)
-            if task.get("call_state") != "HUMAN_TAKEOVER":
+            if task.get("call_state") != "HUMAN_TAKEOVER" or not task.get("takeover_active"):
                 raise InvalidAction("Relay can resume only after human takeover.")
-            await realtime.resume_from_takeover(task_id)
-            return engine.resume_from_takeover(task_id)
+            context_update = await realtime.exit_typed_takeover(task_id)
+            return engine.resume_from_takeover(task_id, context_update)
         except TaskNotFound as error:
             raise HTTPException(status_code=404, detail="Task not found.") from error
         except InvalidAction as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         except RuntimeError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+        except Exception as error:
+            events.append("call.takeover_resume_failed", {"task_id": task_id, "reason": type(error).__name__})
+            raise HTTPException(status_code=502, detail="Relay could not safely return to the call.") from error
 
     @app.post("/api/twilio/voice")
     async def twilio_voice(request: Request) -> Response:

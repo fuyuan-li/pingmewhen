@@ -82,6 +82,16 @@ def is_trivial_acknowledgement(text: str) -> bool:
     return "?" not in text and cleaned in TRIVIAL_ACKNOWLEDGEMENTS
 
 
+def sanitized_takeover_text(text: str) -> str:
+    cleaned = re.sub(r"(?<!\d)(?:\d[ -]?){7,}(?!\d)", "[redacted identifier]", text)
+    return re.sub(
+        r"\b(password|passcode|account pin|api key|auth token|authentication token)\b\s*(?:is|:|=)?\s*\S+",
+        lambda match: f"{match.group(1)} [REDACTED]",
+        cleaned,
+        flags=re.I,
+    )
+
+
 def gatekeeper_context(context: dict[str, Any]) -> dict[str, Any]:
     action = context.get("action", {})
     return {
@@ -151,6 +161,11 @@ class ActiveRealtimeSession:
     keepalive_complete: asyncio.Event = field(default_factory=asyncio.Event)
     keepalive_task: asyncio.Task | None = None
     has_disclosed: bool = False
+    typed_takeover: bool = False
+    takeover_sensitive: bool = False
+    takeover_exchange: list[dict[str, str]] = field(default_factory=list)
+    takeover_speech_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    secure_handoff_field: str | None = None
 
 
 @dataclass(frozen=True)
@@ -331,6 +346,8 @@ class RealtimeSessionHub:
         wait_for_available: bool = False,
         purpose: str = "unspecified",
     ) -> bool:
+        if session.typed_takeover or session.secure_mode:
+            return False
         request = request or {"type": "response.create"}
         while True:
             async with session.response_lock:
@@ -376,7 +393,7 @@ class RealtimeSessionHub:
     async def inject(self, task_id: str, text: str) -> PrivateMessageDelivery | None:
         async with self._lock:
             session = self._sessions.get(task_id)
-        if session is None or session.secure_mode:
+        if session is None or session.secure_mode or session.typed_takeover:
             return None
         session.task_id = session.task_id or task_id
         waiting_for_user = session.waiting_for_user
@@ -542,16 +559,24 @@ class RealtimeSessionHub:
             interaction_id=interaction_id,
         )
 
-    async def speak_secure_field(self, task_id: str, field_name: str, value: str) -> None:
-        async with self._lock:
-            session = self._sessions.get(task_id)
-        if session is None or not session.secure_mode or session.expected_field != field_name:
-            raise RuntimeError("Relay is not waiting for that secure field.")
-        chunks = self._tts_renderer.render(field_name, value)
-        value = ""
+    async def _cancel_active_response(self, session: ActiveRealtimeSession) -> None:
+        if not session.response_pending:
+            return
+        await session.realtime.send(json.dumps({"type": "response.cancel"}))
+        try:
+            await asyncio.wait_for(session.response_complete.wait(), timeout=2)
+        except TimeoutError:
+            session.response_pending = False
+            session.response_request_id = ""
+            session.response_server_id = ""
+            session.response_purpose = ""
+            session.response_complete.set()
+            self._events.append("realtime.response_cancel_timeout", {"task_id": session.task_id})
+
+    async def _play_local_tts(self, session: ActiveRealtimeSession, chunks: list[str], mark_prefix: str) -> None:
         if not chunks:
             raise RuntimeError("Local speech returned no audio.")
-        mark_name = f"secure-{uuid4().hex}"
+        mark_name = f"{mark_prefix}-{uuid4().hex}"
         completion = asyncio.Event()
         session.mark_events[mark_name] = completion
         try:
@@ -567,72 +592,202 @@ class RealtimeSessionHub:
             session.mark_events.pop(mark_name, None)
             chunks.clear()
 
-    async def resume_after_secure_field(self, task_id: str) -> None:
+    async def speak_takeover_text(self, task_id: str, text: str) -> None:
+        async with self._lock:
+            session = self._sessions.get(task_id)
+        if session is None or not session.typed_takeover:
+            raise RuntimeError("Type-to-speak is not active for this call.")
+        cleaned = text.strip()
+        if not cleaned:
+            raise RuntimeError("Type something for the representative.")
+        async with session.takeover_speech_lock:
+            if session.takeover_sensitive:
+                field_name = session.expected_field
+                if not field_name:
+                    raise RuntimeError("Relay is not waiting for a protected field.")
+                if field_name == "verification_request":
+                    renderer = getattr(self._tts_renderer, "render_text", None)
+                    if renderer is None:
+                        raise RuntimeError("The configured local voice cannot speak arbitrary text.")
+                    chunks = renderer(cleaned)
+                else:
+                    renderer = getattr(self._tts_renderer, "render_sensitive", None)
+                    chunks = renderer(field_name, cleaned) if renderer else self._tts_renderer.render(field_name, cleaned)
+                cleaned = ""
+                await self._play_local_tts(session, chunks, "secure-takeover")
+            else:
+                renderer = getattr(self._tts_renderer, "render_text", None)
+                if renderer is None:
+                    raise RuntimeError("The configured local voice cannot speak arbitrary text.")
+                chunks = renderer(cleaned)
+                await self._play_local_tts(session, chunks, "typed-takeover")
+                session.takeover_exchange.append({"speaker": "user", "text": cleaned})
+                cleaned = ""
+        self._events.append(
+            "call.takeover_speech_completed",
+            {"task_id": task_id, "sensitive": session.takeover_sensitive},
+        )
+
+    async def enter_typed_takeover(self, task_id: str, sensitive: bool = False) -> None:
         async with self._lock:
             session = self._sessions.get(task_id)
         if session is None:
             raise RuntimeError("The active call is no longer connected.")
+        await self._stop_waiting_keepalive(session)
+        session.waiting_for_user = False
+        session.pending_question = ""
+        session.pending_interaction_id = ""
+        session.pending_interaction_reason = ""
+        session.typed_takeover = True
+        session.takeover_sensitive = bool(sensitive or session.secure_mode)
+        session.takeover_exchange.clear()
+        if session.response_pending:
+            with suppress(Exception):
+                await self._cancel_active_response(session)
+        await session.twilio.send_json({"event": "clear", "streamSid": session.stream_sid})
+        if session.takeover_sensitive:
+            session.secure_mode = True
+            await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
+        self._events.append(
+            "call.takeover_audio_gated",
+            {"task_id": task_id, "sensitive": session.takeover_sensitive},
+        )
+
+    async def exit_typed_takeover(self, task_id: str) -> dict[str, Any] | None:
+        async with self._lock:
+            session = self._sessions.get(task_id)
+        if session is None or not session.typed_takeover:
+            raise RuntimeError("Typed takeover is not active for this call.")
+        sensitive = session.takeover_sensitive
+        update_record = None
         await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
+        if sensitive:
+            item_text = (
+                "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND\n"
+                "The represented person completed a protected exchange through local voice. Continue naturally "
+                "without identifying, requesting, or repeating any protected value."
+            )
+        else:
+            lines = []
+            for turn in session.takeover_exchange[-16:]:
+                speaker = "represented person" if turn["speaker"] == "user" else "representative"
+                cleaned = sanitized_takeover_text(turn["text"])
+                lines.append(f"{speaker}: {cleaned[:500]}")
+            summary = "\n".join(lines) or "No substantive exchange was captured during typed takeover."
+            update_record = {
+                "id": uuid4().hex,
+                "kind": "takeover_context",
+                "key": "typed_takeover_exchange",
+                "value": summary,
+                "summary": f"During typed takeover:\n{summary}",
+            }
+            session.context_updates.append(update_record)
+            item_text = (
+                "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND\n"
+                f"Meaning: {update_record['summary']}\n"
+                "This is a backend-confirmed continuity note, not speech currently coming from the representative."
+            )
+        item_id = uuid4().hex
+        session.pending_context_item_id = item_id
+        session.context_item_ack.clear()
+        await session.realtime.send(
+            json.dumps(
+                {
+                    "type": "conversation.item.create",
+                    "item": {
+                        "id": item_id,
+                        "type": "message",
+                        "role": "system",
+                        "content": [{"type": "input_text", "text": item_text}],
+                    },
+                }
+            )
+        )
+        try:
+            if self._session_update_timeout > 0:
+                await asyncio.wait_for(session.context_item_ack.wait(), timeout=self._session_update_timeout)
+        finally:
+            session.pending_context_item_id = ""
         session.expected_field = None
         session.secure_mode = False
+        session.typed_takeover = False
+        session.takeover_sensitive = False
+        session.takeover_exchange.clear()
         await self._send_response_create(
             session,
             {
                 "type": "response.create",
                 "response": {
                     "instructions": (
-                        "The user supplied one protected field through local voice. Say only: "
-                        "'Thanks. Please continue.' Do not identify or repeat the field or its value."
+                        speaker_addressing_preamble(session.context)
+                        + "Control has just returned to you after a typed takeover. Continue the current phone "
+                        "conversation naturally from the newest confirmed backend context. Do not reintroduce "
+                        "yourself, repeat the disclosure, mention the private interface, or repeat protected data."
                     )
                 },
             },
             wait_for_available=True,
-            purpose="secure_field_resume",
+            purpose="takeover_resume",
         )
-        self._events.append("secure_mode.exited", {"task_id": task_id})
-
-    async def resume_from_takeover(self, task_id: str) -> None:
-        async with self._lock:
-            session = self._sessions.get(task_id)
-        if session is None:
-            raise RuntimeError("The active call is no longer connected.")
-        expected_field = session.expected_field
-        await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
-        session.expected_field = None
-        session.secure_mode = False
-        try:
-            await self._send_response_create(
-                session,
-                {
-                    "type": "response.create",
-                    "response": {
-                        "instructions": (
-                            speaker_addressing_preamble(session.context)
-                            + "The user has handed the active call back to you after handling a protected exchange "
-                            "personally. Continue naturally from here without identifying or repeating any "
-                            "protected information."
-                        )
-                    },
-                },
-                wait_for_available=True,
-                purpose="takeover_resume",
-            )
-        except Exception:
-            session.expected_field = expected_field
-            session.secure_mode = True
-            raise
-        self._events.append("secure_mode.takeover_resumed", {"task_id": task_id})
+        self._events.append("call.takeover_context_applied", {"task_id": task_id, "sensitive": sensitive})
+        return update_record
 
     async def _enter_secure_mode(self, task_id: str, session: ActiveRealtimeSession, field_name: str) -> None:
         await self._stop_waiting_keepalive(session)
-        session.secure_mode = True
+        session.secure_handoff_field = field_name
         session.expected_field = field_name
         await session.twilio.send_json({"event": "clear", "streamSid": session.stream_sid})
+        if session.response_pending:
+            await session.realtime.send(json.dumps({"type": "response.cancel"}))
+            return
+        caller_name = normalize_display_name(str(session.context.get("caller_name", ""))) or "the caller"
+        sent = await self._send_response_create(
+            session,
+            {
+                "type": "response.create",
+                "response": {
+                    "instructions": (
+                        f"Say exactly this one sentence and nothing else: 'One moment — {caller_name} is going to "
+                        "take over for this part.' Do not say, identify, infer, or repeat any protected value."
+                    )
+                },
+            },
+            wait_for_available=True,
+            purpose="sensitive_handoff",
+        )
+        if not sent:
+            await self._activate_sensitive_takeover(task_id, session, field_name)
+
+    async def _activate_sensitive_takeover(
+        self,
+        task_id: str,
+        session: ActiveRealtimeSession,
+        field_name: str,
+    ) -> None:
+        session.secure_handoff_field = None
+        session.secure_mode = True
         await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
         state = self._secure_requester(task_id, field_name) if self._secure_requester else {}
         self._events.append(
-            "secure_mode.takeover_required" if state.get("call_state") == "HUMAN_TAKEOVER" else "secure_mode.entered",
-            {"task_id": task_id, "field": field_name},
+            "secure_mode.takeover_required",
+            {"task_id": task_id, "field": field_name, "call_state": state.get("call_state", "")},
+        )
+
+    async def _promote_active_takeover_to_sensitive(
+        self,
+        task_id: str,
+        session: ActiveRealtimeSession,
+        field_name: str,
+    ) -> None:
+        session.takeover_sensitive = True
+        session.secure_mode = True
+        session.expected_field = field_name
+        session.takeover_exchange.clear()
+        await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
+        state = self._secure_requester(task_id, field_name) if self._secure_requester else {}
+        self._events.append(
+            "secure_mode.takeover_required",
+            {"task_id": task_id, "field": field_name, "call_state": state.get("call_state", "")},
         )
 
     async def bridge(
@@ -769,7 +924,7 @@ class RealtimeSessionHub:
             message = await session.twilio.receive_json()
             event = message.get("event")
             if event == "media":
-                if not session.secure_mode:
+                if not session.secure_mode and not session.secure_handoff_field:
                     await session.realtime.send(
                         json.dumps({"type": "input_audio_buffer.append", "audio": message["media"]["payload"]})
                     )
@@ -800,7 +955,7 @@ class RealtimeSessionHub:
                 if str(item.get("id", "")) == session.pending_context_item_id:
                     session.context_item_ack.set()
             if event_type == "response.output_audio.delta":
-                if not session.secure_mode and (
+                if not session.secure_mode and not session.typed_takeover and (
                     not session.waiting_for_user
                     or session.hold_response_active
                     or session.keepalive_response_active
@@ -815,11 +970,13 @@ class RealtimeSessionHub:
             elif (
                 event_type == "input_audio_buffer.speech_started"
                 and not session.secure_mode
+                and not session.typed_takeover
                 and not session.waiting_for_user
             ):
                 await session.twilio.send_json({"event": "clear", "streamSid": session.stream_sid})
             if event_type == "response.done":
                 response = event.get("response", {})
+                completed_purpose = session.response_purpose
                 completed_response_id = str(response.get("id", "")) or session.response_server_id
                 payload = {
                     "task_id": task_id,
@@ -841,17 +998,45 @@ class RealtimeSessionHub:
                 if session.keepalive_response_active:
                     session.keepalive_response_active = False
                     session.keepalive_complete.set()
-                if session.deferred_representative_turns and not session.waiting_for_user:
+                if completed_purpose == "sensitive_handoff" and session.secure_handoff_field:
+                    await self._activate_sensitive_takeover(
+                        task_id,
+                        session,
+                        session.secure_handoff_field,
+                    )
+                elif session.secure_handoff_field:
+                    await self._enter_secure_mode(task_id, session, session.secure_handoff_field)
+                if (
+                    session.deferred_representative_turns
+                    and not session.waiting_for_user
+                    and not session.typed_takeover
+                    and not session.secure_mode
+                ):
                     utterance = session.deferred_representative_turns.pop(0)
                     await self._gate_representative_turn(session, task_id, utterance)
             transcript = transcript_from_realtime_event(event)
             if transcript and transcript[1].strip() and not session.secure_mode:
+                if session.secure_handoff_field and transcript[0] == "representative":
+                    continue
                 sensitive_field = requested_sensitive_field(transcript[1])
-                if transcript[0] == "representative" and sensitive_field:
+                if transcript[0] == "representative" and sensitive_field and session.typed_takeover:
+                    await self._promote_active_takeover_to_sensitive(task_id, session, sensitive_field)
+                elif (
+                    transcript[0] == "representative"
+                    and sensitive_field
+                    and not session.typed_takeover
+                    and not session.secure_handoff_field
+                ):
                     await self._enter_secure_mode(task_id, session, sensitive_field)
-                else:
+                elif not (session.typed_takeover and transcript[0] == "relay"):
                     self._transcript_writer(task_id, transcript[0], transcript[1])
-                    if transcript[0] == "representative" and not session.waiting_for_user:
+                    if transcript[0] == "representative" and session.typed_takeover:
+                        session.takeover_exchange.append({"speaker": "representative", "text": transcript[1]})
+                    elif (
+                        transcript[0] == "representative"
+                        and not session.waiting_for_user
+                        and not session.secure_handoff_field
+                    ):
                         await self._gate_representative_turn(session, task_id, transcript[1])
             if event_type == "error":
                 detail = event.get("error", {})
@@ -889,6 +1074,8 @@ class RealtimeSessionHub:
         utterance: str,
     ) -> None:
         session.task_id = session.task_id or task_id
+        if session.typed_takeover or session.secure_mode or session.secure_handoff_field:
+            return
         if session.response_pending:
             session.deferred_representative_turns.append(utterance)
             self._events.append("realtime.representative_turn_deferred", {"task_id": task_id})
@@ -940,6 +1127,8 @@ class RealtimeSessionHub:
             )
         else:
             latency_ms = round((monotonic() - started) * 1000)
+        if session.typed_takeover or session.secure_mode or session.secure_handoff_field:
+            return
         session.debug_trace and session.debug_trace.append(
             "gatekeeper.verdict",
             {"verdict": verdict.model_dump(), "latency_ms": latency_ms},
@@ -971,6 +1160,8 @@ class RealtimeSessionHub:
                 )
             else:
                 veto_latency_ms = round((monotonic() - veto_started) * 1000)
+            if session.typed_takeover or session.secure_mode or session.secure_handoff_field:
+                return
             session.debug_trace and session.debug_trace.append(
                 "gatekeeper.authority_veto",
                 {"verdict": veto.model_dump(), "latency_ms": veto_latency_ms},

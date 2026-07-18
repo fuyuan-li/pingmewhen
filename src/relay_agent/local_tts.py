@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import re
 import sys
 import time
 import warnings
@@ -13,7 +14,9 @@ class LocalTTSUnavailable(RuntimeError):
 
 
 class LocalTTSRenderer(Protocol):
-    def render(self, field: str, value: str) -> list[str]: ...
+    def render_text(self, text: str) -> list[str]: ...
+
+    def render_sensitive(self, field: str, value: str) -> list[str]: ...
 
 
 FAKE_SENSITIVE_VALUES = {
@@ -26,6 +29,15 @@ FAKE_SENSITIVE_VALUES = {
 
 def is_allowed_fake_value(field: str, value: str) -> bool:
     return "".join(character for character in value if character.isdigit()) == FAKE_SENSITIVE_VALUES.get(field)
+
+
+def looks_like_protected_value(value: str) -> bool:
+    digits = "".join(character for character in value if character.isdigit())
+    return bool(
+        13 <= len(digits) <= 19
+        or re.search(r"\b\d{3}[ -]?\d{2}[ -]?\d{4}\b", value)
+        or re.search(r"\b(?:password|passcode|account pin|api key|auth token|authentication token)\b", value, re.I)
+    )
 
 
 def spoken_sensitive_value(field: str, value: str) -> str:
@@ -68,7 +80,19 @@ def _pcmu_chunks(samples: list[float], source_rate: float) -> list[str]:
 
 
 class MacOSLocalTTS:
+    def render_text(self, text: str) -> list[str]:
+        cleaned = text.strip()
+        if not cleaned:
+            raise ValueError("Type something for the representative.")
+        return self._render_utterance(cleaned)
+
+    def render_sensitive(self, field: str, value: str) -> list[str]:
+        return self._render_utterance(spoken_sensitive_value(field, value))
+
     def render(self, field: str, value: str) -> list[str]:
+        return self.render_sensitive(field, value)
+
+    def _render_utterance(self, utterance_text: str) -> list[str]:
         if sys.platform != "darwin":
             raise LocalTTSUnavailable("Secure local voice currently requires macOS.")
         try:
@@ -78,7 +102,6 @@ class MacOSLocalTTS:
         except ImportError as error:
             raise LocalTTSUnavailable("The macOS speech framework is unavailable.") from error
 
-        utterance_text = spoken_sensitive_value(field, value)
         synthesizer = AVFAudio.AVSpeechSynthesizer.alloc().init()
         utterance = AVFAudio.AVSpeechUtterance.speechUtteranceWithString_(utterance_text)
         samples: list[float] = []
@@ -103,7 +126,6 @@ class MacOSLocalTTS:
         while not finished and time.monotonic() < deadline:
             NSRunLoop.currentRunLoop().runUntilDate_(NSDate.dateWithTimeIntervalSinceNow_(0.02))
         utterance_text = ""
-        value = ""
         if not finished or not samples:
             raise LocalTTSUnavailable("macOS did not return synthesized speech audio.")
         return _pcmu_chunks(samples, source_rate)

@@ -662,7 +662,7 @@ def test_malformed_phone_number_block_names_the_offending_action(tmp_path):
     assert "Call billing support (Example Telecom)" in reply["text"]
 
 
-def test_secure_fields_cycle_individually_and_repeat_routes_to_takeover(tmp_path):
+def test_sensitive_request_requires_typed_takeover_and_fake_value_form_is_deprecated(tmp_path):
     log_path = tmp_path / "events.jsonl"
     engine = AgenticTaskEngine(
         EventLog(log_path),
@@ -676,24 +676,28 @@ def test_secure_fields_cycle_individually_and_repeat_routes_to_takeover(tmp_path
     task = engine.begin_call(task["id"], pending["index"], "CA123")
 
     task = engine.request_secure_field(task["id"], "card_number")
-    assert task["call_state"] == "SECURE_LOCAL"
-    assert task["prompt"]["field"] == "card_number"
+    assert task["call_state"] == "HUMAN_TAKEOVER"
+    assert task["stage"] == "takeover_required"
+    assert task["takeover_active"] is False
+    assert task["takeover_sensitive"] is True
+    assert task["prompt"]["kind"] == "takeover_required"
+    assert task["prompt"]["fake_value"] == "4242424242424242"
     event_count = len(task["events"])
     engine.append_transcript(task["id"], "representative", "4242 4242 4242 4242")
     assert len(engine.get(task["id"])["events"]) == event_count
 
-    task = engine.complete_secure_field(task["id"], "card_number")
-    assert task["call_state"] == "CONNECTED"
-    assert task["secure_mode"] is False
-    task = engine.request_secure_field(task["id"], "expiration")
-    assert task["prompt"]["field"] == "expiration"
-    task = engine.complete_secure_field(task["id"], "expiration")
-
-    task = engine.request_secure_field(task["id"], "card_number")
+    task = engine.begin_typed_takeover(task["id"], sensitive=True)
     assert task["call_state"] == "HUMAN_TAKEOVER"
     assert task["stage"] == "human_takeover"
+    assert task["takeover_active"] is True
     assert task["secure_mode"] is True
     assert "4242" not in log_path.read_text()
+
+    task = engine.resume_from_takeover(task["id"])
+    assert task["call_state"] == "CONNECTED"
+    assert task["secure_mode"] is False
+    assert task["takeover_active"] is False
+    assert "card_number" in task["secure_fields_completed"]
 
 
 def test_human_takeover_can_explicitly_resume_the_active_call(tmp_path):
@@ -708,6 +712,7 @@ def test_human_takeover_can_explicitly_resume_the_active_call(tmp_path):
     pending = engine.next_phone_action(task["id"])
     engine.begin_call(task["id"], pending["index"], "CA123")
     task = engine.request_secure_field(task["id"], "verification_request")
+    task = engine.begin_typed_takeover(task["id"], sensitive=True)
 
     resumed = engine.resume_from_takeover(task["id"])
 
@@ -716,9 +721,44 @@ def test_human_takeover_can_explicitly_resume_the_active_call(tmp_path):
     assert resumed["stage"] == "calling"
     assert resumed["status"] == "running"
     assert resumed["secure_mode"] is False
+    assert resumed["takeover_active"] is False
     assert resumed["secure_expected_field"] is None
     assert resumed["prompt"] is None
     assert resumed["events"][-1]["text"] == "Human takeover ended · Relay returned to the active call"
+
+
+def test_general_typed_takeover_records_state_and_context_on_resume(tmp_path):
+    log_path = tmp_path / "events.jsonl"
+    engine = AgenticTaskEngine(
+        EventLog(log_path),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    engine.begin_call(task["id"], pending["index"], "CA123")
+
+    active = engine.begin_typed_takeover(task["id"])
+    assert active["call_state"] == "HUMAN_TAKEOVER"
+    assert active["takeover_active"] is True
+    assert active["takeover_sensitive"] is False
+
+    update = {
+        "id": "update-1",
+        "kind": "takeover_context",
+        "key": "typed_takeover_exchange",
+        "value": "Tuesday works.",
+        "summary": "The represented person accepted Tuesday.",
+    }
+    resumed = engine.resume_from_takeover(task["id"], update)
+
+    assert resumed["call_state"] == "CONNECTED"
+    assert resumed["context_updates"][-1] == update
+    events = log_path.read_text()
+    assert "call.takeover_started" in events
+    assert "call.takeover_ended" in events
 
 
 def test_resume_from_takeover_rejects_any_other_call_state(tmp_path):

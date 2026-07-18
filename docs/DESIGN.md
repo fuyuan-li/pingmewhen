@@ -92,23 +92,13 @@ Production call-time reasoning is split between two roles with the backend as co
 
 The deterministic simulator keeps future turns in a backend queue. The UI requests one turn at a time. A user barge-in is placed at the front of that queue as a private user message, a contextually reformulated Relay utterance, and a simulated representative response. The pending script then resumes.
 
-### Real takeover media path
+### Typed takeover media path
 
-The deterministic preview does not connect audio. Its takeover control only pauses the scripted state machine and is labeled accordingly.
+Production P0 takeover is type-to-speak, not browser microphone audio. The localhost backend cancels and gates Speaker output, pauses Gatekeeper decisions, synthesizes the user's text with macOS AVSpeechSynthesizer, converts it to PCMU, and publishes it directly into the existing Twilio Media Stream. The typed text is not submitted to Speaker as a conversation message.
 
-A real takeover requires three live participants sharing one media bridge:
+During ordinary typed takeover, representative audio continues to reach Realtime transcription so the user can read the Call Console, but the backend never requests a Speaker response. On handback, Relay appends one sanitized backend-confirmed continuity item and explicitly resumes Speaker without another introduction. During protected takeover, both Realtime audio directions and content logging remain gated; handback supplies only a content-free marker that the protected exchange finished.
 
-```text
-representative PSTN/SIP leg ─┐
-Relay Realtime audio leg ────┼─ local media bridge
-user browser WebRTC leg ─────┘
-```
-
-The browser obtains microphone audio with WebRTC. The phone leg enters through a SIP trunk or telephony provider. During Relay mode, the local media bridge publishes Relay audio and keeps the user microphone muted. During takeover, it cancels/pauses Relay output, unmutes the browser track into the same conference, and continues routing representative audio to the browser. Returning control reverses that switch. Ephemeral browser credentials and standard API credentials remain local-backend responsibilities.
-
-OpenAI recommends WebRTC for browser Realtime clients and documents browser microphone tracks and ephemeral credentials: https://developers.openai.com/api/docs/guides/realtime-webrtc. OpenAI also documents SIP phone connectivity and call monitoring: https://developers.openai.com/api/docs/guides/realtime-sip. Combining both legs in a shared conference is Relay architecture, not a capability that the current deterministic app already provides.
-
-For the safe hackathon demo, the representative can be a simulated voice participant rather than a real insurer, but the user and simulated representative should still exchange actual audio through the same conference. That proves takeover without calling a real business.
+The deterministic preview does not connect phone audio. Browser microphone/conference takeover remains a future extension and is not part of P0.
 
 ### Task orchestrator
 
@@ -139,8 +129,8 @@ PREPARING
   -> CONNECTED
   -> WAITING_FOR_USER (representative input/transcription continues; normal Speaker responses pause except constrained keep-alives)
   -> APPROVAL_REQUIRED
-  -> SECURE_HANDOFF_PENDING
-  -> SECURE_LOCAL | HUMAN_TAKEOVER
+  -> HUMAN_TAKEOVER (ordinary typed takeover)
+  -> HUMAN_TAKEOVER (protected takeover required or active)
   -> CONNECTED
   -> COMPLETED | FAILED
 ```
@@ -185,7 +175,7 @@ Secure-mode invariants:
 5. The user can take over at any time.
 6. P0 accepts fake values only.
 
-Payment is a field-by-field state machine, not one combined form: the representative asks for one field; Relay yields the outbound channel; local TTS speaks only that field; its completion signal returns the channel to Relay; and the representative may then request the next field. The deterministic browser preview demonstrates these transitions with device audio. The production bridge gates both Realtime directions, generates speech in memory with macOS AVSpeechSynthesizer, converts it to PCMU, publishes it only to the representative leg, and waits for Twilio's playback mark before reconnecting Realtime.
+Payment is a field-by-field state machine, not one combined form: the representative asks for one field; Relay speaks a brief handoff line; the dashboard requires typed takeover; local TTS speaks only the scoped fake field; and the user hands control back before the next field can be detected. The old production `SECURE_LOCAL` fake-value form and `/secure-fields` endpoint are deprecated. The deterministic browser preview may retain its simulated form. The production bridge gates both Realtime directions, generates speech in memory with macOS AVSpeechSynthesizer, converts it to PCMU, publishes it only to the representative leg, and waits for Twilio's playback mark.
 
 The simulated representative will not intentionally repeat fake card data. In production, a repeated protected-field request keeps the Realtime gate closed and transitions the durable call state to `HUMAN_TAKEOVER` rather than speaking the value again.
 

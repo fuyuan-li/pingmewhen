@@ -91,6 +91,10 @@
       .history-toggle { display: none; padding: 8px 11px; border: 1px solid #cbd1da; border-radius: 9px; color: #4f5660; background: white; font-size: 11px; font-weight: 750; }
       .workspace.planning-active.has-call-history .history-toggle { display: block; }
       .takeover { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #df9b96; border-radius: 10px; background: #fff6f5; color: #a23d35; font-size: 12px; font-weight: 750; }
+      .takeover.active { border-color: #7560df; background: #ece9ff; color: #4332a4; box-shadow: 0 0 0 3px rgba(117, 96, 223, .14); }
+      .takeover.required { animation: takeover-pulse 1.15s ease-in-out infinite; }
+      @keyframes takeover-pulse { 50% { transform: scale(1.035); box-shadow: 0 0 0 7px rgba(211, 72, 61, .13); } }
+      .prompt.takeover-warning { border: 2px solid #d95b50; background: #fff0ed; color: #7f2923; }
       .hangup { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #d64c4c; border-radius: 10px; background: #d64c4c; color: #fff; font-size: 12px; font-weight: 750; }
       .call-tabs { display: flex; min-width: 0; gap: 7px; overflow-x: auto; padding: 10px 12px; border-bottom: 1px solid #e6e8ed; background: white; scrollbar-width: thin; }
       .call-tab { flex: 0 0 auto; max-width: 190px; overflow: hidden; padding: 8px 10px; border: 1px solid #d8dce3; border-radius: 9px; color: #68707b; background: #f8f9fb; font-size: 11px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
@@ -502,7 +506,8 @@
           act('takeover');
           return;
         }
-        resumeTakeover();
+        if (task?.takeover_active) resumeTakeover();
+        else beginTakeover();
       });
       document.querySelector('#hangup').addEventListener('click', () => {
         if (!task || task.status === 'complete') return;
@@ -554,8 +559,40 @@
         const value = input.value.trim();
         if (!value) return;
         input.value = '';
+        if (runtimeMode !== 'demo' && task?.takeover_active) {
+          await sendTakeoverText(value);
+          return;
+        }
         const optimistic = appendOptimisticInstruction(phase, value);
         await act('instruction', value, optimistic);
+      }
+
+      async function sendTakeoverText(value) {
+        if (!task || actionInFlight || !task.takeover_active) return;
+        actionInFlight = true;
+        const displayText = task.takeover_sensitive ? 'Protected value spoken locally' : value;
+        const optimistic = appendOptimisticInstruction('calling', displayText);
+        optimistic.pending.textContent = 'Speaking locally to the representative';
+        setControlsDisabled(true);
+        try {
+          const response = await fetch(`/api/tasks/${task.id}/takeover-say`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text: value})
+          });
+          value = '';
+          task = await readResponse(response);
+          optimistic.pending.remove();
+          optimistic.message.classList.remove('optimistic');
+          renderTask();
+        } catch (error) {
+          value = '';
+          failOptimisticInstruction(optimistic);
+          showError(error.message);
+        } finally {
+          actionInFlight = false;
+          setControlsDisabled(task?.status === 'complete');
+        }
       }
 
       async function act(action, value = '', optimistic = null) {
@@ -668,22 +705,34 @@
           return event.phase === 'calling' && !['user_private', 'relay_private'].includes(event.speaker);
         }), activePhase);
 
-        const securePrompt = activePhase === 'calling' && (task.secure_mode || task.call_state === 'HUMAN_TAKEOVER');
-        renderPrompt(securePrompt ? null : task.prompt, planningPrompt);
-        renderPrompt(securePrompt ? task.prompt : null, callingPrompt);
+        const demoSecurePrompt = runtimeMode === 'demo' && activePhase === 'calling' && task.secure_mode;
+        renderPrompt(demoSecurePrompt ? null : task.prompt, planningPrompt);
+        renderPrompt(demoSecurePrompt ? task.prompt : null, callingPrompt);
+        planningPrompt.classList.toggle('takeover-warning', task.stage === 'takeover_required' || task.takeover_sensitive);
         const takeover = document.querySelector('#takeover');
-        const canResumeTakeover = runtimeMode !== 'demo' && task.call_state === 'HUMAN_TAKEOVER';
-        takeover.style.display = activePhase === 'calling' && (runtimeMode === 'demo' || canResumeTakeover) ? 'block' : 'none';
-        takeover.textContent = runtimeMode === 'demo' ? 'Simulate takeover · no audio' : 'Return control to Relay';
+        takeover.style.display = activePhase === 'calling' ? 'block' : 'none';
+        takeover.classList.toggle('active', Boolean(task.takeover_active));
+        takeover.classList.toggle('required', task.stage === 'takeover_required');
+        takeover.textContent = runtimeMode === 'demo'
+          ? 'Simulate takeover · no audio'
+          : task.takeover_active
+            ? '⌨ You’re speaking · click to hand back'
+            : '⌨ Take over (type)';
         takeover.disabled = task.status === 'complete' || (runtimeMode === 'demo' && task.stage === 'takeover');
         const hangup = document.querySelector('#hangup');
         hangup.style.display = activePhase === 'calling' && runtimeMode !== 'demo' && task.status !== 'complete' ? 'block' : 'none';
         hangup.disabled = task.status === 'complete' || !task.current_call;
-        planningInstruction.disabled = task.status === 'complete' || task.secure_mode;
+        planningInstruction.disabled = task.status === 'complete' || (task.secure_mode && !task.takeover_active);
         planningInstruction.placeholder = activePhase === 'calling'
-          ? 'Message Relay privately · answer, update context, or change call strategy…'
+          ? task.takeover_active
+            ? task.takeover_sensitive
+              ? task.secure_expected_field === 'verification_request'
+                ? 'Type a non-sensitive response · protected values will be rejected…'
+                : 'Type the displayed fake protected value to speak locally…'
+              : 'Type what you want to say to the representative…'
+            : 'Message Relay privately · answer, update context, or change call strategy…'
           : 'Reply to Relay or revise the plan…';
-        document.querySelector('#planning-send').disabled = task.status === 'complete' || task.secure_mode;
+        document.querySelector('#planning-send').disabled = task.status === 'complete' || (task.secure_mode && !task.takeover_active);
         document.querySelector('#task-attach-label').style.display = activePhase === 'planning' && task.status !== 'complete' ? 'inline-flex' : 'none';
         if (task.auto_advance) {
           advanceTimer = setTimeout(() => act('advance'), 850);
@@ -855,12 +904,17 @@
         question.textContent = prompt.question;
         promptBox.appendChild(question);
 
+        if (prompt.kind === 'takeover_required' && prompt.fake_value) {
+          const testValue = document.createElement('div');
+          testValue.className = 'hint';
+          testValue.textContent = `P0 fake data only. After taking over, type this test value: ${prompt.fake_value}`;
+          promptBox.appendChild(testValue);
+        }
+
         if (prompt.kind === 'secure_field') {
           const warning = document.createElement('div');
           warning.className = 'hint';
-          warning.textContent = runtimeMode === 'demo'
-            ? 'Fake data only. This value remains in this browser and the preview plays it on this device.'
-            : 'Fake data only. The value goes only to this localhost process for on-device speech and is never sent to the cloud model, task transcript, or event log.';
+          warning.textContent = 'Fake data only. This value remains in this browser and the preview plays it on this device.';
           const form = document.createElement('div');
           form.className = 'secure-form';
           const field = document.createElement('input');
@@ -872,19 +926,10 @@
           form.appendChild(field);
           const speak = document.createElement('button');
           speak.className = 'choice';
-          speak.textContent = runtimeMode === 'demo'
-            ? `Simulate ${prompt.label} via local TTS · device audio`
-            : `Speak fake ${prompt.label} into the protected call`;
+          speak.textContent = `Simulate ${prompt.label} via local TTS · device audio`;
           speak.onclick = () => {
             const value = field.value.trim();
             if (!value) return showError(`Enter a fake ${prompt.label.toLowerCase()} first.`);
-            if (runtimeMode !== 'demo') {
-              field.value = '';
-              speak.disabled = true;
-              field.disabled = true;
-              sendSecureField(prompt.field, value);
-              return;
-            }
             if (!window.speechSynthesis) return showError('Local browser speech is unavailable. Use Take Over instead.');
             const digits = value.replace(/\D/g, '');
             if (!digits) return showError(`Enter a valid fake ${prompt.label.toLowerCase()}.`);
@@ -930,40 +975,35 @@
           return;
         }
         document.querySelectorAll('.choice').forEach(control => control.disabled = false);
-        document.querySelector('#planning-send').disabled = task?.status === 'complete' || task?.secure_mode;
-        document.querySelector('#takeover').disabled = task?.status === 'complete' || workflowPhase !== 'calling' || task?.stage === 'takeover';
-      }
-
-      async function sendSecureField(field, value) {
-        actionInFlight = true;
-        try {
-          const response = await fetch(`/api/tasks/${task.id}/secure-fields`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({field, value})
-          });
-          value = '';
-          task = await readResponse(response);
-          renderTask();
-        } catch (error) {
-          value = '';
-          showError(error.message);
-          task = await fetch(`/api/tasks/${task.id}`).then(readResponse);
-          renderTask();
-        } finally {
-          actionInFlight = false;
-          setControlsDisabled(task?.status === 'complete');
-        }
+        document.querySelector('#planning-send').disabled = task?.status === 'complete' || (task?.secure_mode && !task?.takeover_active);
+        document.querySelector('#takeover').disabled = task?.status === 'complete' || workflowPhase !== 'calling' || (runtimeMode === 'demo' && task?.stage === 'takeover');
       }
 
       async function resumeTakeover() {
-        if (!task || actionInFlight || task.call_state !== 'HUMAN_TAKEOVER') return;
+        if (!task || actionInFlight || !task.takeover_active) return;
         actionInFlight = true;
         setControlsDisabled(true);
         try {
           const response = await fetch(`/api/tasks/${task.id}/resume-takeover`, {method: 'POST'});
           task = await readResponse(response);
           renderTask();
+        } catch (error) {
+          showError(error.message);
+        } finally {
+          actionInFlight = false;
+          setControlsDisabled(task?.status === 'complete');
+        }
+      }
+
+      async function beginTakeover() {
+        if (!task || actionInFlight || workflowPhase !== 'calling') return;
+        actionInFlight = true;
+        setControlsDisabled(true);
+        try {
+          const response = await fetch(`/api/tasks/${task.id}/takeover`, {method: 'POST'});
+          task = await readResponse(response);
+          renderTask();
+          planningInstruction.focus();
         } catch (error) {
           showError(error.message);
         } finally {

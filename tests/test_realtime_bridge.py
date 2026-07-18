@@ -9,6 +9,7 @@ from relay_agent.realtime_bridge import (
     RealtimeSessionHub,
     realtime_session_update,
     requested_sensitive_field,
+    sanitized_takeover_text,
     transcript_from_realtime_event,
 )
 
@@ -89,6 +90,15 @@ def test_transcripts_are_classified():
     assert requested_sensitive_field("What is the CVV?") == "cvv"
     assert requested_sensitive_field("May I repeat that number back to verify it?") == "verification_request"
     assert requested_sensitive_field("What are the last four digits of your SSN?") is None
+
+
+def test_takeover_continuity_redacts_identifiers_and_secrets():
+    sanitized = sanitized_takeover_text("Account 123456789 and password: hunter2")
+
+    assert "123456789" not in sanitized
+    assert "hunter2" not in sanitized
+    assert "[redacted identifier]" in sanitized
+    assert "[REDACTED]" in sanitized
 
 
 class FakeRealtime:
@@ -926,6 +936,152 @@ def test_secure_mode_stops_audio_in_both_directions_and_suppresses_transcripts(t
     assert not log_path.exists() or "4242" not in log_path.read_text()
 
 
+def test_general_typed_takeover_keeps_transcribing_but_pauses_speaker_and_gatekeeper(tmp_path):
+    class NeverGatekeeper:
+        async def classify(self, request):
+            raise AssertionError("Gatekeeper must remain paused during typed takeover")
+
+        async def veto(self, request):
+            raise AssertionError("Gatekeeper must remain paused during typed takeover")
+
+        async def route_private_message(self, request):
+            raise AssertionError("Private routing must remain paused during typed takeover")
+
+    twilio = FakeTwilio(
+        [
+            {"event": "media", "media": {"payload": "representative-audio"}},
+            {"event": "stop"},
+        ]
+    )
+    realtime = FakeRealtime(
+        [
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "transcript": "Tuesday is available.",
+            },
+            {"type": "response.output_audio.delta", "delta": "must-not-play"},
+        ]
+    )
+    transcripts = []
+    session = ActiveRealtimeSession(
+        realtime,
+        twilio,
+        "MZ1",
+        task_id="task-1",
+        typed_takeover=True,
+    )
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: transcripts.append((speaker, text)) or {},
+        EventLog(tmp_path / "events.jsonl"),
+        gatekeeper=NeverGatekeeper(),
+    )
+
+    async def run():
+        await asyncio.gather(hub._twilio_to_openai(session), hub._openai_to_twilio(session, "task-1"))
+
+    asyncio.run(run())
+
+    assert realtime.sent == [{"type": "input_audio_buffer.append", "audio": "representative-audio"}]
+    assert transcripts == [("representative", "Tuesday is available.")]
+    assert session.takeover_exchange == [{"speaker": "representative", "text": "Tuesday is available."}]
+    assert not any(message.get("event") == "media" for message in twilio.sent)
+
+
+def test_enter_typed_takeover_clears_speaker_audio_and_pauses_private_injection(tmp_path):
+    realtime = FakeRealtime()
+    twilio = FakeTwilio()
+    session = ActiveRealtimeSession(realtime, twilio, "MZ1", task_id="task-1")
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        await hub.enter_typed_takeover("task-1")
+        return await hub.inject("task-1", "This must not reach Gatekeeper or Speaker")
+
+    delivery = asyncio.run(run())
+
+    assert session.typed_takeover is True
+    assert session.secure_mode is False
+    assert delivery is None
+    assert twilio.sent == [{"event": "clear", "streamSid": "MZ1"}]
+    assert realtime.sent == []
+
+
+def test_general_typed_message_uses_local_tts_and_never_enters_realtime(tmp_path):
+    class FakeRenderer:
+        def __init__(self):
+            self.texts = []
+
+        def render_text(self, text):
+            self.texts.append(text)
+            return ["bG9jYWwtYXVkaW8="]
+
+    renderer = FakeRenderer()
+    realtime = FakeRealtime()
+    twilio = FakeTwilio()
+    session = ActiveRealtimeSession(realtime, twilio, "MZ1", typed_takeover=True)
+    log_path = tmp_path / "events.jsonl"
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(log_path),
+        tts_renderer=renderer,
+        playback_timeout=1,
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        speaking = asyncio.create_task(hub.speak_takeover_text("task-1", "Tuesday works for me"))
+        while not session.mark_events:
+            await asyncio.sleep(0)
+        next(iter(session.mark_events.values())).set()
+        await speaking
+
+    asyncio.run(run())
+
+    assert renderer.texts == ["Tuesday works for me"]
+    assert realtime.sent == []
+    assert [message["event"] for message in twilio.sent] == ["media", "mark"]
+    assert "Tuesday works for me" not in log_path.read_text()
+
+
+def test_sensitive_request_during_general_takeover_promotes_to_full_secure_mode(tmp_path):
+    requested = []
+    realtime = FakeRealtime(
+        [
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "transcript": "Please type the card number now.",
+            }
+        ]
+    )
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", typed_takeover=True)
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        secure_requester=lambda task_id, field: requested.append((task_id, field)) or {"call_state": "HUMAN_TAKEOVER"},
+    )
+
+    asyncio.run(hub._openai_to_twilio(session, "task-1"))
+
+    assert session.typed_takeover is True
+    assert session.takeover_sensitive is True
+    assert session.secure_mode is True
+    assert session.expected_field == "card_number"
+    assert requested == [("task-1", "card_number")]
+    assert realtime.sent == [{"type": "input_audio_buffer.clear"}]
+
+
 def test_sensitive_request_disconnects_realtime_before_accepting_a_field(tmp_path):
     requested = []
     transcripts = []
@@ -934,7 +1090,8 @@ def test_sensitive_request_disconnects_realtime_before_accepting_a_field(tmp_pat
             {
                 "type": "conversation.item.input_audio_transcription.completed",
                 "transcript": "Please provide the card number.",
-            }
+            },
+            {"type": "response.done", "response": {"id": "resp-handoff", "status": "completed"}},
         ]
     )
     twilio = FakeTwilio()
@@ -944,7 +1101,7 @@ def test_sensitive_request_disconnects_realtime_before_accepting_a_field(tmp_pat
         lambda task_id, index: sample_context(),
         lambda task_id, speaker, text: transcripts.append(text),
         EventLog(tmp_path / "events.jsonl"),
-        secure_requester=lambda task_id, field: requested.append((task_id, field)) or {"call_state": "SECURE_LOCAL"},
+        secure_requester=lambda task_id, field: requested.append((task_id, field)) or {"call_state": "HUMAN_TAKEOVER"},
     )
 
     asyncio.run(hub._openai_to_twilio(session, "task-1"))
@@ -953,7 +1110,34 @@ def test_sensitive_request_disconnects_realtime_before_accepting_a_field(tmp_pat
     assert requested == [("task-1", "card_number")]
     assert transcripts == []
     assert [message["event"] for message in twilio.sent] == ["clear"]
-    assert [event["type"] for event in realtime.sent] == ["input_audio_buffer.clear"]
+    assert [event["type"] for event in realtime.sent] == ["response.create", "input_audio_buffer.clear"]
+    assert "going to take over for this part" in realtime.sent[0]["response"]["instructions"]
+
+
+def test_sensitive_handoff_stops_new_representative_audio_before_full_takeover(tmp_path):
+    realtime = FakeRealtime()
+    twilio = FakeTwilio(
+        [
+            {"event": "media", "media": {"payload": "must-not-reach-cloud"}},
+            {"event": "stop"},
+        ]
+    )
+    session = ActiveRealtimeSession(
+        realtime,
+        twilio,
+        "MZ1",
+        secure_handoff_field="card_number",
+    )
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+    )
+
+    asyncio.run(hub._twilio_to_openai(session))
+
+    assert realtime.sent == []
 
 
 def test_last_four_ssn_question_remains_in_normal_transcript_flow(tmp_path):
@@ -985,14 +1169,19 @@ def test_last_four_ssn_question_remains_in_normal_transcript_flow(tmp_path):
     assert [event["type"] for event in realtime.sent] == ["response.create"]
 
 
-def test_resume_from_takeover_reuses_session_and_injects_fresh_instruction(tmp_path):
+def test_exit_typed_takeover_reuses_session_and_injects_continuity_without_reintroduction(tmp_path):
     realtime = FakeRealtime()
     session = ActiveRealtimeSession(
         realtime,
         FakeTwilio(),
         "MZ1",
-        secure_mode=True,
-        expected_field="verification_request",
+        task_id="task-1",
+        typed_takeover=True,
+        takeover_exchange=[
+            {"speaker": "representative", "text": "The earliest appointment is Tuesday."},
+            {"speaker": "user", "text": "Tuesday works for me."},
+        ],
+        context=sample_context(),
     )
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
@@ -1003,23 +1192,65 @@ def test_resume_from_takeover_reuses_session_and_injects_fresh_instruction(tmp_p
 
     async def run():
         hub._sessions["task-1"] = session
-        await hub.resume_from_takeover("task-1")
+        return await hub.exit_typed_takeover("task-1")
 
-    asyncio.run(run())
+    update = asyncio.run(run())
 
     assert hub._sessions["task-1"] is session
     assert session.secure_mode is False
+    assert session.typed_takeover is False
     assert session.expected_field is None
-    assert [event["type"] for event in realtime.sent] == ["input_audio_buffer.clear", "response.create"]
-    assert "handed the active call back" in realtime.sent[-1]["response"]["instructions"]
+    assert update["key"] == "typed_takeover_exchange"
+    assert [event["type"] for event in realtime.sent] == [
+        "input_audio_buffer.clear",
+        "conversation.item.create",
+        "response.create",
+    ]
+    item_text = realtime.sent[1]["item"]["content"][0]["text"]
+    assert "Tuesday works for me" in item_text
+    resume_instructions = realtime.sent[-1]["response"]["instructions"]
+    assert "Do not reintroduce yourself" in resume_instructions
 
 
-def test_secure_local_tts_sends_one_field_to_twilio_then_resumes(tmp_path):
+def test_sensitive_takeover_resume_adds_only_content_free_context(tmp_path):
+    realtime = FakeRealtime()
+    session = ActiveRealtimeSession(
+        realtime,
+        FakeTwilio(),
+        "MZ1",
+        task_id="task-1",
+        secure_mode=True,
+        typed_takeover=True,
+        takeover_sensitive=True,
+        expected_field="card_number",
+        context=sample_context(),
+    )
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        return await hub.exit_typed_takeover("task-1")
+
+    update = asyncio.run(run())
+
+    assert update is None
+    item_text = realtime.sent[1]["item"]["content"][0]["text"]
+    assert "completed a protected exchange" in item_text
+    assert "card_number" not in item_text
+    assert "4242" not in json.dumps(realtime.sent)
+
+
+def test_sensitive_typed_takeover_sends_one_fake_field_only_through_local_tts(tmp_path):
     class FakeRenderer:
         def __init__(self):
             self.calls = []
 
-        def render(self, field, value):
+        def render_sensitive(self, field, value):
             self.calls.append((field, value))
             return ["cGNtdS1hdWRpbw=="]
 
@@ -1032,6 +1263,8 @@ def test_secure_local_tts_sends_one_field_to_twilio_then_resumes(tmp_path):
         "MZ1",
         secure_mode=True,
         expected_field="card_number",
+        typed_takeover=True,
+        takeover_sensitive=True,
     )
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
@@ -1044,19 +1277,19 @@ def test_secure_local_tts_sends_one_field_to_twilio_then_resumes(tmp_path):
 
     async def run():
         hub._sessions["task-1"] = session
-        speaking = asyncio.create_task(hub.speak_secure_field("task-1", "card_number", "4242424242424242"))
+        speaking = asyncio.create_task(hub.speak_takeover_text("task-1", "4242424242424242"))
         while not session.mark_events:
             await asyncio.sleep(0)
         next(iter(session.mark_events.values())).set()
         await speaking
-        await hub.resume_after_secure_field("task-1")
 
     asyncio.run(run())
 
     assert renderer.calls == [("card_number", "4242424242424242")]
     assert [message["event"] for message in twilio.sent] == ["media", "mark"]
-    assert session.secure_mode is False
-    assert [event["type"] for event in realtime.sent] == ["input_audio_buffer.clear", "response.create"]
+    assert session.secure_mode is True
+    assert realtime.sent == []
+    assert "4242424242424242" not in (tmp_path / "events.jsonl").read_text()
 
 
 def test_bridge_twilio_stop_cancels_realtime_and_cleans_up_session(tmp_path):
