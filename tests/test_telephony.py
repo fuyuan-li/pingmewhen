@@ -27,10 +27,21 @@ from relay_agent.tunnel import TunnelManager
 class FakeCalls:
     def __init__(self):
         self.arguments = None
+        self.updated = []
 
     def create(self, **arguments):
         self.arguments = arguments
         return SimpleNamespace(sid="CA123", status="queued")
+
+    def __call__(self, call_sid):
+        calls = self
+
+        class _CallContext:
+            def update(self, **kwargs):
+                calls.updated.append((call_sid, kwargs))
+                return SimpleNamespace(sid=call_sid, status=kwargs.get("status", "completed"))
+
+        return _CallContext()
 
 
 class ExecutablePlanner:
@@ -111,6 +122,22 @@ def test_tunnel_url_is_used_for_per_call_webhooks(tmp_path):
     assert "status_callback_method" not in calls.arguments
     tunnel.release()
     assert terminations == [8765]
+
+
+def test_end_call_hangs_up_the_twilio_call(tmp_path):
+    tunnel = TunnelManager(
+        8765,
+        launcher=lambda port: SimpleNamespace(tunnel="https://relay.trycloudflare.com"),
+        terminator=lambda port: None,
+    )
+    calls = FakeCalls()
+    credentials = configured_store(tmp_path).resolve
+    service = TelephonyService(credentials, tunnel, lambda account_sid, auth_token: SimpleNamespace(calls=calls))
+
+    status = service.end_call("CA123")
+
+    assert status == "completed"
+    assert calls.updated == [("CA123", {"status": "completed"})]
 
 
 def test_production_runtime_starts_tunnel_at_application_start_and_checks_health_on_approval(monkeypatch, tmp_path):

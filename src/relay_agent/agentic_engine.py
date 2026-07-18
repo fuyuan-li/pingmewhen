@@ -562,6 +562,27 @@ class AgenticTaskEngine:
         self._events.append("task.private_call_message_retry_requested", {"task_id": task_id})
         return snapshot
 
+    def call_sid_for(self, task_id: str) -> str:
+        with self._lock:
+            task = self._require(task_id)
+            active = task.get("current_call") or {}
+            return str(active.get("call_sid", ""))
+
+    def hang_up_call_by_user(self, task_id: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            if task["phase"] != "calling" or not task.get("current_call"):
+                raise InvalidAction("There is no active call to hang up.")
+            call_sid = str(task["current_call"]["call_sid"])
+            # A deliberate user hangup is a clean, connected completion regardless of what the call was waiting on.
+            task["call_state"] = "CONNECTED"
+            self._append(task, "message", speaker="user_private", text="End the call.", channel="private")
+            self._append(task, "status", text="Ending the call at your request", channel="private")
+            self._store.save("production", task)
+        snapshot = self.finish_call(task_id, call_sid, "completed")
+        self._events.append("task.call_ended_by_user", {"task_id": task_id})
+        return snapshot
+
     def complete_secure_field(self, task_id: str, field_name: str) -> dict[str, Any]:
         with self._lock:
             task = self._require(task_id)

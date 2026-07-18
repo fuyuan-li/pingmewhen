@@ -269,6 +269,43 @@ def test_failed_private_answer_keeps_pending_prompt_and_requests_retry(tmp_path)
     assert failed["events"][-1]["text"] == "Answer not applied · the call remains active"
 
 
+def test_user_hangup_completes_the_call_even_while_waiting_for_an_answer(tmp_path):
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    engine.begin_call(task["id"], pending["index"], "CA123")
+    engine.mark_call_connected(task["id"])
+    engine.request_user_input(task["id"], "What installation date works?", "text", True)
+
+    assert engine.call_sid_for(task["id"]) == "CA123"
+    ended = engine.hang_up_call_by_user(task["id"])
+
+    # A deliberate hangup resolves cleanly as completed rather than the "ended while waiting" failure path.
+    assert ended["call_state"] == "COMPLETED"
+    assert ended["current_call"] is None
+    assert ended["phase"] == "planning"
+    assert ended["stage"] == "post_call_review"
+
+
+def test_hang_up_requires_an_active_call(tmp_path):
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+
+    with pytest.raises(InvalidAction):
+        engine.hang_up_call_by_user(task["id"])
+
+
 def test_user_authority_interaction_is_persisted_and_resolved_by_explicit_answer(tmp_path):
     engine = AgenticTaskEngine(
         EventLog(tmp_path / "events.jsonl"),

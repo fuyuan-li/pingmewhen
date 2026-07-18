@@ -113,7 +113,10 @@ def speaker_addressing_preamble(context: dict[str, Any]) -> str:
         f"{caller_name} in the third person. You are not {caller_name} and you are not {target}: you speak for "
         f"{caller_name} to {target}. You already introduced yourself earlier in this call — do not reintroduce "
         "yourself or restate that you are an AI unless asked. Relay the information in the correct direction: keep "
-        "who is asking, offering, conceding, or requesting exactly as it actually is, and never swap it. "
+        "who is asking, offering, conceding, or requesting exactly as it actually is, and never swap it. You are "
+        f"the one telling {target} what {caller_name} has decided — say it as your own statement to {target}, for "
+        f"example 'I can confirm {caller_name} is okay going ahead at $100 a month', never 'you can let "
+        f"{caller_name} know' (you are not asking {target} to pass a message to {caller_name}). "
     )
 
 
@@ -159,20 +162,44 @@ class PrivateMessageDelivery:
     interaction_id: str = ""
 
 
-def realtime_session_update(
+def build_speaker_instructions(
     context: dict[str, Any],
-    transcription_model: str = "gpt-4o-mini-transcribe",
     context_updates: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    action = context["action"]
+    has_disclosed: bool = False,
+) -> str:
+    action = context.get("action", {})
     caller_name = normalize_display_name(str(context.get("caller_name", ""))) or "the user"
     caller_name_literal = json.dumps(caller_name)
-    target_literal = json.dumps(action["target"])
+    target_literal = json.dumps(action.get("target", "the representative"))
     private_context = "\n".join(context.get("private_messages", [])[-20:])
     document_context = context.get("document_context", "")
     prior_calls = context.get("prior_call_transcript", "")
     confirmed_updates = json.dumps(context_updates or context.get("context_updates", []), ensure_ascii=False)
-    instructions = (
+    purpose = action.get("purpose", "the approved purpose")
+    goal = context.get("goal", "")
+    if has_disclosed:
+        turn_section = (
+            "CONTINUING: You have ALREADY introduced yourself and disclosed that you are an AI earlier in this "
+            "call. Do NOT introduce yourself again, do NOT repeat the AI disclosure, and do NOT restate the "
+            "call's purpose from the top. Simply continue the conversation, responding directly and briefly to "
+            "what the representative just said. Never deny being an AI if asked.\n\n"
+        )
+    else:
+        turn_section = (
+            "FIRST TURN: You never speak first. This is an outbound call you placed, so wait for the "
+            "representative to speak — a greeting, 'hello,' or asking who is calling — before saying anything. If "
+            "instead you hear hold music, an automated queue message, or silence, stay silent and keep waiting; "
+            "never fill the silence, greet first, or ask if anyone is there. Once the representative actually "
+            "speaks, your first reply must open with a short AI disclosure and nothing else before it, then "
+            "briefly state ONLY the primary service or topic you are calling about (see GOAL below) in the same "
+            "reply — for example 'setting up internet service at his address.' Do NOT announce your negotiation "
+            "strategy, a target or maximum price, discounts you are hoping for, or your full multi-step plan in "
+            "the opening; those come out later only as the conversation needs them. Never leave the representative "
+            "wondering why you called or invite generic small talk. Never repeat the disclosure later in the "
+            "call, and never restart it if interrupted — continue from what the representative said. Never deny "
+            "being an AI if asked, and never deny or forget that you placed this call for a specific reason.\n\n"
+        )
+    return (
         "IDENTITY — read this first, keep these two facts separate for the whole call:\n"
         f"- You represent (you are calling ON BEHALF OF): {caller_name_literal}\n"
         f"- You are calling (the organization/person you dial and speak to): {target_literal}\n"
@@ -191,17 +218,9 @@ def realtime_session_update(
         "called. Private text comes from the person you represent; it is an answer or instruction for you, not "
         "speech from the representative. Never acknowledge or answer that private person aloud as though they were "
         "on the phone. Reformulate their information naturally for the representative.\n\n"
-        "FIRST TURN: You never speak first. This is an outbound call you placed, so wait for the representative to "
-        "speak — a greeting, 'hello,' or asking who is calling — before saying anything. If instead you hear hold "
-        "music, an automated queue message, or silence, stay silent and keep waiting; never fill the silence, "
-        "greet first, or ask if anyone is there. Once the representative actually speaks, your first reply must "
-        "open with a short AI disclosure and nothing else before it, then briefly state the reason for this call "
-        "(see GOAL below) in the same reply — never leave the representative wondering why you called or invite "
-        "generic small talk instead. Never repeat the disclosure later in the call, and never restart it if "
-        "interrupted — continue from what the representative said. Never deny being an AI if asked, and never deny "
-        "or forget that you placed this call for a specific reason.\n\n"
-        "GOAL: Pursue only this approved purpose: "
-        f"{action['purpose']}. The overall user goal is: {context['goal']}. Continue each turn naturally from the "
+        + turn_section
+        + "GOAL: Pursue only this approved purpose: "
+        f"{purpose}. The overall user goal is: {goal}. Continue each turn naturally from the "
         "immediately preceding conversation.\n\n"
         "TURN CONTROL: The backend Gatekeeper is the sole authority that decides whether enough information exists "
         "to answer each representative turn. The backend creates your response only after approval. Never invent a "
@@ -225,11 +244,18 @@ def realtime_session_update(
         "or directions from the person you represent, never statements made by the representative:\n"
         f"{confirmed_updates}"
     )
+
+
+def realtime_session_update(
+    context: dict[str, Any],
+    transcription_model: str = "gpt-4o-mini-transcribe",
+    context_updates: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return {
         "type": "session.update",
         "session": {
             "type": "realtime",
-            "instructions": instructions,
+            "instructions": build_speaker_instructions(context, context_updates, has_disclosed=False),
             "output_modalities": ["audio"],
             "tools": [],
             "tool_choice": "none",
@@ -241,6 +267,7 @@ def realtime_session_update(
                         "type": "server_vad",
                         "create_response": False,
                         "interrupt_response": True,
+                        "silence_duration_ms": 900,
                     },
                 },
                 "output": {"format": {"type": "audio/pcmu"}, "voice": "marin"},
@@ -840,13 +867,20 @@ class RealtimeSessionHub:
                 )
 
     def _representative_turn_request(self, session: ActiveRealtimeSession) -> dict[str, Any] | None:
-        # Deliberately never attaches a response.instructions override here: that field replaces the entire
-        # session-level system instructions for this response, not just augments it. Every ongoing turn must keep
-        # the full goal, boundaries, and private context, so this only tracks disclosure state for the Gatekeeper
-        # bypass in _gate_representative_turn — the disclosure wording itself lives in the static session
-        # instructions (the FIRST TURN section), which stays in effect for every turn.
+        # response.instructions replaces the session instructions for this response, so we must pass the COMPLETE
+        # speaker instructions (identity, goal, boundaries, private context) every time — never a fragment, which
+        # would wipe the model's context. The only per-turn difference is the disclosure toggle: the first turn
+        # still introduces and discloses; every later turn is told it has already done so and must not repeat it.
+        disclosed_before = session.has_disclosed
         session.has_disclosed = True
-        return None
+        return {
+            "type": "response.create",
+            "response": {
+                "instructions": build_speaker_instructions(
+                    session.context, session.context_updates, has_disclosed=disclosed_before
+                )
+            },
+        }
 
     async def _gate_representative_turn(
         self,
@@ -984,7 +1018,6 @@ class RealtimeSessionHub:
             {
                 "type": "response.create",
                 "response": {
-                    "max_output_tokens": 16,
                     "instructions": (
                         "Say exactly one brief natural hold line to the representative, such as "
                         "'Let me check on that one second.' Produce that single short line, then end your turn "
@@ -1034,7 +1067,6 @@ class RealtimeSessionHub:
                     {
                         "type": "response.create",
                         "response": {
-                            "max_output_tokens": 16,
                             "instructions": (
                                 "Say exactly one short natural keep-alive line, such as 'Just need one more "
                                 "moment.' Produce that single short line, then end your turn immediately. Say "

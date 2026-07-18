@@ -422,6 +422,25 @@ def create_app(
     async def act_on_task(task_id: str, request: TaskActionRequest) -> dict:
         try:
             was_calling = engine.get(task_id)["phase"] == "calling"
+            if was_calling and request.action == "hangup" and isinstance(engine, AgenticTaskEngine):
+                call_sid = engine.call_sid_for(task_id)
+                if not call_sid:
+                    raise InvalidAction("There is no active call to hang up.")
+                events.append("realtime.hangup_requested", {"task_id": task_id})
+                try:
+                    await asyncio.to_thread(telephony.end_call, call_sid)
+                except Exception as error:
+                    events.append(
+                        "realtime.hangup_failed",
+                        {"task_id": task_id, "reason": type(error).__name__},
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Relay could not hang up the call. It may have already ended.",
+                    ) from error
+                snapshot = engine.hang_up_call_by_user(task_id)
+                telephony.capabilities.revoke(call_sid)
+                return snapshot
             if was_calling and request.action == "instruction" and isinstance(engine, AgenticTaskEngine):
                 instruction = request.value.strip()
                 if not instruction:

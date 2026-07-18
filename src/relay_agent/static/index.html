@@ -91,6 +91,7 @@
       .history-toggle { display: none; padding: 8px 11px; border: 1px solid #cbd1da; border-radius: 9px; color: #4f5660; background: white; font-size: 11px; font-weight: 750; }
       .workspace.planning-active.has-call-history .history-toggle { display: block; }
       .takeover { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #df9b96; border-radius: 10px; background: #fff6f5; color: #a23d35; font-size: 12px; font-weight: 750; }
+      .hangup { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #d64c4c; border-radius: 10px; background: #d64c4c; color: #fff; font-size: 12px; font-weight: 750; }
       .call-tabs { display: flex; min-width: 0; gap: 7px; overflow-x: auto; padding: 10px 12px; border-bottom: 1px solid #e6e8ed; background: white; scrollbar-width: thin; }
       .call-tab { flex: 0 0 auto; max-width: 190px; overflow: hidden; padding: 8px 10px; border: 1px solid #d8dce3; border-radius: 9px; color: #68707b; background: #f8f9fb; font-size: 11px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
       .call-tab.selected { border-color: #8f99ef; color: #3540a1; background: #eceefe; }
@@ -291,6 +292,7 @@
                 <div class="call-controls">
                   <button id="history-toggle" class="history-toggle">Minimize</button>
                   <button id="takeover" class="takeover">Simulate takeover · no audio</button>
+                  <button id="hangup" class="hangup" style="display:none">End call</button>
                 </div>
               </div>
               <nav id="call-tabs" class="call-tabs" aria-label="External call transcripts"></nav>
@@ -502,6 +504,10 @@
         }
         resumeTakeover();
       });
+      document.querySelector('#hangup').addEventListener('click', () => {
+        if (!task || task.status === 'complete') return;
+        if (window.confirm('End the call and hang up now?')) act('hangup');
+      });
       document.querySelector('#history-toggle').addEventListener('click', event => {
         event.stopPropagation();
         toggleCallHistory();
@@ -670,6 +676,9 @@
         takeover.style.display = activePhase === 'calling' && (runtimeMode === 'demo' || canResumeTakeover) ? 'block' : 'none';
         takeover.textContent = runtimeMode === 'demo' ? 'Simulate takeover · no audio' : 'Return control to Relay';
         takeover.disabled = task.status === 'complete' || (runtimeMode === 'demo' && task.stage === 'takeover');
+        const hangup = document.querySelector('#hangup');
+        hangup.style.display = activePhase === 'calling' && runtimeMode !== 'demo' && task.status !== 'complete' ? 'block' : 'none';
+        hangup.disabled = task.status === 'complete' || !task.current_call;
         planningInstruction.disabled = task.status === 'complete' || task.secure_mode;
         planningInstruction.placeholder = activePhase === 'calling'
           ? 'Message Relay privately · answer, update context, or change call strategy…'

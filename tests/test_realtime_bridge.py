@@ -442,7 +442,11 @@ def test_first_representative_turn_bypasses_the_gatekeeper_regardless_of_content
     )
 
     assert gatekeeper.requests == []
-    assert realtime.sent == [{"type": "response.create"}]
+    assert len(realtime.sent) == 1
+    assert realtime.sent[0]["type"] == "response.create"
+    first_turn_instructions = realtime.sent[0]["response"]["instructions"]
+    assert "FIRST TURN" in first_turn_instructions
+    assert "Ask for price and availability." in first_turn_instructions  # full goal/purpose preserved
     logged = logged_events(log_path)[0]
     assert logged["event"] == "gatekeeper.bypassed"
     assert logged["payload"]["reason"] == "first_turn"
@@ -1321,7 +1325,7 @@ def test_private_answer_response_carries_the_identity_anchor(tmp_path):
     assert "CONFIRMED CONTEXT UPDATE" in instructions
 
 
-def test_representative_turn_request_never_overrides_session_instructions(tmp_path):
+def test_representative_turn_request_carries_full_context_and_toggles_disclosure(tmp_path):
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
@@ -1332,6 +1336,15 @@ def test_representative_turn_request_never_overrides_session_instructions(tmp_pa
     session.context = {**sample_context(), "caller_name": "mina"}
 
     assert session.has_disclosed is False
-    assert hub._representative_turn_request(session) is None
+    first = hub._representative_turn_request(session)
+    # First turn: full instructions AND the introduce-yourself section — never a bare fragment that wipes context.
+    assert "Ask for price and availability." in first["response"]["instructions"]
+    assert "FIRST TURN" in first["response"]["instructions"]
     assert session.has_disclosed is True
-    assert hub._representative_turn_request(session) is None
+
+    later = hub._representative_turn_request(session)
+    # Later turns keep the full context but switch to "already disclosed, do not reintroduce".
+    assert "Ask for price and availability." in later["response"]["instructions"]
+    assert "CONTINUING" in later["response"]["instructions"]
+    assert "Do NOT introduce yourself again" in later["response"]["instructions"]
+    assert "FIRST TURN" not in later["response"]["instructions"]

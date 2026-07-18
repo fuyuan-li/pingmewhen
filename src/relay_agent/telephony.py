@@ -68,3 +68,15 @@ class TelephonyService:
             self.tunnel.release()
             raise
         return {"sid": call.sid, "status": str(call.status or "queued")}
+
+    def end_call(self, call_sid: str) -> str:
+        """Hang up a live Twilio call. Twilio then fires its 'completed' status callback, which drives the
+        normal call-teardown path (media stop, capability revocation, task completion)."""
+        if not call_sid:
+            raise RuntimeError("Cannot end a call without a call SID.")
+        credentials = self._credentials()
+        if not credentials.complete:
+            raise RuntimeError("Relay telephony credentials are incomplete.")
+        client = self._client_factory(credentials.twilio_account_sid, credentials.twilio_auth_token)
+        call = client.calls(call_sid).update(status="completed")
+        return str(getattr(call, "status", "") or "completed")
