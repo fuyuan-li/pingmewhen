@@ -12,7 +12,11 @@
         color: #17191c;
       }
       * { box-sizing: border-box; }
-      body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, #f8f9fb, #eef1f5); }
+      body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, #f8f9fb, #eef1f5); transition: background .45s ease; }
+      body.private-takeover { background: #0a0b0e; }
+      :root:has(body.private-takeover) { background: #0a0b0e; }
+      .privacy-flag { display: none; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px; background: rgba(255,255,255,.08); color: #d7dbe4; font-size: 12px; font-weight: 700; letter-spacing: .01em; }
+      .privacy-flag .dot { width: 7px; height: 7px; border-radius: 50%; background: #7dd6a8; box-shadow: 0 0 0 3px rgba(125,214,168,.18); }
       button, textarea, input, select { font: inherit; }
       button { border: 0; cursor: pointer; }
       button:disabled { cursor: not-allowed; opacity: .42; }
@@ -33,11 +37,18 @@
       .settings-help { display: block; margin-top: 5px; color: #7a818c; font-size: 11px; }
       .settings-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 22px; }
       .secondary { padding: 10px 14px; border: 1px solid #cbd1da; border-radius: 10px; color: #4f5660; background: white; font-weight: 700; }
-      .hero { margin: 22px 0 28px; }
-      h1 { max-width: 850px; margin: 0 0 10px; font-size: clamp(32px, 5vw, 50px); line-height: 1.04; letter-spacing: -.04em; }
-      .lede { max-width: 800px; margin: 0; color: #606772; font-size: 17px; line-height: 1.55; }
-      .panel { overflow: hidden; border: 1px solid #dde1e7; border-radius: 22px; background: white; box-shadow: 0 20px 60px rgba(30, 35, 50, .09); }
-      .intake { padding: 24px; }
+      #landing { position: relative; }
+      #landing::before { content: ""; position: absolute; z-index: 0; top: -90px; left: 50%; width: 720px; max-width: 96vw; height: 440px; transform: translateX(-50%); background: radial-gradient(58% 58% at 50% 38%, rgba(88,101,242,.18), rgba(88,101,242,0) 72%); pointer-events: none; }
+      #landing > * { position: relative; z-index: 1; }
+      .hero { margin: 30px 0 30px; }
+      .eyebrow { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px; padding: 7px 13px; border: 1px solid #dfe2ff; border-radius: 999px; background: rgba(243,244,255,.8); color: #4853c8; font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+      .eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: #5865f2; box-shadow: 0 0 0 3px rgba(88,101,242,.16); }
+      h1 { max-width: 850px; margin: 0 0 14px; font-size: clamp(34px, 5.2vw, 56px); line-height: 1.02; letter-spacing: -.045em; }
+      .lede { max-width: 720px; margin: 0; color: #5a616c; font-size: 17px; line-height: 1.6; }
+      .hero-chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; }
+      .hero-chip { padding: 8px 14px; border: 1px solid #e2e5ec; border-radius: 999px; background: rgba(255,255,255,.75); color: #4f5660; font-size: 12px; font-weight: 650; box-shadow: 0 1px 2px rgba(20,25,40,.04); }
+      .panel { overflow: hidden; border: 1px solid #dde1e7; border-radius: 22px; background: white; box-shadow: 0 24px 70px rgba(30, 35, 50, .10); }
+      .intake { padding: 26px; }
       .start-progress { display: none; align-items: center; gap: 11px; margin-top: 14px; padding: 12px 14px; border: 1px solid #d9ddff; border-radius: 12px; color: #424b9f; background: #f2f3ff; font-size: 12px; font-weight: 650; line-height: 1.4; }
       .start-progress.visible { display: flex; }
       .spinner { flex: 0 0 auto; width: 17px; height: 17px; border: 2px solid #c9cdf8; border-top-color: #5865f2; border-radius: 50%; animation: spin .8s linear infinite; }
@@ -54,7 +65,8 @@
       textarea:focus, input:focus { border-color: #5966ef; box-shadow: 0 0 0 3px rgba(89, 102, 239, .12); }
       .intake-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; }
       .file-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
-      .file-button { display: inline-block; margin: 0; padding: 9px 12px; border: 1px solid #cbd1da; border-radius: 10px; background: #f9fafb; font-size: 12px; cursor: pointer; }
+      .attach-plus { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 40px; height: 40px; margin: 0; border: 1px solid #d5d9e0; border-radius: 12px; color: #4f5660; background: #fff; box-shadow: 0 1px 2px rgba(20,25,40,.05); cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .12s ease; }
+      .attach-plus:hover { border-color: #9aa0f2; color: #4853c8; background: #f7f8ff; transform: translateY(-1px); }
       .file-row input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
       .file-name { color: #6b727c; font-size: 12px; }
       .hint { color: #767d87; font-size: 12px; }
@@ -90,11 +102,14 @@
       .call-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
       .history-toggle { display: none; padding: 8px 11px; border: 1px solid #cbd1da; border-radius: 9px; color: #4f5660; background: white; font-size: 11px; font-weight: 750; }
       .workspace.planning-active.has-call-history .history-toggle { display: block; }
-      .listen { display: none; flex: 0 0 auto; padding: 9px 12px; border: 1px solid #cbd1da; border-radius: 10px; color: #777f8a; background: #f4f5f7; font-size: 12px; font-weight: 750; }
-      .listen.active { border-color: #7580e8; color: #3540a1; background: #e9ebff; box-shadow: 0 0 0 3px rgba(89,102,239,.12); }
-      .takeover { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #df9b96; border-radius: 10px; background: #fff6f5; color: #a23d35; font-size: 12px; font-weight: 750; }
-      .takeover.active { border-color: #7560df; background: #ece9ff; color: #4332a4; box-shadow: 0 0 0 3px rgba(117, 96, 223, .14); }
-      .takeover.required { animation: takeover-pulse 1.15s ease-in-out infinite; }
+      .listen { display: none; align-items: center; gap: 7px; flex: 0 0 auto; padding: 8px 13px; border: 1px solid #d5d9e0; border-radius: 999px; color: #4f5660; background: #fff; font-size: 12px; font-weight: 650; box-shadow: 0 1px 2px rgba(20,25,40,.05); transition: border-color .16s ease, color .16s ease, background .16s ease, box-shadow .16s ease; }
+      .listen:hover { border-color: #b7bcc6; color: #24282e; }
+      .listen svg { display: block; }
+      .listen.active { border-color: #7580e8; color: #3540a1; background: #eef0ff; box-shadow: 0 0 0 3px rgba(89,102,239,.12); }
+      .takeover-bar { width: 100%; margin: 0 0 9px; padding: 12px 14px; border: 1px solid #d5d9e0; border-radius: 13px; background: #fff; color: #24282e; font-size: 13px; font-weight: 700; box-shadow: 0 1px 3px rgba(20,25,40,.06); transition: border-color .16s ease, background .16s ease, color .16s ease, box-shadow .16s ease, transform .12s ease; }
+      .takeover-bar:hover:not(:disabled) { border-color: #b7bcc6; transform: translateY(-1px); }
+      .takeover-bar.active { border-color: #6f60df; background: #6f60df; color: #fff; box-shadow: 0 6px 20px rgba(111,96,223,.28); }
+      .takeover-bar.required { border-color: #d9534a; background: #fff2f0; color: #a5332a; animation: takeover-pulse 1.2s ease-in-out infinite; }
       @keyframes takeover-pulse { 50% { transform: scale(1.035); box-shadow: 0 0 0 7px rgba(211, 72, 61, .13); } }
       .prompt.takeover-warning { border: 2px solid #d95b50; background: #fff0ed; color: #7f2923; }
       .takeover-mode-label { display: none; padding: 7px 10px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; color: #f4f5f7; background: rgba(255,255,255,.09); backdrop-filter: blur(12px); font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
@@ -115,6 +130,13 @@
       .workspace.takeover-active .planning-board input::placeholder { color: #858d98; }
       .workspace.takeover-active .calling-board { opacity: .5; filter: grayscale(1); box-shadow: none; }
       .workspace.takeover-active .takeover.active { border-color: #f1f3f5; color: #f6f7f8; background: #17191d; box-shadow: 0 0 0 3px rgba(255,255,255,.12); }
+      /* Full-app "private mode": the entire interface goes dark while the user has taken over the call. */
+      body.private-takeover { background: #0a0b0e; }
+      body.private-takeover .brand { color: #c3c8ff; }
+      body.private-takeover .mode { background: rgba(255,255,255,.08); color: #d3d7e0; }
+      body.private-takeover .model-settings-open { border-color: #33383f; color: #d3d7e0; background: rgba(255,255,255,.04); }
+      body.private-takeover .privacy-flag { display: inline-flex; }
+      body.private-takeover .takeover-bar.active { border-color: rgba(255,255,255,.22); }
       .hangup { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #d64c4c; border-radius: 10px; background: #d64c4c; color: #fff; font-size: 12px; font-weight: 750; }
       .call-tabs { display: flex; min-width: 0; gap: 7px; overflow-x: auto; padding: 10px 12px; border-bottom: 1px solid #e6e8ed; background: white; scrollbar-width: thin; }
       .call-tab { flex: 0 0 auto; max-width: 190px; overflow: hidden; padding: 8px 10px; border: 1px solid #d8dce3; border-radius: 9px; color: #68707b; background: #f8f9fb; font-size: 11px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
@@ -178,7 +200,8 @@
       .composer-field-hint { display: none; margin: 0 0 7px; color: #737b87; font-size: 11px; font-weight: 650; }
       .composer-field-hint.visible { display: block; }
       .send { padding: 10px 15px; border-radius: 10px; background: #17191c; color: white; font-weight: 700; }
-      .attach-inline { display: none; flex: 0 0 auto; align-items: center; margin: 0; padding: 10px 12px; border: 1px solid #cbd1da; border-radius: 10px; color: #4f5660; background: #f9fafb; font-size: 12px; cursor: pointer; }
+      .attach-inline { display: none; align-items: center; justify-content: center; flex: 0 0 auto; width: 42px; margin: 0; border: 1px solid #d5d9e0; border-radius: 12px; color: #4f5660; background: #fff; cursor: pointer; transition: border-color .16s ease, color .16s ease, background .16s ease; }
+      .attach-inline:hover { border-color: #9aa0f2; color: #4853c8; background: #f7f8ff; }
       .instruction-row .task-context-input { position: absolute; width: 1px; min-width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; }
       .secure-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 10px 0; }
       .secure-form input { min-width: 0; padding: 10px; border: 1px solid #cbd1da; border-radius: 9px; }
@@ -210,6 +233,7 @@
       <header>
         <div class="brand">Relay</div>
         <div class="header-actions">
+          <span class="privacy-flag"><span class="dot"></span>Private mode · you're on the line</span>
           <button id="model-settings-open" class="model-settings-open">Models</button>
           <div id="mode" class="mode">Loading runtime…</div>
         </div>
@@ -278,8 +302,14 @@
       </section>
       <section id="landing" style="display:none">
         <div class="hero">
-          <h1>Delegate the call. Keep the control.</h1>
+          <span class="eyebrow"><span class="eyebrow-dot"></span>Local-first voice agent</span>
+          <h1>Delegate the call.<br/>Keep the control.</h1>
           <p class="lede">Give Relay a goal and the relevant context. It handles the phone calls, keeps you informed visually, and brings you in only when your knowledge, approval, or voice is needed.</p>
+          <div class="hero-chips">
+            <span class="hero-chip">Real calls, on your keys</span>
+            <span class="hero-chip">Approves before it acts</span>
+            <span class="hero-chip">You can take over anytime</span>
+          </div>
         </div>
         <section id="intake-panel" class="panel intake">
           <label for="goal">What should Relay accomplish?</label>
@@ -290,9 +320,11 @@
             <span>Relay is researching your goal and building a reviewable plan. Web research can take several seconds.</span>
           </div>
           <div class="file-row">
-            <label class="file-button" for="context-file">Attach PDF context</label>
-            <input id="context-file" type="file" accept="application/pdf,.pdf" />
-            <span id="file-name" class="file-name">Optional · PDF up to 10 MB</span>
+            <label class="attach-plus" for="context-file" title="Attach a context file" aria-label="Attach a context file">
+              <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </label>
+            <input id="context-file" type="file" accept=".pdf,.txt,.md,.markdown,.csv,.tsv,.log,.text" />
+            <span id="file-name" class="file-name">Optional · PDF or text file, up to 10 MB</span>
           </div>
           <div class="intake-row">
             <span id="runtime-hint" class="hint">Loading Relay runtime…</span>
@@ -312,9 +344,12 @@
               <div id="planning-error" class="error"></div>
               <div id="planning-prompt" class="prompt"></div>
               <div id="composer-field-hint" class="composer-field-hint"></div>
+              <button id="takeover" class="takeover-bar" type="button" style="display:none">Take over &amp; speak by typing</button>
               <div class="instruction-row">
-                <label id="task-attach-label" class="attach-inline" for="task-context-file">Attach PDF</label>
-                <input id="task-context-file" class="task-context-input" type="file" accept="application/pdf,.pdf" />
+                <label id="task-attach-label" class="attach-inline" for="task-context-file" title="Attach a context file" aria-label="Attach a context file">
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </label>
+                <input id="task-context-file" class="task-context-input" type="file" accept=".pdf,.txt,.md,.markdown,.csv,.tsv,.log,.text" />
                 <input id="planning-instruction" type="text" placeholder="Reply to Relay or revise the plan…" />
                 <button id="planning-send" class="send">Send</button>
               </div>
@@ -330,8 +365,7 @@
                 <div class="task-title"><strong><span>Call Console</span><span id="calling-badge" class="phase-badge live">Live</span></strong><span>External voice transcript · private messages stay in the workspace</span></div>
                 <div class="call-controls">
                   <button id="history-toggle" class="history-toggle">Minimize</button>
-                  <button id="listen" class="listen" type="button" aria-pressed="false" title="Listen to the live call in this browser">🔇 Listen</button>
-                  <button id="takeover" class="takeover">Simulate takeover · no audio</button>
+                  <button id="listen" class="listen" type="button" aria-pressed="false" title="Listen to the live call in this browser"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M17 9.5l4 5M21 9.5l-4 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span>Listen</span></button>
                   <button id="hangup" class="hangup" style="display:none">End call</button>
                 </div>
               </div>
@@ -502,7 +536,7 @@
         startButton.disabled = !goalInput.value.trim();
       });
       contextFile.addEventListener('change', () => {
-        document.querySelector('#file-name').textContent = contextFile.files[0]?.name || 'Optional · PDF up to 10 MB';
+        document.querySelector('#file-name').textContent = contextFile.files[0]?.name || 'Optional · PDF or text file, up to 10 MB';
       });
 
       startButton.addEventListener('click', async () => {
@@ -752,6 +786,7 @@
         workspace.classList.toggle('call-history-open', callHistoryOpen && activePhase === 'planning');
         workspace.classList.toggle('takeover-active', Boolean(task.takeover_active));
         workspace.classList.toggle('takeover-sensitive', Boolean(task.takeover_active && task.takeover_sensitive));
+        document.body.classList.toggle('private-takeover', Boolean(task.takeover_active));
         document.querySelector('#planning-board').classList.toggle('active', true);
         document.querySelector('#planning-board').classList.toggle('inactive', false);
         document.querySelector('#calling-board').classList.toggle('active', activePhase === 'calling');
@@ -791,9 +826,9 @@
         takeover.textContent = runtimeMode === 'demo'
           ? 'Simulate takeover · no audio'
           : task.takeover_active
-            ? '⌨ You’re speaking · click to hand back'
-            : '⌨ Take over (type)';
-        takeover.disabled = task.status === 'complete' || (runtimeMode === 'demo' && task.stage === 'takeover');
+            ? 'You’re speaking · tap to hand back to Relay'
+            : 'Take over & speak by typing';
+        takeover.disabled = task.status === 'complete' || !task.current_call || (runtimeMode === 'demo' && task.stage === 'takeover');
         const listen = document.querySelector('#listen');
         listen.style.display = activePhase === 'calling' && runtimeMode !== 'demo' ? 'block' : 'none';
         listen.disabled = activePhase !== 'calling' || !task.current_call;
@@ -1017,11 +1052,13 @@
         hint.classList.toggle('visible', Boolean(hintText));
       }
 
+      const LISTEN_ICON_ON = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 8.5a4 4 0 0 1 0 7M18.5 6a7.5 7.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+      const LISTEN_ICON_OFF = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M17 9.5l4 5M21 9.5l-4 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
       function updateListenButton() {
         const button = document.querySelector('#listen');
         button.classList.toggle('active', listenWanted);
         button.setAttribute('aria-pressed', String(listenWanted));
-        button.textContent = listenWanted ? '🔊 Listening' : '🔇 Listen';
+        button.innerHTML = `${listenWanted ? LISTEN_ICON_ON : LISTEN_ICON_OFF}<span>${listenWanted ? 'Listening' : 'Listen'}</span>`;
         button.title = listenWanted ? 'Stop monitoring the live call' : 'Listen to the live call in this browser';
       }
 

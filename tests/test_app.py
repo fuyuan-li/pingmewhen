@@ -124,7 +124,7 @@ def test_dashboard_keeps_private_speakers_left_and_restores_failed_text():
     assert "if (!planningInstruction.value) planningInstruction.value = optimistic.text;" in source
     assert "Checking secure call tunnel reachability…" in source
     assert "appendConnectionProgress()" in source
-    assert "⌨ Take over (type)" in source
+    assert "Take over &amp; speak by typing" in source
     assert "/takeover-say" in source
     assert "task?.takeover_active" in source
     assert "takeover-warning" in source
