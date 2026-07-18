@@ -100,6 +100,23 @@ def gatekeeper_identity(context: dict[str, Any]) -> tuple[str, str]:
     return represented_user, representative_name
 
 
+def speaker_addressing_preamble(context: dict[str, Any]) -> str:
+    """Identity anchor prepended to every backend-driven response whose instructions field would otherwise
+    replace the session instructions and leave the Speaker with no sense of who it is or who it is speaking to."""
+    caller_name = normalize_display_name(str(context.get("caller_name", ""))) or "the user"
+    target = str(context.get("action", {}).get("target", "")).strip() or "the representative"
+    return (
+        "WHO YOU ARE ON THIS REPLY: You are Relay, an AI phone caller, speaking OUT LOUD on a live call to "
+        f"{target}. You represent {caller_name} and are calling on their behalf. Speak TO {target}, addressing "
+        f"them directly as 'you'. Refer to the person you represent as {caller_name} by name; never call "
+        f"{caller_name} 'they', 'them', 'the customer', 'the client', or 'the user', and never talk about "
+        f"{caller_name} in the third person. You are not {caller_name} and you are not {target}: you speak for "
+        f"{caller_name} to {target}. You already introduced yourself earlier in this call — do not reintroduce "
+        "yourself or restate that you are an AI unless asked. Relay the information in the correct direction: keep "
+        "who is asking, offering, conceding, or requesting exactly as it actually is, and never swap it. "
+    )
+
+
 @dataclass
 class ActiveRealtimeSession:
     realtime: Any
@@ -164,6 +181,10 @@ def realtime_session_update(
         f"NAME USAGE: Always refer to the represented person by the exact name {caller_name_literal}. Never replace "
         f"{caller_name_literal} with 'the customer,' 'the user,' 'the client,' 'the person,' or pronouns such as "
         "they, them, their, he, she, him, or her. Repeat the name when grammar requires a reference.\n\n"
+        f"ADDRESSING: You are speaking directly to {target_literal} on the phone. Address {target_literal} as "
+        f"'you'. Never refer to {target_literal} in the third person as 'they' or 'them' while speaking to them. "
+        f"When you relay something {caller_name_literal} wants, say it in the correct direction — for example, "
+        f"'{caller_name} is hoping you can lower the price', not 'they are hoping they can lower the price'.\n\n"
         "ROLE: You are Relay, the outbound caller who initiated this call to accomplish a specific approved goal. "
         "You are not an inbound support agent: never welcome the other person to a support service, ask what they "
         "called about, or offer generic help. Your spoken audio is always addressed to the representative you "
@@ -419,20 +440,26 @@ class RealtimeSessionHub:
                 raise RuntimeError("Speaker did not acknowledge the confirmed context update.")
             finally:
                 session.pending_context_item_id = ""
+        preamble = speaker_addressing_preamble(session.context)
         response_request = {
             "type": "response.create",
             "response": {
                 "instructions": (
-                    "The backend appended a confirmed context update after consulting the person you represent. Use "
-                    "the newest CONFIRMED CONTEXT UPDATE conversation item. State the relevant information "
-                    "naturally to the representative and continue the phone conversation. Do not acknowledge the "
-                    "private exchange with phrases such as 'Got it,' and do not address the represented person aloud."
-                    if waiting_for_user
-                    else (
-                        "The backend appended a confirmed context update or call direction. Use the newest CONFIRMED "
-                        "CONTEXT UPDATE conversation item naturally while "
-                        "speaking only to the representative. Do not mention a private channel or acknowledge the "
-                        "represented person aloud."
+                    preamble
+                    + (
+                        "The backend appended a confirmed context update after consulting the person you represent. "
+                        "Use the newest CONFIRMED CONTEXT UPDATE conversation item. Convey it to the representative "
+                        "as a natural continuation of the call — if it answers their question, answer them; if it is "
+                        "a question or request from the person you represent, ask it of the representative in the "
+                        "correct direction. Do not acknowledge the private exchange with phrases such as 'Got it,' "
+                        "and do not address the represented person aloud."
+                        if waiting_for_user
+                        else (
+                            "The backend appended a confirmed context update or call direction. Use the newest "
+                            "CONFIRMED CONTEXT UPDATE conversation item naturally while speaking only to the "
+                            "representative. Do not mention a private channel or acknowledge the represented person "
+                            "aloud."
+                        )
                     )
                 )
             },
@@ -553,7 +580,8 @@ class RealtimeSessionHub:
                     "type": "response.create",
                     "response": {
                         "instructions": (
-                            "The user has handed the active call back to you after handling a protected exchange "
+                            speaker_addressing_preamble(session.context)
+                            + "The user has handed the active call back to you after handling a protected exchange "
                             "personally. Continue naturally from here without identifying or repeating any "
                             "protected information."
                         )
@@ -956,12 +984,14 @@ class RealtimeSessionHub:
             {
                 "type": "response.create",
                 "response": {
+                    "max_output_tokens": 16,
                     "instructions": (
                         "Say exactly one brief natural hold line to the representative, such as "
-                        "'Let me check on that one second.' Say it once and stop; do not repeat it, restate it in "
-                        "other words, or say anything else. Do not answer the question, ask another question, "
-                        "restart the introduction, or call a tool."
-                    )
+                        "'Let me check on that one second.' Produce that single short line, then end your turn "
+                        "immediately. Do not say it a second time, do not restate it in other words, and do not add "
+                        "any second sentence. Do not answer the question, state any price, number, address, or "
+                        "decision, ask another question, restart the introduction, or call a tool."
+                    ),
                 },
             },
             purpose="hold",
@@ -1004,11 +1034,14 @@ class RealtimeSessionHub:
                     {
                         "type": "response.create",
                         "response": {
+                            "max_output_tokens": 16,
                             "instructions": (
                                 "Say exactly one short natural keep-alive line, such as 'Just need one more "
-                                "moment.' Say nothing else: do not answer any question, introduce a new topic, "
-                                "repeat the pending question, or react to other representative speech."
-                            )
+                                "moment.' Produce that single short line, then end your turn immediately. Say "
+                                "nothing else: do not say it twice, do not answer any question, state any price, "
+                                "number, or decision, introduce a new topic, repeat the pending question, or react "
+                                "to other representative speech."
+                            ),
                         },
                     },
                     wait_for_available=True,

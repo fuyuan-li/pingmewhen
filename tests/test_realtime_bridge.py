@@ -55,6 +55,8 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert "one or two short sentences" in instructions
     assert "Always refer to the represented person by the exact name" in instructions
     assert "Never replace \"Mina\" with 'the customer,'" in instructions
+    assert 'ADDRESSING: You are speaking directly to "Example Provider"' in instructions
+    assert 'Address "Example Provider" as \'you\'' in instructions
     assert "Never vocalize planning, analysis, self-talk" in instructions
     assert "while they follow along by text" not in instructions
     assert update["session"]["tool_choice"] == "none"
@@ -1251,6 +1253,72 @@ def test_gatekeeper_identity_extracts_caller_and_target_with_fallbacks():
     default_represented, default_representative = gatekeeper_identity({})
     assert default_represented == "the represented user"
     assert default_representative == "the representative"
+
+
+def test_speaker_addressing_preamble_anchors_identity_and_direction():
+    from relay_agent.realtime_bridge import speaker_addressing_preamble
+
+    preamble = speaker_addressing_preamble(
+        {"caller_name": "andy", "action": {"target": "Alex"}}
+    )
+    assert "speaking OUT LOUD on a live call to Alex" in preamble
+    assert "You represent Andy" in preamble
+    assert "addressing them directly as 'you'" in preamble
+    assert "never call Andy 'they', 'them'" in preamble
+    assert "You are not Andy and you are not Alex" in preamble
+    assert "do not reintroduce yourself" in preamble
+    assert "Relay the information in the correct direction" in preamble
+
+
+def test_private_answer_response_carries_the_identity_anchor(tmp_path):
+    class RelayingGatekeeper(SequenceGatekeeper):
+        async def route_private_message(self, request):
+            return PrivateMessageRoute(
+                disposition="answer",
+                speaker_update=ContextUpdate(
+                    kind="fact", key="apartment_number", value="6", summary="Andy's unit number is 6.",
+                ),
+            )
+
+    realtime = FakeRealtime(
+        [
+            {"type": "response.created", "response": {"id": "resp-answer"}},
+            {"type": "response.done", "response": {"id": "resp-answer", "status": "completed"}},
+        ]
+    )
+    context = {**sample_context(), "caller_name": "andy", "action": {**sample_context()["action"], "target": "Alex"}}
+    session = ActiveRealtimeSession(
+        realtime,
+        FakeTwilio(),
+        "MZ1",
+        waiting_for_user=True,
+        pending_question="What is your apartment number?",
+        context=context,
+    )
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: context,
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        gatekeeper=RelayingGatekeeper([]),
+        response_delivery_timeout=1,
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        delivery_task = asyncio.create_task(hub.inject("task-1", "Unit 6"))
+        while not any(event.get("type") == "response.create" for event in realtime.sent):
+            await asyncio.sleep(0)
+        await hub._openai_to_twilio(session, "task-1")
+        return await delivery_task
+
+    asyncio.run(run())
+
+    answer = next(event for event in realtime.sent if event.get("type") == "response.create")
+    instructions = answer["response"]["instructions"]
+    assert "You represent Andy" in instructions
+    assert "speaking OUT LOUD on a live call to Alex" in instructions
+    assert "CONFIRMED CONTEXT UPDATE" in instructions
 
 
 def test_representative_turn_request_never_overrides_session_instructions(tmp_path):
