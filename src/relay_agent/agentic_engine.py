@@ -9,6 +9,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from relay_agent.event_log import EventLog
+from relay_agent.names import normalize_display_name
 from relay_agent.planner import Planner, PlannerError, PlanningTurn
 from relay_agent.task_engine import InvalidAction, TaskNotFound, secure_field_prompt
 from relay_agent.task_store import SQLiteTaskStore
@@ -181,7 +182,7 @@ class AgenticTaskEngine:
         turn = self._planner.plan(task["goal"], messages, contexts)
         confirmed_name = turn.caller_name.strip()
         if confirmed_name:
-            task["caller_name"] = confirmed_name[:100]
+            task["caller_name"] = normalize_display_name(confirmed_name)[:100]
         if turn.status == "plan_ready":
             has_phone_actions = any(action.kind == "phone_call" for action in turn.actions)
             if has_phone_actions and not task.get("caller_name"):

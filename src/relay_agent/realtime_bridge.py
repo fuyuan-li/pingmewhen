@@ -25,6 +25,7 @@ from relay_agent.gatekeeper import (
     gatekeeper_request,
 )
 from relay_agent.local_tts import LocalTTSRenderer, MacOSLocalTTS
+from relay_agent.names import normalize_display_name
 
 
 SENSITIVE_FIELD_PATTERNS = {
@@ -133,7 +134,7 @@ def realtime_session_update(
     already_opened: bool = False,
 ) -> dict[str, Any]:
     action = context["action"]
-    caller_name = str(context.get("caller_name", "")).strip() or "the user"
+    caller_name = normalize_display_name(str(context.get("caller_name", ""))) or "the user"
     caller_name_literal = json.dumps(caller_name)
     target_literal = json.dumps(action["target"])
     private_context = "\n".join(context.get("private_messages", [])[-20:])
@@ -160,6 +161,9 @@ def realtime_session_update(
         f"- You are calling (the organization/person you dial and speak to): {target_literal}\n"
         f"- Never say you are calling {caller_name_literal}. That is who you represent, not who you are calling.\n"
         f"- Never say you are {caller_name_literal} or claim to be them. You represent them; you are not them.\n\n"
+        f"NAME USAGE: Always refer to the represented person by the exact name {caller_name_literal}. Never replace "
+        f"{caller_name_literal} with 'the customer,' 'the user,' 'the client,' 'the person,' or pronouns such as "
+        "they, them, their, he, she, him, or her. Repeat the name when grammar requires a reference.\n\n"
         "ROLE: You are Relay, the outbound caller who initiated this call to accomplish a specific approved goal. "
         "You are not an inbound support agent: never welcome the other person to a support service, ask what they "
         "called about, or offer generic help. Your spoken audio is always addressed to the representative you "
@@ -175,7 +179,9 @@ def realtime_session_update(
         "missing fact or independently address the private user.\n\n"
         "SPEAKING STYLE: Keep every turn to roughly one or two short sentences. Do not front-load every detail or goal "
         "into one long statement. Make one useful point, then pause and let the representative respond. Prefer a "
-        "natural back-and-forth phone rhythm over a complete or exhaustive statement.\n\n"
+        "natural back-and-forth phone rhythm over a complete or exhaustive statement. Never vocalize planning, "
+        "analysis, self-talk, rehearsal, or commentary about how you will answer; output only words intended for the "
+        "representative.\n\n"
         "BOUNDARIES: Never claim to be the user. Do not provide payment-card data or a full Social Security number. "
         "Never read phone numbers, account numbers, or other reference identifiers aloud unless the representative "
         "explicitly asks for that specific detail; identifiers in known facts are internal reference by default. Do "
@@ -214,13 +220,15 @@ def realtime_session_update(
 def initial_response(context: dict[str, Any] | None = None) -> dict[str, Any]:
     context = context or {}
     action = context.get("action", {})
-    caller_name = str(context.get("caller_name", "")).strip() or "the user"
+    caller_name = normalize_display_name(str(context.get("caller_name", ""))) or "the user"
     target = action.get("target", "the representative")
     return {
         "type": "response.create",
         "response": {
             "instructions": (
-                f"Open this outbound call now. You are calling {target}. You represent {caller_name} — say you are "
+                "Speak only the finished opening addressed to the representative. Do not vocalize planning, analysis, "
+                "self-talk, rehearsal, or commentary about composing the opening. Your first audible words must be "
+                f"'Hi, Relay here.' You are calling {target}. You represent {caller_name} — say you are "
                 f"calling on behalf of {caller_name}, do not say you are calling {caller_name}. Open with exactly this "
                 f"short disclosure: 'Hi, Relay here — I'm an AI assistant on behalf of {caller_name}.' Add no other "
                 f"disclosure clause. Then state only the immediate reason for calling: "
@@ -348,7 +356,7 @@ class RealtimeSessionHub:
             raise RuntimeError("Gatekeeper did not provide a Speaker update.")
         update_record = {"id": uuid4().hex, **update}
         session.context_updates.append(update_record)
-        item_id = f"relay_context_{uuid4().hex}"
+        item_id = uuid4().hex
         context_item = {
             "type": "conversation.item.create",
             "item": {
@@ -708,9 +716,15 @@ class RealtimeSessionHub:
                         await self._gate_representative_turn(session, task_id, transcript[1])
             if event_type == "error":
                 detail = event.get("error", {})
+                session.debug_trace and session.debug_trace.append("speaker.protocol_error", {"error": detail})
                 self._events.append(
                     "realtime.protocol_error",
-                    {"task_id": task_id, "type": detail.get("type"), "code": detail.get("code")},
+                    {
+                        "task_id": task_id,
+                        "type": detail.get("type"),
+                        "code": detail.get("code"),
+                        "param": detail.get("param"),
+                    },
                 )
 
     async def _gate_representative_turn(

@@ -94,7 +94,7 @@ def test_phone_plan_collects_caller_name_once_and_preserves_it_across_revisions(
                 status="plan_ready",
                 message="The call plan is ready.",
                 plan_summary="Call the provider.",
-                caller_name="Mina" if user_supplied_name and not name_already_confirmed else "",
+                caller_name="mina" if user_supplied_name and not name_already_confirmed else "",
                 actions=[
                     PlanAction(
                         kind="phone_call",

@@ -26,7 +26,7 @@ def sample_context():
 
 def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     context = sample_context()
-    context["caller_name"] = "Mina"
+    context["caller_name"] = "mina"
     update = realtime_session_update(context)
 
     assert update["session"]["audio"]["input"]["format"] == {"type": "audio/pcmu"}
@@ -53,6 +53,9 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert "Hi, Relay here — I'm an AI assistant on behalf of" in instructions
     assert "Do not front-load every detail" in instructions
     assert "one or two short sentences" in instructions
+    assert "Always refer to the represented person by the exact name" in instructions
+    assert "Never replace \"Mina\" with 'the customer,'" in instructions
+    assert "Never vocalize planning, analysis, self-talk" in instructions
     assert "while they follow along by text" not in instructions
     assert update["session"]["tool_choice"] == "none"
     assert update["session"]["audio"]["input"]["turn_detection"]["create_response"] is False
@@ -66,6 +69,8 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert "Hi, Relay here — I'm an AI assistant on behalf of Mina." in opening["response"]["instructions"]
     assert "following along" not in opening["response"]["instructions"]
     assert "two short sentences" in opening["response"]["instructions"]
+    assert "first audible words must be 'Hi, Relay here.'" in opening["response"]["instructions"]
+    assert "Do not vocalize planning, analysis, self-talk" in opening["response"]["instructions"]
 
 
 def test_realtime_session_uses_selected_transcription_model():
@@ -257,6 +262,7 @@ def test_live_instruction_is_reformulated_into_session_context_before_response(t
     context_text = realtime.sent[0]["item"]["content"][0]["text"]
     assert "Ask about a discount." in context_text
     assert "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND" in context_text
+    assert len(realtime.sent[0]["item"]["id"]) == 32
     response_instruction = realtime.sent[-1]["response"]["instructions"]
     assert "CONFIRMED CONTEXT UPDATE conversation item" in response_instruction
     assert "acknowledge the represented person aloud" in response_instruction.lower()
