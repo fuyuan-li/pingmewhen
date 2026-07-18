@@ -440,6 +440,9 @@ class AgenticTaskEngine:
         question: str,
         input_kind: str,
         blocking: bool,
+        interaction_id: str = "",
+        reason: str = "missing_fact",
+        representative_update: str = "",
     ) -> dict[str, Any]:
         cleaned_question = question.strip()
         with self._lock:
@@ -457,6 +460,17 @@ class AgenticTaskEngine:
                 "options": [],
                 "blocking": blocking,
             }
+            if interaction_id:
+                task["prompt"].update(interaction_id=interaction_id, reason=reason)
+                task.setdefault("pending_interactions", []).append(
+                    {
+                        "id": interaction_id,
+                        "reason": reason,
+                        "representative_update": representative_update,
+                        "question": cleaned_question,
+                        "status": "pending",
+                    }
+                )
             self._append(task, "message", speaker="relay_private", text=cleaned_question)
             self._append(task, "status", text="Relay is waiting for your answer")
             self._store.save("production", task)
@@ -470,6 +484,7 @@ class AgenticTaskEngine:
         context_update: dict[str, Any] | None,
         private_reply: str,
         resumed_call: bool,
+        interaction_id: str = "",
     ) -> dict[str, Any]:
         cleaned = text.strip()
         with self._lock:
@@ -490,6 +505,15 @@ class AgenticTaskEngine:
                     channel="private",
                 )
             if resumed_call:
+                if interaction_id:
+                    for interaction in task.get("pending_interactions", []):
+                        if interaction.get("id") == interaction_id and interaction.get("status") == "pending":
+                            interaction.update(
+                                status="resolved",
+                                resolution=cleaned,
+                                context_update_id=(context_update or {}).get("id", ""),
+                            )
+                            break
                 task.update(call_state="CONNECTED", stage="calling", status="running", prompt=None)
                 self._append(
                     task,
@@ -510,8 +534,32 @@ class AgenticTaskEngine:
             snapshot = self._snapshot(task)
         self._events.append(
             "task.private_call_message",
-            {"task_id": task_id, "disposition": disposition, "resumed_call": resumed_call},
+            {
+                "task_id": task_id,
+                "disposition": disposition,
+                "resumed_call": resumed_call,
+                "interaction_id": interaction_id,
+            },
         )
+        return snapshot
+
+    def record_call_delivery_failure(self, task_id: str, text: str) -> dict[str, Any]:
+        cleaned = text.strip()
+        with self._lock:
+            task = self._require(task_id)
+            if task["phase"] != "calling" or not task.get("current_call"):
+                raise InvalidAction("Private call messages require an active call.")
+            self._append(task, "message", speaker="user_private", text=cleaned, channel="private")
+            prompt = task.get("prompt") or {}
+            pending_question = str(prompt.get("question", "")).strip()
+            retry_text = "Relay could not apply that answer. Please send it again."
+            if task.get("call_state") == "WAITING_FOR_USER" and pending_question:
+                retry_text = f"Relay could not apply that answer. Please try again: {pending_question}"
+            self._append(task, "message", speaker="relay_private", text=retry_text, channel="private")
+            self._append(task, "status", text="Answer not applied · the call remains active", channel="private")
+            self._store.save("production", task)
+            snapshot = self._snapshot(task)
+        self._events.append("task.private_call_message_retry_requested", {"task_id": task_id})
         return snapshot
 
     def complete_secure_field(self, task_id: str, field_name: str) -> dict[str, Any]:

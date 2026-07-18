@@ -125,14 +125,21 @@ def create_app(
         events,
         gatekeeper=active_gatekeeper,
         secure_requester=lambda task_id, field_name: engine.request_secure_field(task_id, field_name),
-        user_input_requester=lambda task_id, question, input_kind, blocking: engine.request_user_input(
-            task_id, question, input_kind, blocking
+        user_input_requester=lambda task_id, question, input_kind, blocking, interaction_id, reason, representative_update: engine.request_user_input(
+            task_id,
+            question,
+            input_kind,
+            blocking,
+            interaction_id,
+            reason,
+            representative_update,
         ),
         call_connected=lambda task_id: engine.mark_call_connected(task_id),
         tts_renderer=tts_renderer,
         realtime_model=lambda: model_settings.load().realtime_model,
         transcription_model=lambda: model_settings.load().transcription_model,
         session_update_timeout=3,
+        response_delivery_timeout=float(os.environ.get("RELAY_RESPONSE_DELIVERY_TIMEOUT", "20")),
     )
 
     def setup_required() -> bool:
@@ -427,10 +434,7 @@ def create_app(
                         "realtime.instruction_failed",
                         {"task_id": task_id, "reason": type(error).__name__},
                     )
-                    raise HTTPException(
-                        status_code=502,
-                        detail="Relay received the private message but could not apply it to the active call.",
-                    ) from error
+                    return engine.record_call_delivery_failure(task_id, instruction)
                 if not delivery:
                     events.append("realtime.instruction_rejected", {"task_id": task_id})
                     raise HTTPException(
@@ -447,6 +451,7 @@ def create_app(
                     delivery.context_update,
                     delivery.private_reply,
                     delivery.resumed_call,
+                    delivery.interaction_id,
                 )
             task = engine.act(task_id, request.action, request.value)
             if isinstance(engine, AgenticTaskEngine) and task["stage"] == "execution_ready":

@@ -246,6 +246,77 @@ def test_private_call_routing_keeps_meta_private_and_persists_confirmed_updates(
     assert engine.call_context(task["id"], pending["index"])["context_updates"] == [update]
 
 
+def test_failed_private_answer_keeps_pending_prompt_and_requests_retry(tmp_path):
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    engine.begin_call(task["id"], pending["index"], "CA123")
+    engine.mark_call_connected(task["id"])
+    engine.request_user_input(task["id"], "What installation date works?", "text", True)
+
+    failed = engine.record_call_delivery_failure(task["id"], "Aug 1")
+
+    assert failed["call_state"] == "WAITING_FOR_USER"
+    assert failed["prompt"]["question"] == "What installation date works?"
+    assert failed["events"][-2]["speaker"] == "relay_private"
+    assert "Please try again" in failed["events"][-2]["text"]
+    assert failed["events"][-1]["text"] == "Answer not applied · the call remains active"
+
+
+def test_user_authority_interaction_is_persisted_and_resolved_by_explicit_answer(tmp_path):
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    engine.begin_call(task["id"], pending["index"], "CA123")
+    engine.mark_call_connected(task["id"])
+    waiting = engine.request_user_input(
+        task["id"],
+        "Alex offered $90 per month.\n\nAccept, counter, or decline?",
+        "text",
+        True,
+        "interaction-1",
+        "decision",
+        "Alex offered $90 per month.",
+    )
+    update = {
+        "id": "update-1",
+        "interaction_id": "interaction-1",
+        "kind": "decision",
+        "key": "offer_decision",
+        "value": "accept",
+        "summary": "Jack approved the $90 monthly offer.",
+    }
+
+    resolved = engine.record_call_private_exchange(
+        task["id"],
+        "Accept",
+        "answer",
+        update,
+        "",
+        True,
+        "interaction-1",
+    )
+
+    assert waiting["prompt"]["interaction_id"] == "interaction-1"
+    assert waiting["pending_interactions"][0]["status"] == "pending"
+    interaction = resolved["pending_interactions"][0]
+    assert interaction["status"] == "resolved"
+    assert interaction["resolution"] == "Accept"
+    assert interaction["context_update_id"] == "update-1"
+
+
 def test_completed_twilio_call_without_media_connection_is_reported_as_failed(tmp_path):
     store = SQLiteTaskStore(tmp_path / "relay.db")
     engine = AgenticTaskEngine(EventLog(tmp_path / "events.jsonl"), FakePlanner(), store, lambda _: "")

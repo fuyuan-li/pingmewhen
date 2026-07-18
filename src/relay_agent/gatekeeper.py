@@ -12,27 +12,94 @@ from pydantic import BaseModel, Field
 
 
 GATEKEEPER_INSTRUCTIONS = (
-    "You are Relay's call Gatekeeper. Decide whether the voice Speaker can answer the representative's latest "
-    "utterance without private help from the represented user. Return answerable when Speaker can respond faithfully "
-    "from the supplied task context and user updates, or when no private fact, preference, decision, or authority is "
-    "needed, including greetings, acknowledgements, and questions about facts the representative owns. Return "
-    "unanswerable only when responding requires guessing or inventing the user's personal fact, preference, decision, "
-    "or authority. A representative's direct request for a personal, account, property, scheduling, or preference "
-    "detail is unanswerable unless that exact detail is explicit; a related fact is not a substitute. For example, a "
-    "street address does not make an unknown apartment number answerable. For unanswerable, write one concise question "
-    "to show privately to the represented user in the same language as the representative's latest utterance. The "
-    "private question must ask only for the fact or decision requested in that latest utterance; never pull in a phone "
-    "number, contact, dialing step, or unrelated planning detail. Address the represented user identified by "
-    "caller_name, never the target or representative. Do not answer the representative and do not add explanations."
+    "You are Relay's call Gatekeeper. An IDENTITY block will tell you the represented user's name (whose authority "
+    "you protect — private questions are written TO this person) and the representative's name (the person/"
+    "organization Relay called — this is who said the LATEST UTTERANCE you are reviewing). Never attribute the "
+    "representative's own words or statements to the represented user, and never attribute the represented user's "
+    "private answers to the representative — these are two different people and mixing them up is a serious error. "
+    "Apply this USER AUTHORITY RULE: Relay may continue autonomously only when its response requires no new fact, "
+    "preference, judgment, permission, commitment, correction, or consequential choice from the represented user. "
+    "Use route=consult_user if responding would require guessing a user-owned fact; choosing between alternatives; "
+    "accepting, rejecting, or countering terms; expressing a preference; granting permission; scheduling or "
+    "canceling; enrolling, purchasing, or committing; correcting user information; or otherwise exercising authority "
+    "on the user's behalf. A known budget, preference, or goal is a constraint, not permission to decide or commit. "
+    "When uncertain, use consult_user with reason=uncertainty. Use route=continue with reason=none only for ordinary "
+    "conversation that is fully supported by confirmed context and requires no user authority, including greetings, "
+    "acknowledgements, procedural questions, and questions about facts the representative owns. For consult_user, "
+    "faithfully summarize the representative's relevant question, proposal, or new information in "
+    "representative_update without changing its meaning or its speaker, then write one direct question_to_user "
+    "addressed to the represented user by the IDENTITY block. Never ask the user to supply a fact the representative "
+    "just supplied. A related fact is not a substitute for an exact missing fact; for example, a street address does "
+    "not answer an apartment-number question. Do not answer the representative."
 )
+
+AUTHORITY_VETO_INSTRUCTIONS = (
+    "You are Relay's veto-only user-authority checker. You cannot authorize speech; you may only block it. An "
+    "IDENTITY block will tell you the represented user's name (whose authority you protect) and the representative's "
+    "name (who said the LATEST UTTERANCE). Never attribute the representative's own words to the represented user or "
+    "vice versa. Judge ONLY whether responding to the representative's LATEST UTTERANCE, right now, specifically "
+    "requires new user authority — not whether the call's eventual purpose might. The call's overall goal (for "
+    "example negotiating price, enrolling, or scheduling) is background context, not evidence that THIS utterance "
+    "needs the user: a greeting, acknowledgement, procedural remark, or a question already answered by confirmed "
+    "context never requires user authority, no matter what the call may lead to later. Set requires_user=true only "
+    "when responding to this specific utterance would itself require guessing a new user-owned fact; choosing "
+    "between alternatives; accepting, rejecting, or countering terms; expressing a preference; granting permission; "
+    "scheduling or canceling; enrolling, purchasing, or committing; or correcting user information — right now, in "
+    "direct response to what the representative just said. When genuinely uncertain whether THIS utterance (not "
+    "the call overall) requires authority, veto with reason=uncertainty. Set false whenever continuing clearly "
+    "requires no user authority for this utterance specifically. If vetoing, faithfully summarize the "
+    "representative's relevant message (correctly attributed to the representative) and ask the represented user "
+    "one direct question."
+)
+
+UserAuthorityReason = Literal[
+    "none",
+    "missing_fact",
+    "preference",
+    "decision",
+    "approval",
+    "authority",
+    "correction",
+    "uncertainty",
+]
 
 
 class GatekeeperVerdict(BaseModel):
-    verdict: Literal["answerable", "unanswerable"]
-    question: str = Field(
+    route: Literal["continue", "consult_user"]
+    reason: UserAuthorityReason
+    representative_update: str = Field(
         default="",
-        description="Concise private question for the represented user; empty when verdict is answerable.",
+        description="Faithful relevant content from the representative when user consultation is required.",
     )
+    question_to_user: str = Field(
+        default="",
+        description="Concise private question for the represented user; empty when route is continue.",
+    )
+
+
+class AuthorityVeto(BaseModel):
+    requires_user: bool
+    reason: UserAuthorityReason
+    representative_update: str = ""
+    question_to_user: str = ""
+
+
+def _validate_authority_route(
+    route: str,
+    reason: str,
+    representative_update: str,
+    question_to_user: str,
+) -> None:
+    if route == "continue":
+        if reason != "none":
+            raise RuntimeError("An autonomous continuation must use reason=none.")
+        return
+    if reason == "none":
+        raise RuntimeError("User consultation requires a specific authority reason.")
+    if not representative_update.strip():
+        raise RuntimeError("User consultation omitted the representative's relevant message.")
+    if not question_to_user.strip():
+        raise RuntimeError("User consultation omitted the private user question.")
 
 
 class ContextUpdate(BaseModel):
@@ -54,6 +121,8 @@ class GatekeeperRequest:
     latest_utterance: str
     context: dict
     context_updates: tuple[dict, ...]
+    represented_user: str = "the represented user"
+    representative_name: str = "the representative"
 
     def messages(self) -> list[dict[str, str]]:
         return [
@@ -61,9 +130,14 @@ class GatekeeperRequest:
             {
                 "role": "user",
                 "content": (
+                    f"IDENTITY:\n"
+                    f"- Represented user (whose authority you protect; private questions go to them): "
+                    f"{self.represented_user}\n"
+                    f"- Representative (who said the LATEST UTTERANCE below; Relay called them): "
+                    f"{self.representative_name}\n\n"
                     f"KNOWN CONTEXT:\n{json.dumps(self.context, ensure_ascii=False)}\n\n"
                     f"CONFIRMED CONTEXT UPDATES THIS CALL:\n{json.dumps(self.context_updates, ensure_ascii=False)}\n\n"
-                    f"LATEST REPRESENTATIVE UTTERANCE:\n{self.latest_utterance}"
+                    f"LATEST REPRESENTATIVE UTTERANCE (said by {self.representative_name}):\n{self.latest_utterance}"
                 ),
             },
         ]
@@ -73,12 +147,16 @@ def gatekeeper_request(
     latest_utterance: str,
     context: dict,
     context_updates: list[dict],
+    represented_user: str = "the represented user",
+    representative_name: str = "the representative",
 ) -> GatekeeperRequest:
     return GatekeeperRequest(
         instructions=GATEKEEPER_INSTRUCTIONS,
         latest_utterance=latest_utterance.strip(),
         context=context,
         context_updates=tuple(context_updates),
+        represented_user=represented_user or "the represented user",
+        representative_name=representative_name or "the representative",
     )
 
 
@@ -89,13 +167,19 @@ class PrivateMessageRequest:
     context_updates: tuple[dict, ...]
     waiting_for_user: bool
     pending_question: str
+    pending_reason: str = ""
+    pending_interaction_id: str = ""
+    represented_user: str = "the represented user"
+    representative_name: str = "the representative"
 
     def messages(self) -> list[dict[str, str]]:
         return [
             {
                 "role": "developer",
                 "content": (
-                    "You are Relay's private call coordinator. Route a dashboard message without ever exposing its "
+                    "You are Relay's private call coordinator. The PRIVATE DASHBOARD MESSAGE below comes from the "
+                    "represented user (named in the IDENTITY section), not from the representative — never confuse "
+                    "the two when writing a Speaker update. Route a dashboard message without ever exposing its "
                     "raw text to the voice Speaker. When WAITING FOR USER is true and PENDING QUESTION is non-empty, "
                     "strongly presume the private dashboard message is the answer to that pending question. Short or "
                     "terse replies such as '7A', 'yes', '$100', or a date are normal answers: use disposition=answer "
@@ -109,8 +193,10 @@ class PrivateMessageRequest:
                     "such as 'Got it.' A question addressed to Relay itself, testing message, unrelated aside, or other "
                     "meta conversation is private_meta: answer it briefly in private_reply and provide no Speaker update. "
                     "When disposition is answer, speaker_update is mandatory: copy the factual meaning of the private "
-                    "message into its value and summary instead of restating that the answer is missing. Derive a "
-                    "stable, semantically specific key from PENDING QUESTION, such as apartment_number, "
+                    "message into its value and summary instead of restating that the answer is missing. "
+                    "When PENDING REASON is decision, approval, or authority, use kind=decision so Speaker receives "
+                    "an explicit authorization record rather than treating the answer as an ordinary fact. "
+                    "Derive a stable, semantically specific key from PENDING QUESTION, such as apartment_number, "
                     "installation_date, or monthly_budget. The summary must state what the answer means, such as "
                     "'The apartment/unit number is 2711.' Never use a generic key such as pending_question_answer, "
                     "user_answer, or answer, and never write a summary that only says the user answered a question."
@@ -119,10 +205,17 @@ class PrivateMessageRequest:
             {
                 "role": "user",
                 "content": (
+                    f"IDENTITY:\n"
+                    f"- Represented user (the PRIVATE DASHBOARD MESSAGE below is FROM this person): "
+                    f"{self.represented_user}\n"
+                    f"- Representative (Relay called them; they never send dashboard messages): "
+                    f"{self.representative_name}\n\n"
                     f"ORIGINAL CALL CONTEXT:\n{json.dumps(self.context, ensure_ascii=False)}\n\n"
                     f"CONFIRMED CONTEXT UPDATES:\n{json.dumps(self.context_updates, ensure_ascii=False)}\n\n"
                     f"WAITING FOR USER: {self.waiting_for_user}\n"
                     f"PENDING QUESTION: {self.pending_question}\n\n"
+                    f"PENDING REASON: {self.pending_reason}\n"
+                    f"PENDING INTERACTION ID: {self.pending_interaction_id}\n\n"
                     f"PRIVATE DASHBOARD MESSAGE:\n{self.text}"
                 ),
             },
@@ -132,12 +225,17 @@ class PrivateMessageRequest:
 class Gatekeeper(Protocol):
     async def classify(self, request: GatekeeperRequest) -> GatekeeperVerdict: ...
 
+    async def veto(self, request: GatekeeperRequest) -> AuthorityVeto: ...
+
     async def route_private_message(self, request: PrivateMessageRequest) -> PrivateMessageRoute: ...
 
 
 class AllowAllGatekeeper:
     async def classify(self, request: GatekeeperRequest) -> GatekeeperVerdict:
-        return GatekeeperVerdict(verdict="answerable")
+        return GatekeeperVerdict(route="continue", reason="none")
+
+    async def veto(self, request: GatekeeperRequest) -> AuthorityVeto:
+        return AuthorityVeto(requires_user=False, reason="none")
 
     async def route_private_message(self, request: PrivateMessageRequest) -> PrivateMessageRoute:
         disposition = "answer" if request.waiting_for_user else "call_instruction"
@@ -169,6 +267,9 @@ class OpenAIGatekeeper:
     async def classify(self, request: GatekeeperRequest) -> GatekeeperVerdict:
         return await asyncio.to_thread(self._classify, request)
 
+    async def veto(self, request: GatekeeperRequest) -> AuthorityVeto:
+        return await asyncio.to_thread(self._veto, request)
+
     async def route_private_message(self, request: PrivateMessageRequest) -> PrivateMessageRoute:
         return await asyncio.to_thread(self._route_private_message, request)
 
@@ -183,9 +284,25 @@ class OpenAIGatekeeper:
         verdict = response.output_parsed
         if verdict is None:
             raise RuntimeError("Gatekeeper returned no verdict.")
-        if verdict.verdict == "unanswerable" and not verdict.question.strip():
-            raise RuntimeError("Gatekeeper omitted the user question.")
+        _validate_authority_route(verdict.route, verdict.reason, verdict.representative_update, verdict.question_to_user)
         return verdict
+
+    def _veto(self, request: GatekeeperRequest) -> AuthorityVeto:
+        client = self._client_for_key(self._api_key())
+        messages = request.messages()
+        messages[0] = {"role": "developer", "content": AUTHORITY_VETO_INSTRUCTIONS}
+        response = client.responses.parse(
+            model=self._model(),
+            input=messages,
+            reasoning={"effort": "none"},
+            text_format=AuthorityVeto,
+        )
+        veto = response.output_parsed
+        if veto is None:
+            raise RuntimeError("Authority checker returned no verdict.")
+        route = "consult_user" if veto.requires_user else "continue"
+        _validate_authority_route(route, veto.reason, veto.representative_update, veto.question_to_user)
+        return veto
 
     def _route_private_message(self, request: PrivateMessageRequest) -> PrivateMessageRoute:
         client = self._client_for_key(self._api_key())
@@ -199,7 +316,7 @@ class OpenAIGatekeeper:
         if route is None:
             raise RuntimeError("Gatekeeper returned no private-message route.")
         if route.disposition == "answer" and not request.waiting_for_user:
-            raise RuntimeError("Gatekeeper marked a message as an answer when no answer was pending.")
+            route = route.model_copy(update={"disposition": "context_update"})
         if route.disposition == "private_meta":
             return route.model_copy(
                 update={
@@ -217,6 +334,8 @@ class OpenAIGatekeeper:
                 speaker_update = _pending_question_update(request.pending_question, request.text)
             else:
                 speaker_update = speaker_update.model_copy(update={"value": request.text.strip()})
+            if request.pending_reason in {"decision", "approval", "authority"}:
+                speaker_update = speaker_update.model_copy(update={"kind": "decision"})
             return route.model_copy(
                 update={
                     "speaker_update": speaker_update,

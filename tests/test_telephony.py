@@ -369,6 +369,56 @@ async def async_false():
     return False
 
 
+async def async_injection_failure():
+    raise RuntimeError("routing failed")
+
+
+def test_live_instruction_failure_is_nonfatal_and_visible_in_private_workspace(monkeypatch, tmp_path):
+    monkeypatch.setenv("RELAY_MODE", "standard")
+    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
+    monkeypatch.setattr(RealtimeSessionHub, "inject", lambda self, task_id, text: async_injection_failure())
+    calls = FakeCalls()
+    tunnel = TunnelManager(
+        8765,
+        launcher=lambda port: SimpleNamespace(tunnel="https://relay.trycloudflare.com"),
+        terminator=lambda port: None,
+    )
+    client = TestClient(
+        create_app(
+            planner=ExecutablePlanner(),
+            credential_store=configured_store(tmp_path),
+            tunnel_manager=tunnel,
+            twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
+            tunnel_readiness_checker=lambda url: True,
+            connection_status_delay=0,
+        )
+    )
+    task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
+    client.post(
+        f"/api/tasks/{task['id']}/actions",
+        json={"action": "answer", "value": "approve"},
+    )
+    wait_for_call(client, task["id"], calls)
+
+    response = client.post(
+        f"/api/tasks/{task['id']}/actions",
+        json={"action": "instruction", "value": "Aug 1"},
+    )
+
+    assert response.status_code == 200
+    snapshot = response.json()
+    assert snapshot["phase"] == "calling"
+    assert snapshot["events"][-2]["speaker"] == "relay_private"
+    assert "Please send it again" in snapshot["events"][-2]["text"]
+    assert snapshot["events"][-1]["text"] == "Answer not applied · the call remains active"
+    event_names = [
+        json.loads(line)["event"]
+        for line in (tmp_path / "runtime" / "logs" / "events.jsonl").read_text().splitlines()
+    ]
+    assert "realtime.instruction_failed" in event_names
+    assert "task.private_call_message_retry_requested" in event_names
+
+
 def test_terminal_status_callback_revokes_the_call_capabilities(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
