@@ -85,6 +85,16 @@ def secure_field_prompt(field: str, simulated: bool = True) -> dict[str, Any]:
             "placeholder": "Fake SSN: 000-00-0000",
             "input_mode": "numeric",
         },
+        "ssn_last_four": {
+            "label": "Last four digits of Social Security number",
+            "placeholder": "Fake last four: 0000",
+            "input_mode": "numeric",
+        },
+        "date_of_birth": {
+            "label": "Date of birth",
+            "placeholder": "Choose a fake date",
+            "input_mode": "date",
+        },
     }
     if field not in fields:
         raise InvalidAction("Unsupported secure field.")

@@ -74,7 +74,10 @@ Exit: the demo is driven by actual voice runtime events rather than scripted UI 
 - [x] Add field-by-field simulated secure-mode transitions and deliberate transcript gaps.
 - [x] Use the browser/OS local speech facility separately for fake card number, expiration, and CVV in the deterministic preview.
 - [x] Inject locally synthesized PCMU only into the representative call leg while both Realtime directions are gated.
+- [x] Add a receive-only, capability-scoped browser monitor for both non-protected call audio directions without backpressuring the call.
 - [x] Accept locally validated real card, expiration, CVV, and full-SSN values in production typed takeover without cloud or log exposure.
+- [x] Protect last-four SSN and date-of-birth exchanges and render field-specific masked/date controls.
+- [x] Render adaptive regular-call prompts, a distinct takeover visual mode, and a dedicated default post-call summary.
 - [x] Route repeated protected-field requests to `HUMAN_TAKEOVER` without repeating the value.
 - [x] Resume Relay only after Twilio confirms local playback and capture only non-sensitive content.
 

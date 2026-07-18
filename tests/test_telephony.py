@@ -703,6 +703,21 @@ def test_twilio_media_websocket_rejects_valid_capability_with_invalid_signature(
     assert disconnected.value.code == 1008
 
 
+def test_call_listener_requires_its_own_active_capability(monkeypatch, tmp_path):
+    client, capability, _ = capability_client(monkeypatch, tmp_path)
+
+    with pytest.raises(WebSocketDisconnect) as wrong:
+        with client.websocket_connect("/api/twilio/listen/wrong"):
+            pass
+    with pytest.raises(WebSocketDisconnect) as not_connected:
+        with client.websocket_connect(f"/api/twilio/listen/{capability.listen_token}") as websocket:
+            websocket.receive_json()
+
+    assert wrong.value.code == 1008
+    assert not_connected.value.code == 1013
+    assert capability.listen_token != capability.media_token
+
+
 def test_revoked_call_capabilities_cannot_be_replayed(monkeypatch, tmp_path):
     client, capability, capabilities = capability_client(monkeypatch, tmp_path)
     capabilities.revoke("CA123")
@@ -716,10 +731,14 @@ def test_revoked_call_capabilities_cannot_be_replayed(monkeypatch, tmp_path):
     with pytest.raises(WebSocketDisconnect) as disconnected:
         with client.websocket_connect(f"/api/twilio/media/{capability.media_token}"):
             pass
+    with pytest.raises(WebSocketDisconnect) as listener_disconnected:
+        with client.websocket_connect(f"/api/twilio/listen/{capability.listen_token}"):
+            pass
 
     assert voice.status_code == 403
     assert status.status_code == 403
     assert disconnected.value.code == 1008
+    assert listener_disconnected.value.code == 1008
 
 
 def test_capability_access_log_filter_redacts_http_and_media_tokens():
@@ -747,15 +766,27 @@ def test_capability_access_log_filter_redacts_http_and_media_tokens():
         ("/api/twilio/media/media-secret",),
         None,
     )
+    listener_record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        "%s",
+        ("/api/twilio/listen/listen-secret",),
+        None,
+    )
     access_filter = CapabilityAccessLogFilter()
 
     access_filter.filter(record)
     access_filter.filter(media_record)
+    access_filter.filter(listener_record)
 
     assert "voice-secret" not in record.getMessage()
     assert "media-secret" not in media_record.getMessage()
     assert "[REDACTED]" in record.getMessage()
     assert "[REDACTED]" in media_record.getMessage()
+    assert "listen-secret" not in listener_record.getMessage()
+    assert "[REDACTED]" in listener_record.getMessage()
 
 
 def test_uvicorn_access_handler_installs_capability_redaction():

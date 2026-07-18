@@ -99,6 +99,7 @@ The call agent emits a constrained JSON schema mapped to prebuilt controls:
 - multiple choice
 - yes/no confirmation
 - date picker
+- month picker
 - masked identifier
 - address confirmation
 - final action approval
@@ -109,9 +110,10 @@ Free text always uses the persistent chat input; it is not a generated component
 
 - Unknown facts generate an immediate user request.
 - Financial, contractual, legal, and final purchase actions require approval.
-- A permanent Take Over control is visible during an active call only after real audio bridging exists.
-- The user can return control to Relay after takeover when supported.
-- Until then, the deterministic UI must say `Simulate takeover · no audio` and must not imply the microphone is connected.
+- A permanent keyboard Take Over control is visible during an active production call and lets the user type speech through local macOS TTS without a browser microphone.
+- The user can return control to Relay after takeover.
+- A separate, off-by-default Listen control lets the user monitor both non-protected call audio directions in the browser. It is receive-only and never injects browser audio into the call.
+- The deterministic UI must say `Simulate takeover · no audio` and must not imply that production call audio is connected.
 
 ### AI disclosure
 
@@ -129,12 +131,13 @@ Relay begins calls with a concise disclosure such as:
 
 ### Secure mode
 
-- Trigger before a card number or full SSN is exchanged.
+- Trigger before a card number, CVV, expiration date, full or last-four SSN, or date of birth is exchanged.
 - Mute or disconnect the cloud AI in both audio directions.
 - Pause transcript and content logging.
 - Offer macOS built-in on-device TTS and user takeover.
 - Keep the deterministic demo fake-only; validate production values locally for the detected protected field.
 - Resume cloud AI only after the sensitive exchange ends.
+- Show field-specific local controls: date/month pickers where applicable and masked numeric inputs with visible format/length hints for identifiers.
 
 ### Logging and transcripts
 

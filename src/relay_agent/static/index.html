@@ -90,11 +90,31 @@
       .call-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
       .history-toggle { display: none; padding: 8px 11px; border: 1px solid #cbd1da; border-radius: 9px; color: #4f5660; background: white; font-size: 11px; font-weight: 750; }
       .workspace.planning-active.has-call-history .history-toggle { display: block; }
+      .listen { display: none; flex: 0 0 auto; padding: 9px 12px; border: 1px solid #cbd1da; border-radius: 10px; color: #777f8a; background: #f4f5f7; font-size: 12px; font-weight: 750; }
+      .listen.active { border-color: #7580e8; color: #3540a1; background: #e9ebff; box-shadow: 0 0 0 3px rgba(89,102,239,.12); }
       .takeover { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #df9b96; border-radius: 10px; background: #fff6f5; color: #a23d35; font-size: 12px; font-weight: 750; }
       .takeover.active { border-color: #7560df; background: #ece9ff; color: #4332a4; box-shadow: 0 0 0 3px rgba(117, 96, 223, .14); }
       .takeover.required { animation: takeover-pulse 1.15s ease-in-out infinite; }
       @keyframes takeover-pulse { 50% { transform: scale(1.035); box-shadow: 0 0 0 7px rgba(211, 72, 61, .13); } }
       .prompt.takeover-warning { border: 2px solid #d95b50; background: #fff0ed; color: #7f2923; }
+      .takeover-mode-label { display: none; padding: 7px 10px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; color: #f4f5f7; background: rgba(255,255,255,.09); backdrop-filter: blur(12px); font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+      .workspace.takeover-active .takeover-mode-label { display: inline-flex; }
+      .workspace.takeover-active .planning-board { border-color: #30343b; color: #f4f5f7; background: #101216; box-shadow: 0 0 0 3px rgba(25,27,32,.2), 0 22px 70px rgba(0,0,0,.28); }
+      .workspace.takeover-active .planning-board .board-header,
+      .workspace.takeover-active .planning-board .composer { border-color: #30343b; background: rgba(18,20,24,.92); }
+      .workspace.takeover-active .planning-board .timeline { background: radial-gradient(circle at top right, #252a31, #101216 58%); }
+      .workspace.takeover-active .planning-board .task-title > span,
+      .workspace.takeover-active .planning-board .speaker,
+      .workspace.takeover-active .planning-board .hint { color: #aeb4be; }
+      .workspace.takeover-active .planning-board .phase-badge { color: #f0f2f5; background: rgba(255,255,255,.12); }
+      .workspace.takeover-active .planning-board .relay_private { border-color: #59616e; color: #ecf0f4; background: rgba(255,255,255,.08); }
+      .workspace.takeover-active .planning-board .user_private { border-color: #376b58; color: #dff9ee; background: rgba(29,99,73,.3); }
+      .workspace.takeover-active .planning-board .prompt { color: #edf0f4; background: rgba(255,255,255,.08); }
+      .workspace.takeover-active .planning-board .prompt.takeover-warning { border-color: #e88980; color: #ffe8e5; background: rgba(142,45,38,.3); }
+      .workspace.takeover-active .planning-board input { border-color: #4a505a; color: #f7f8fa; background: #1c1f24; }
+      .workspace.takeover-active .planning-board input::placeholder { color: #858d98; }
+      .workspace.takeover-active .calling-board { opacity: .5; filter: grayscale(1); box-shadow: none; }
+      .workspace.takeover-active .takeover.active { border-color: #f1f3f5; color: #f6f7f8; background: #17191d; box-shadow: 0 0 0 3px rgba(255,255,255,.12); }
       .hangup { flex: 0 0 auto; padding: 9px 13px; border: 1px solid #d64c4c; border-radius: 10px; background: #d64c4c; color: #fff; font-size: 12px; font-weight: 750; }
       .call-tabs { display: flex; min-width: 0; gap: 7px; overflow-x: auto; padding: 10px 12px; border-bottom: 1px solid #e6e8ed; background: white; scrollbar-width: thin; }
       .call-tab { flex: 0 0 auto; max-width: 190px; overflow: hidden; padding: 8px 10px; border: 1px solid #d8dce3; border-radius: 9px; color: #68707b; background: #f8f9fb; font-size: 11px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
@@ -134,6 +154,13 @@
       .plan-phone { min-width: 0; overflow-wrap: anywhere; color: #68707b; font-variant-numeric: tabular-nums; text-align: right; }
       .plan-questions { margin: 10px 0 0; padding-left: 18px; color: #4f5660; font-size: 12px; }
       .agent-plan-summary { margin-bottom: 10px; color: #343a43; font-size: 13px; line-height: 1.45; }
+      .call-summary { max-width: 760px; margin: 18px auto; overflow: hidden; border: 1px solid #bed8cc; border-radius: 16px; background: #f7fcfa; box-shadow: 0 12px 30px rgba(30, 94, 68, .08); }
+      .call-summary-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; color: #174c39; background: #e2f3ec; font-size: 13px; font-weight: 800; }
+      .call-summary-status { padding: 4px 7px; border-radius: 999px; color: #236146; background: rgba(255,255,255,.7); font-size: 10px; text-transform: uppercase; }
+      .call-summary-body { padding: 15px 16px; color: #3e4c46; font-size: 12px; line-height: 1.5; }
+      .call-summary-section + .call-summary-section { margin-top: 12px; }
+      .call-summary-section strong { display: block; margin-bottom: 5px; color: #1d332a; }
+      .call-summary-list { margin: 0; padding-left: 18px; }
       .agent-plan-target { color: #68707b; font-size: 11px; }
       .comparison-caption { padding: 13px 14px; color: #4d5560; font-size: 12px; font-weight: 700; }
       table { width: 100%; border-collapse: collapse; min-width: 700px; font-size: 12px; }
@@ -148,6 +175,8 @@
       .choice.risky { border-color: #e0a19b; color: #a33c34; background: #fff7f6; }
       .instruction-row { display: flex; gap: 9px; }
       .instruction-row input { width: 100%; min-width: 0; padding: 11px 13px; border: 1px solid #cbd1da; border-radius: 11px; outline: none; }
+      .composer-field-hint { display: none; margin: 0 0 7px; color: #737b87; font-size: 11px; font-weight: 650; }
+      .composer-field-hint.visible { display: block; }
       .send { padding: 10px 15px; border-radius: 10px; background: #17191c; color: white; font-weight: 700; }
       .attach-inline { display: none; flex: 0 0 auto; align-items: center; margin: 0; padding: 10px 12px; border: 1px solid #cbd1da; border-radius: 10px; color: #4f5660; background: #f9fafb; font-size: 12px; cursor: pointer; }
       .instruction-row .task-context-input { position: absolute; width: 1px; min-width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; }
@@ -271,12 +300,13 @@
         <div class="boards">
           <section id="planning-board" class="board planning-board active">
             <div class="board-header">
-              <div class="task-title"><strong><span>Private Workspace</span><span id="planning-badge" class="phase-badge">Active</span></strong><span id="goal-summary"></span></div>
+              <div class="task-title"><strong><span>Private Workspace</span><span id="planning-badge" class="phase-badge">Active</span><span class="takeover-mode-label">Private local voice</span></strong><span id="goal-summary"></span></div>
             </div>
             <div id="planning-timeline" class="timeline" aria-live="polite"></div>
             <div id="planning-composer" class="composer">
               <div id="planning-error" class="error"></div>
               <div id="planning-prompt" class="prompt"></div>
+              <div id="composer-field-hint" class="composer-field-hint"></div>
               <div class="instruction-row">
                 <label id="task-attach-label" class="attach-inline" for="task-context-file">Attach PDF</label>
                 <input id="task-context-file" class="task-context-input" type="file" accept="application/pdf,.pdf" />
@@ -295,6 +325,7 @@
                 <div class="task-title"><strong><span>Call Console</span><span id="calling-badge" class="phase-badge live">Live</span></strong><span>External voice transcript · private messages stay in the workspace</span></div>
                 <div class="call-controls">
                   <button id="history-toggle" class="history-toggle">Minimize</button>
+                  <button id="listen" class="listen" type="button" aria-pressed="false" title="Listen to the live call in this browser">🔇 Listen</button>
                   <button id="takeover" class="takeover">Simulate takeover · no audio</button>
                   <button id="hangup" class="hangup" style="display:none">End call</button>
                 </div>
@@ -336,6 +367,13 @@
       let actionInFlight = false;
       let runtimeMode = 'standard';
       let currentModelSettings = null;
+      let composerModeKey = '';
+      let listenSocket = null;
+      let listenAudioContext = null;
+      let listenWanted = false;
+      let listenGeneration = 0;
+      let listenPlayheads = {representative: 0, relay: 0};
+      const listenSources = new Set();
 
       function fillModelSelect(id, options, selected) {
         const select = document.querySelector(id);
@@ -463,11 +501,17 @@
       });
 
       startButton.addEventListener('click', async () => {
+        const submittedGoal = goalInput.value.trim();
         startButton.disabled = true;
         startButton.textContent = 'Researching…';
         document.querySelector('#intake-panel').setAttribute('aria-busy', 'true');
         document.querySelector('#start-progress').classList.add('visible');
         document.querySelector('#intake-error').style.display = 'none';
+        document.querySelector('#goal-summary').textContent = submittedGoal;
+        landing.style.display = 'none';
+        workspace.style.display = 'block';
+        const optimisticStart = appendOptimisticInstruction('planning', submittedGoal);
+        optimisticStart.pending.textContent = 'Relay is researching your goal and preparing its first response';
         try {
           const contexts = [];
           if (contextFile.files[0]) {
@@ -479,14 +523,16 @@
           const response = await fetch('/api/tasks', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({goal: goalInput.value, contexts})
+            body: JSON.stringify({goal: submittedGoal, contexts})
           });
           task = await readResponse(response);
+          clearOptimisticInstruction(optimisticStart);
           document.querySelector('#goal-summary').textContent = task.goal;
-          landing.style.display = 'none';
-          workspace.style.display = 'block';
           renderTask();
         } catch (error) {
+          clearOptimisticInstruction(optimisticStart);
+          workspace.style.display = 'none';
+          landing.style.display = 'block';
           const intakeError = document.querySelector('#intake-error');
           intakeError.textContent = error.message;
           intakeError.style.display = 'block';
@@ -508,6 +554,10 @@
         }
         if (task?.takeover_active) resumeTakeover();
         else beginTakeover();
+      });
+      document.querySelector('#listen').addEventListener('click', () => {
+        if (listenWanted) stopListening();
+        else startListening();
       });
       document.querySelector('#hangup').addEventListener('click', () => {
         if (!task || task.status === 'complete') return;
@@ -565,6 +615,20 @@
         }
         const optimistic = appendOptimisticInstruction(phase, value);
         await act('instruction', value, optimistic);
+      }
+
+      function promptOptionValue(prompt, option) {
+        return prompt.response_action === 'instruction' ? option.label : option.value;
+      }
+
+      async function submitPromptOption(prompt, option) {
+        const value = promptOptionValue(prompt, option);
+        if (prompt.response_action === 'instruction') {
+          const optimistic = appendOptimisticInstruction('calling', value);
+          await act('instruction', value, optimistic);
+          return;
+        }
+        await act('answer', option.value);
       }
 
       async function sendTakeoverText(value) {
@@ -681,6 +745,8 @@
         workspace.classList.toggle('calling-active', activePhase === 'calling');
         workspace.classList.toggle('has-call-history', hasCallHistory);
         workspace.classList.toggle('call-history-open', callHistoryOpen && activePhase === 'planning');
+        workspace.classList.toggle('takeover-active', Boolean(task.takeover_active));
+        workspace.classList.toggle('takeover-sensitive', Boolean(task.takeover_active && task.takeover_sensitive));
         document.querySelector('#planning-board').classList.toggle('active', true);
         document.querySelector('#planning-board').classList.toggle('inactive', false);
         document.querySelector('#calling-board').classList.toggle('active', activePhase === 'calling');
@@ -708,7 +774,11 @@
         const demoSecurePrompt = runtimeMode === 'demo' && activePhase === 'calling' && task.secure_mode;
         renderPrompt(demoSecurePrompt ? null : task.prompt, planningPrompt);
         renderPrompt(demoSecurePrompt ? task.prompt : null, callingPrompt);
-        planningPrompt.classList.toggle('takeover-warning', task.stage === 'takeover_required' || task.takeover_sensitive);
+        configureComposer(demoSecurePrompt ? null : task.prompt, activePhase);
+        planningPrompt.classList.toggle(
+          'takeover-warning',
+          Boolean(task.stage === 'takeover_required' || task.takeover_sensitive)
+        );
         const takeover = document.querySelector('#takeover');
         takeover.style.display = activePhase === 'calling' ? 'block' : 'none';
         takeover.classList.toggle('active', Boolean(task.takeover_active));
@@ -719,11 +789,15 @@
             ? '⌨ You’re speaking · click to hand back'
             : '⌨ Take over (type)';
         takeover.disabled = task.status === 'complete' || (runtimeMode === 'demo' && task.stage === 'takeover');
+        const listen = document.querySelector('#listen');
+        listen.style.display = activePhase === 'calling' && runtimeMode !== 'demo' ? 'block' : 'none';
+        listen.disabled = activePhase !== 'calling' || !task.current_call;
+        if (activePhase !== 'calling' && listenWanted) stopListening(false);
         const hangup = document.querySelector('#hangup');
         hangup.style.display = activePhase === 'calling' && runtimeMode !== 'demo' && task.status !== 'complete' ? 'block' : 'none';
         hangup.disabled = task.status === 'complete' || !task.current_call;
         planningInstruction.disabled = task.status === 'complete' || (task.secure_mode && !task.takeover_active);
-        planningInstruction.placeholder = activePhase === 'calling'
+        const defaultPlaceholder = activePhase === 'calling'
           ? task.takeover_active
             ? task.takeover_sensitive
               ? task.secure_expected_field === 'verification_request'
@@ -732,6 +806,7 @@
               : 'Type what you want to say to the representative…'
             : 'Message Relay privately · answer, update context, or change call strategy…'
           : 'Reply to Relay or revise the plan…';
+        if (!task.prompt?.placeholder && !task.takeover_active) planningInstruction.placeholder = defaultPlaceholder;
         document.querySelector('#planning-send').disabled = task.status === 'complete' || (task.secure_mode && !task.takeover_active);
         document.querySelector('#task-attach-label').style.display = activePhase === 'planning' && task.status !== 'complete' ? 'inline-flex' : 'none';
         if (task.auto_advance) {
@@ -851,6 +926,9 @@
         } else if (event.type === 'agent_plan') {
           wrapper.className = 'plan-card';
           wrapper.innerHTML = agentPlanMarkup(event);
+        } else if (event.type === 'call_summary') {
+          wrapper.className = 'call-summary';
+          wrapper.innerHTML = callSummaryMarkup(event);
         } else {
           const block = document.createElement('div');
           block.className = event.type === 'secure_gap' ? 'secure-gap' : event.type;
@@ -893,6 +971,138 @@
           <thead><tr><th>Insurer</th><th>Monthly</th><th>Property</th><th>Liability</th><th>Deductible</th><th>Loss of use</th></tr></thead>
           <tbody>${quotes.map(q => `<tr><td><strong>${escapeHtml(q.insurer)}</strong></td><td>${money(q.monthly_premium)}</td><td>${money(q.personal_property)}</td><td>${money(q.liability)}</td><td>${money(q.deductible)}</td><td>${money(q.loss_of_use)}</td></tr>`).join('')}</tbody>
         </table>`;
+      }
+
+      function callSummaryMarkup(event) {
+        const list = (items, empty) => items?.length
+          ? `<ul class="call-summary-list">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+          : `<div class="hint">${escapeHtml(empty)}</div>`;
+        return `<div class="call-summary-head"><span>${escapeHtml(event.text || 'Post-call summary')}</span><span class="call-summary-status">${escapeHtml(event.outcome || 'Complete')}</span></div>
+          <div class="call-summary-body">
+            <div class="call-summary-section"><strong>${escapeHtml(event.target || 'External call')}</strong></div>
+            <div class="call-summary-section"><strong>Representative highlights</strong>${list(event.highlights, 'No representative transcript was captured.')}</div>
+            <div class="call-summary-section"><strong>Confirmed during the call</strong>${list(event.confirmed, 'No additional user-confirmed facts were recorded.')}</div>
+            <div class="call-summary-section"><strong>Next</strong>${escapeHtml(event.next_step || 'Review the transcript or give Relay the next instruction.')}</div>
+          </div>`;
+      }
+
+      function configureComposer(prompt, activePhase) {
+        const hint = document.querySelector('#composer-field-hint');
+        let kind = prompt?.input_kind || 'text';
+        if (task?.takeover_active && task?.takeover_sensitive) kind = task.prompt?.input_kind || 'masked_numeric';
+        const modeKey = `${kind}:${task?.secure_expected_field || ''}:${prompt?.question || ''}`;
+        if (modeKey !== composerModeKey && (composerModeKey.includes('masked') || kind.includes('masked'))) {
+          planningInstruction.value = '';
+        }
+        composerModeKey = modeKey;
+        planningInstruction.type = kind === 'date' ? 'date' : kind === 'month' ? 'month' : kind.includes('masked') ? 'password' : 'text';
+        planningInstruction.inputMode = kind.includes('numeric') ? 'numeric' : 'text';
+        planningInstruction.pattern = kind.includes('numeric') ? '[0-9]*' : '';
+        planningInstruction.maxLength = Number(prompt?.max_length || 1000);
+        planningInstruction.autocomplete = kind.includes('masked') ? 'off' : 'on';
+        planningInstruction.placeholder = prompt?.placeholder || (activePhase === 'calling' ? 'Message Relay privately…' : 'Reply to Relay…');
+        const hintText = prompt?.hint || (kind.includes('masked') ? 'Protected input is hidden as you type.' : '');
+        hint.textContent = hintText;
+        hint.classList.toggle('visible', Boolean(hintText));
+      }
+
+      function updateListenButton() {
+        const button = document.querySelector('#listen');
+        button.classList.toggle('active', listenWanted);
+        button.setAttribute('aria-pressed', String(listenWanted));
+        button.textContent = listenWanted ? '🔊 Listening' : '🔇 Listen';
+        button.title = listenWanted ? 'Stop monitoring the live call' : 'Listen to the live call in this browser';
+      }
+
+      async function startListening() {
+        if (!task?.current_call || workflowPhase !== 'calling' || listenWanted) return;
+        const generation = ++listenGeneration;
+        listenWanted = true;
+        updateListenButton();
+        try {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (!AudioContextClass) throw new Error('Live audio monitoring is not supported in this browser.');
+          listenAudioContext = new AudioContextClass();
+          await listenAudioContext.resume();
+          listenPlayheads = {representative: 0, relay: 0};
+          const capability = await readResponse(await fetch(`/api/tasks/${task.id}/listen-capability`));
+          if (!listenWanted || generation !== listenGeneration) return;
+          const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const socket = new WebSocket(`${protocol}//${location.host}${capability.websocket_path}`);
+          listenSocket = socket;
+          socket.onmessage = event => {
+            if (!listenWanted || socket !== listenSocket) return;
+            try {
+              const frame = JSON.parse(event.data);
+              if ((frame.source === 'representative' || frame.source === 'relay') && frame.payload) {
+                playMuLawFrame(frame.source, frame.payload);
+              }
+            } catch (_) {
+              stopListening(false);
+              showError('Relay received an invalid live-monitor audio frame.');
+            }
+          };
+          socket.onerror = () => {
+            if (listenWanted) showError('Relay could not open the live audio monitor. You can retry Listen.');
+          };
+          socket.onclose = () => {
+            if (socket !== listenSocket) return;
+            const unexpected = listenWanted;
+            stopListening(false);
+            if (unexpected) showError('Live audio monitoring stopped. The phone call itself is unaffected.');
+          };
+        } catch (error) {
+          stopListening(false);
+          showError(error.message);
+        }
+      }
+
+      function decodeMuLaw(payload) {
+        const encoded = atob(payload);
+        const samples = new Float32Array(encoded.length);
+        for (let index = 0; index < encoded.length; index += 1) {
+          let value = (~encoded.charCodeAt(index)) & 0xff;
+          let sample = ((value & 0x0f) << 3) + 0x84;
+          sample <<= (value & 0x70) >> 4;
+          sample = (value & 0x80) ? 0x84 - sample : sample - 0x84;
+          samples[index] = Math.max(-1, Math.min(1, sample / 32768));
+        }
+        return samples;
+      }
+
+      function playMuLawFrame(source, payload) {
+        const context = listenAudioContext;
+        if (!context || context.state === 'closed') return;
+        const samples = decodeMuLaw(payload);
+        const now = context.currentTime;
+        let startAt = Math.max(listenPlayheads[source] || 0, now + 0.06);
+        if (startAt > now + 0.8) return;
+        const buffer = context.createBuffer(1, samples.length, 8000);
+        buffer.copyToChannel(samples, 0);
+        const node = context.createBufferSource();
+        node.buffer = buffer;
+        node.connect(context.destination);
+        listenSources.add(node);
+        node.onended = () => listenSources.delete(node);
+        node.start(startAt);
+        listenPlayheads[source] = startAt + buffer.duration;
+      }
+
+      function stopListening(closeSocket = true) {
+        listenWanted = false;
+        listenGeneration += 1;
+        const socket = listenSocket;
+        listenSocket = null;
+        if (closeSocket && socket && socket.readyState < WebSocket.CLOSING) socket.close(1000, 'monitor stopped');
+        listenSources.forEach(source => {
+          try { source.stop(); } catch (_) {}
+        });
+        listenSources.clear();
+        const context = listenAudioContext;
+        listenAudioContext = null;
+        if (context && context.state !== 'closed') context.close();
+        listenPlayheads = {representative: 0, relay: 0};
+        updateListenButton();
       }
 
       function renderPrompt(prompt, promptBox) {
@@ -956,7 +1166,7 @@
           const button = document.createElement('button');
           button.className = `choice ${option.value === 'risky' ? 'risky' : ''}`;
           button.textContent = option.label;
-          button.onclick = () => act('answer', option.value);
+          button.onclick = () => submitPromptOption(prompt, option);
           choices.appendChild(button);
         });
         promptBox.appendChild(choices);

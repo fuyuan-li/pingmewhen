@@ -9,6 +9,8 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from relay_agent.event_log import EventLog
+from relay_agent.interaction_prompts import user_input_prompt
+from relay_agent.local_tts import sensitive_input_spec
 from relay_agent.names import normalize_display_name
 from relay_agent.planner import Planner, PlannerError, PlanningTurn
 from relay_agent.task_engine import InvalidAction, TaskNotFound
@@ -208,7 +210,7 @@ class AgenticTaskEngine:
                         )
                     )
                 self._append(task, "message", speaker="relay_private", text=question)
-                task["prompt"] = {"kind": "text_reply", "question": question, "options": []}
+                task["prompt"] = user_input_prompt(question)
                 return
             self._append(task, "message", speaker="relay_private", text=turn.message)
             self._present_plan(task, turn)
@@ -216,7 +218,7 @@ class AgenticTaskEngine:
         self._append(task, "message", speaker="relay_private", text=turn.message)
         task.update(status="waiting_for_user", stage="collecting_context")
         question = turn.questions[0] if turn.questions else "What information should Relay use to continue planning?"
-        task["prompt"] = {"kind": "text_reply", "question": question, "options": []}
+        task["prompt"] = user_input_prompt(question)
 
     def _present_plan(self, task: dict[str, Any], turn: PlanningTurn) -> None:
         plan = turn.model_dump()
@@ -440,6 +442,7 @@ class AgenticTaskEngine:
                 "options": [],
                 "field": field_name,
                 "repeated": repeated,
+                **sensitive_input_spec(field_name),
             }
             self._append(task, "status", text=f"Typed takeover required · protected {field_name} request")
             self._append(task, "secure_gap", text="Protected audio and transcript content are suppressed.")
@@ -511,12 +514,7 @@ class AgenticTaskEngine:
             if not cleaned_question or input_kind != "text" or not isinstance(blocking, bool):
                 raise InvalidAction("Relay requested unsupported user input.")
             task.update(call_state="WAITING_FOR_USER", stage="waiting_for_user", status="waiting_for_user")
-            task["prompt"] = {
-                "kind": "text_reply",
-                "question": cleaned_question,
-                "options": [],
-                "blocking": blocking,
-            }
+            task["prompt"] = user_input_prompt(cleaned_question, blocking=blocking)
             if interaction_id:
                 task["prompt"].update(interaction_id=interaction_id, reason=reason)
                 task.setdefault("pending_interactions", []).append(
@@ -730,19 +728,44 @@ class AgenticTaskEngine:
                 task.update(phase="calling", stage="execution_ready", status="waiting_for_execution", prompt=None)
             else:
                 task.update(phase="planning", stage="post_call_review", status="waiting_for_user", prompt=None)
+                completed_targets = [
+                    entry["action"]["target"]
+                    for entry in task.get("execution_queue", [])
+                    if entry.get("status") == "completed"
+                ]
+                representative_turns = [
+                    event["text"]
+                    for event in task["events"]
+                    if event["type"] == "message"
+                    and event.get("speaker") == "representative"
+                ]
+                confirmed_updates = [
+                    str(update.get("summary", "")).strip()
+                    for update in task.get("context_updates", [])
+                    if str(update.get("summary", "")).strip()
+                ]
                 self._append(
                     task,
                     "message",
                     speaker="relay_private",
-                    text=(
-                        "The approved calls are complete. Any conversation transcript captured is retained in this "
-                        "task, and I am ready to review the results with you."
-                    ),
+                    text="The approved calls are complete. Here is the call summary and retained transcript.",
+                )
+                self._append(
+                    task,
+                    "call_summary",
+                    text="Post-call summary",
+                    target=", ".join(completed_targets) or item["action"]["target"],
+                    outcome="Call completed",
+                    highlights=representative_turns[-5:],
+                    confirmed=confirmed_updates[-5:],
+                    next_step="Review the outcome, ask a follow-up, or tell Relay what to do next.",
                 )
                 task["prompt"] = {
                     "kind": "text_reply",
-                    "question": "Ask Relay to summarize the results or give the next instruction.",
+                    "question": "Ask a follow-up or give Relay the next instruction.",
                     "options": [],
+                    "input_kind": "text",
+                    "placeholder": "Ask about the call or give the next instruction…",
                 }
             self._store.save("production", task)
             return self._snapshot(task)

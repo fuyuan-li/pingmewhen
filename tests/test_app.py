@@ -128,4 +128,15 @@ def test_dashboard_keeps_private_speakers_left_and_restores_failed_text():
     assert "/takeover-say" in source
     assert "task?.takeover_active" in source
     assert "takeover-warning" in source
+    assert "takeover-active" in source
+    assert "Private local voice" in source
+    assert "callSummaryMarkup" in source
+    assert "configureComposer" in source
+    assert "type = kind === 'date' ? 'date'" in source
+    assert "optimisticStart" in source
+    assert 'id="listen"' in source
+    assert "/listen-capability" in source
+    assert "decodeMuLaw" in source
+    assert "playMuLawFrame" in source
+    assert ".send(" not in source[source.index("async function startListening"):source.index("function stopListening")]
     assert "/secure-fields" not in source

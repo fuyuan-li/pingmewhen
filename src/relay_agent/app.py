@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from twilio.request_validator import RequestValidator, add_port, remove_port
@@ -417,6 +417,21 @@ def create_app(
         except TaskNotFound as error:
             raise HTTPException(status_code=404, detail="Task not found.") from error
 
+    @app.get("/api/tasks/{task_id}/listen-capability")
+    async def listen_capability(task_id: str) -> dict[str, str]:
+        if not isinstance(engine, AgenticTaskEngine):
+            raise HTTPException(status_code=409, detail="Live call monitoring is available only during a production call.")
+        try:
+            task = engine.get(task_id)
+        except TaskNotFound as error:
+            raise HTTPException(status_code=404, detail="Task not found.") from error
+        current_call = task.get("current_call") or {}
+        call_sid = str(current_call.get("call_sid", ""))
+        capability = telephony.capabilities.active_for_task(task_id, call_sid) if call_sid else None
+        if capability is None or task.get("phase") != "calling":
+            raise HTTPException(status_code=409, detail="The live call audio stream is not available yet.")
+        return {"websocket_path": f"/api/twilio/listen/{capability.listen_token}"}
+
     @app.post("/api/tasks/{task_id}/actions")
     async def act_on_task(task_id: str, request: TaskActionRequest) -> dict:
         try:
@@ -641,6 +656,30 @@ def create_app(
             expected_queue_index=capability.queue_index,
             expected_call_sid=capability.call_sid,
         )
+
+    @app.websocket("/api/twilio/listen/{capability_token}")
+    async def listen_to_call(websocket: WebSocket, capability_token: str) -> None:
+        capability = telephony.capabilities.authenticate("listen", capability_token)
+        if capability is None:
+            await websocket.close(code=1008)
+            return
+        try:
+            await realtime.attach_listener(capability.task_id, websocket)
+        except RuntimeError:
+            await websocket.close(code=1013)
+            return
+        try:
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    break
+                if message.get("text") is not None or message.get("bytes") is not None:
+                    await websocket.close(code=1008)
+                    break
+        except WebSocketDisconnect:
+            pass
+        finally:
+            await realtime.detach_listener(capability.task_id, websocket)
 
     @app.get("/")
     async def dashboard() -> FileResponse:

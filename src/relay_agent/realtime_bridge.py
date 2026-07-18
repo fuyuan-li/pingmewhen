@@ -33,11 +33,16 @@ SENSITIVE_FIELD_PATTERNS = {
     "card_number": (r"\b(?:credit|debit|payment)?\s*card\s+number\b", r"\b(?:\d[ -]?){13,19}\b"),
     "expiration": (r"\bexpir(?:ation|y|es)\b", r"\bexp(?:iry)?\s*(?:date)?\b"),
     "cvv": (r"\bcvv\b", r"\bcvc\b", r"\bsecurity\s+code\b"),
+    "ssn_last_four": (
+        r"\blast\s+(?:four|4)\b.{0,30}\b(?:social security|ssn)\b",
+        r"\b(?:social security|ssn)\b.{0,30}\blast\s+(?:four|4)\b",
+    ),
     "full_ssn": (
         r"\bfull\s+(?:social security|ssn)\b",
         r"\bsocial security (?:number|no\.?|#)\b",
         r"\b\d{3}[ -]\d{2}[ -]\d{4}\b",
     ),
+    "date_of_birth": (r"\bdate of birth\b", r"\bbirth\s*date\b", r"\bdob\b"),
 }
 
 SENSITIVE_FIELD_LABELS = {
@@ -45,6 +50,8 @@ SENSITIVE_FIELD_LABELS = {
     "expiration": "expiration date",
     "cvv": "security code",
     "full_ssn": "Social Security number",
+    "ssn_last_four": "last four digits of the Social Security number",
+    "date_of_birth": "date of birth",
     "verification_request": "protected information",
 }
 
@@ -76,8 +83,6 @@ def requested_sensitive_field(text: str) -> str | None:
     lowered = text.lower()
     if re.search(r"\b(?:repeat|read back|verify)\b.{0,40}\b(?:that|it|card|number|details?)\b", lowered):
         return "verification_request"
-    if re.search(r"\blast\s+(?:four|4)\b.{0,20}\b(?:social|ssn)\b", lowered):
-        return None
     for field_name, patterns in SENSITIVE_FIELD_PATTERNS.items():
         if any(re.search(pattern, lowered) for pattern in patterns):
             return field_name
@@ -181,6 +186,14 @@ class ActiveRealtimeSession:
     last_forwarded_relay_transcript: str = ""
     last_forwarded_relay_response_id: str = ""
     discard_response_audio: bool = False
+    listener_sockets: dict[int, "ListenerChannel"] = field(default_factory=dict)
+
+
+@dataclass
+class ListenerChannel:
+    websocket: WebSocket
+    queue: asyncio.Queue[dict[str, str]]
+    sender_task: asyncio.Task | None = None
 
 
 @dataclass(frozen=True)
@@ -353,6 +366,65 @@ class RealtimeSessionHub:
         self._waiting_keepalive_interval = waiting_keepalive_interval
         self._sessions: dict[str, ActiveRealtimeSession] = {}
         self._lock = asyncio.Lock()
+
+    async def attach_listener(self, task_id: str, websocket: WebSocket) -> None:
+        async with self._lock:
+            session = self._sessions.get(task_id)
+            if session is None:
+                raise RuntimeError("The live call audio stream is not connected yet.")
+            await websocket.accept()
+            channel = ListenerChannel(websocket=websocket, queue=asyncio.Queue(maxsize=100))
+            session.listener_sockets[id(websocket)] = channel
+            channel.sender_task = asyncio.create_task(self._listener_sender(session, channel))
+        self._events.append("call.listener_attached", {"task_id": task_id})
+
+    async def detach_listener(self, task_id: str, websocket: WebSocket, close: bool = False) -> None:
+        channel = None
+        async with self._lock:
+            session = self._sessions.get(task_id)
+            if session is not None:
+                channel = session.listener_sockets.pop(id(websocket), None)
+        if channel and channel.sender_task and channel.sender_task is not asyncio.current_task():
+            channel.sender_task.cancel()
+            await asyncio.gather(channel.sender_task, return_exceptions=True)
+        if close:
+            with suppress(RuntimeError):
+                await websocket.close(code=1000)
+        if channel:
+            self._events.append("call.listener_detached", {"task_id": task_id})
+
+    async def _listener_sender(self, session: ActiveRealtimeSession, channel: ListenerChannel) -> None:
+        try:
+            while True:
+                await channel.websocket.send_json(await channel.queue.get())
+        except (WebSocketDisconnect, RuntimeError, OSError):
+            pass
+        finally:
+            session.listener_sockets.pop(id(channel.websocket), None)
+
+    def _fan_out_listener_audio(self, session: ActiveRealtimeSession, source: str, payload: str) -> None:
+        frame = {"source": source, "payload": payload}
+        for channel in tuple(session.listener_sockets.values()):
+            if channel.queue.full():
+                with suppress(asyncio.QueueEmpty):
+                    channel.queue.get_nowait()
+            with suppress(asyncio.QueueFull):
+                channel.queue.put_nowait(frame)
+
+    async def _close_session_listeners(self, session: ActiveRealtimeSession) -> None:
+        channels = tuple(session.listener_sockets.values())
+        session.listener_sockets.clear()
+        for channel in channels:
+            if channel.sender_task:
+                channel.sender_task.cancel()
+        if channels:
+            await asyncio.gather(
+                *(channel.sender_task for channel in channels if channel.sender_task),
+                return_exceptions=True,
+            )
+            for channel in channels:
+                with suppress(RuntimeError):
+                    await channel.websocket.close(code=1000)
 
     async def _send_response_create(
         self,
@@ -958,6 +1030,7 @@ class RealtimeSessionHub:
                 active_session = self._sessions.get(task_id)
                 if active_session is not None:
                     await self._stop_waiting_keepalive(active_session)
+                    await self._close_session_listeners(active_session)
             async with self._lock:
                 active = self._sessions.get(task_id)
                 if active is not None and active.realtime is realtime:
@@ -978,6 +1051,7 @@ class RealtimeSessionHub:
             event = message.get("event")
             if event == "media":
                 if not session.secure_mode and not session.secure_handoff_field:
+                    self._fan_out_listener_audio(session, "representative", message["media"]["payload"])
                     await session.realtime.send(
                         json.dumps({"type": "input_audio_buffer.append", "audio": message["media"]["payload"]})
                     )
@@ -1008,13 +1082,19 @@ class RealtimeSessionHub:
         response_id: str,
     ) -> None:
         chunks = session.response_audio_buffers.pop(response_id, [])
-        if session.discard_response_audio or response_id in session.suppressed_response_ids:
+        if (
+            session.secure_mode
+            or session.typed_takeover
+            or session.discard_response_audio
+            or response_id in session.suppressed_response_ids
+        ):
             chunks.clear()
             return
         for payload in chunks:
             await session.twilio.send_json(
                 {"event": "media", "streamSid": session.stream_sid, "media": {"payload": payload}}
             )
+            self._fan_out_listener_audio(session, "relay", payload)
         chunks.clear()
 
     async def _openai_to_twilio(self, session: ActiveRealtimeSession, task_id: str) -> None:

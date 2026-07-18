@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import ctypes
+from datetime import datetime
 import re
 import sys
 import time
@@ -24,7 +25,50 @@ FAKE_SENSITIVE_VALUES = {
     "expiration": "1234",
     "cvv": "123",
     "full_ssn": "000000000",
+    "ssn_last_four": "0000",
+    "date_of_birth": "20000101",
 }
+
+
+def sensitive_input_spec(field: str) -> dict[str, str | int]:
+    return {
+        "card_number": {
+            "input_kind": "masked_numeric",
+            "placeholder": "13–19 digits",
+            "hint": "Card number · 13–19 digits · hidden as you type",
+            "max_length": 19,
+        },
+        "expiration": {
+            "input_kind": "month",
+            "placeholder": "MM / YYYY",
+            "hint": "Expiration month and year",
+            "max_length": 6,
+        },
+        "cvv": {
+            "input_kind": "masked_numeric",
+            "placeholder": "3 or 4 digits",
+            "hint": "Security code · 3 or 4 digits · hidden as you type",
+            "max_length": 4,
+        },
+        "full_ssn": {
+            "input_kind": "masked_numeric",
+            "placeholder": "•••-••-••••",
+            "hint": "Format: ###-##-#### · 9 digits · hidden as you type",
+            "max_length": 9,
+        },
+        "ssn_last_four": {
+            "input_kind": "masked_numeric",
+            "placeholder": "••••",
+            "hint": "Last four digits of Social Security number · hidden as you type",
+            "max_length": 4,
+        },
+        "date_of_birth": {
+            "input_kind": "date",
+            "placeholder": "Choose date of birth",
+            "hint": "Use the date picker; the value stays local.",
+            "max_length": 10,
+        },
+    }.get(field, {"input_kind": "text", "placeholder": "Type a non-sensitive response", "hint": ""})
 
 
 def is_allowed_fake_value(field: str, value: str) -> bool:
@@ -36,6 +80,8 @@ def is_valid_sensitive_value(field: str, value: str) -> bool:
     if field == "card_number":
         return 13 <= len(digits) <= 19
     if field == "expiration":
+        if re.fullmatch(r"\d{4}-\d{2}", value.strip()):
+            return 1 <= int(value.strip()[-2:]) <= 12
         if len(digits) not in {4, 6}:
             return False
         month = int(digits[:2])
@@ -44,6 +90,16 @@ def is_valid_sensitive_value(field: str, value: str) -> bool:
         return len(digits) in {3, 4}
     if field == "full_ssn":
         return len(digits) == 9
+    if field == "ssn_last_four":
+        return len(digits) == 4
+    if field == "date_of_birth":
+        for pattern in ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y"):
+            try:
+                datetime.strptime(value.strip(), pattern)
+                return True
+            except ValueError:
+                pass
+        return False
     return False
 
 
@@ -57,10 +113,20 @@ def looks_like_protected_value(value: str) -> bool:
 
 
 def spoken_sensitive_value(field: str, value: str) -> str:
+    if field == "date_of_birth":
+        for pattern in ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y"):
+            try:
+                parsed = datetime.strptime(value.strip(), pattern)
+                return f"{parsed.strftime('%B')} {parsed.day}, {parsed.year}"
+            except ValueError:
+                pass
+        raise ValueError("Enter a valid date of birth.")
     digits = "".join(character for character in value if character.isdigit())
     if not digits:
         raise ValueError("Enter a valid fake value.")
     if field == "expiration" and len(digits) >= 4:
+        if re.fullmatch(r"\d{4}-\d{2}", value.strip()):
+            digits = f"{value.strip()[-2:]}{value.strip()[:4]}"
         return f"{' '.join(digits[:2])}, {' '.join(digits[2:])}"
     return " ".join(digits)
 

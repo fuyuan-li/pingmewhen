@@ -1,6 +1,8 @@
 import asyncio
 import json
 
+from fastapi import WebSocketDisconnect
+
 from relay_agent.credentials import RelayCredentials
 from relay_agent.event_log import EventLog
 from relay_agent.gatekeeper import AuthorityVeto, ContextUpdate, GatekeeperVerdict, PrivateMessageRoute
@@ -158,7 +160,8 @@ def test_transcripts_are_classified():
     assert requested_sensitive_field("May I have the card number?") == "card_number"
     assert requested_sensitive_field("What is the CVV?") == "cvv"
     assert requested_sensitive_field("May I repeat that number back to verify it?") == "verification_request"
-    assert requested_sensitive_field("What are the last four digits of your SSN?") is None
+    assert requested_sensitive_field("What are the last four digits of your SSN?") == "ssn_last_four"
+    assert requested_sensitive_field("What is your date of birth?") == "date_of_birth"
 
 
 def test_takeover_continuity_redacts_identifiers_and_secrets():
@@ -205,6 +208,38 @@ class FakeTwilio:
 
     async def receive_json(self):
         return self.incoming.pop(0)
+
+
+class FakeListener:
+    def __init__(self):
+        self.accepted = False
+        self.sent = []
+        self.close_codes = []
+
+    async def accept(self):
+        self.accepted = True
+
+    async def send_json(self, value):
+        self.sent.append(value)
+
+    async def close(self, code):
+        self.close_codes.append(code)
+
+
+class SlowListener(FakeListener):
+    def __init__(self):
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def send_json(self, value):
+        self.started.set()
+        await self.release.wait()
+
+
+class DisconnectedListener(FakeListener):
+    async def send_json(self, value):
+        raise WebSocketDisconnect(code=1006)
 
 
 class FakeConnector:
@@ -1005,6 +1040,140 @@ def test_secure_mode_stops_audio_in_both_directions_and_suppresses_transcripts(t
     assert not log_path.exists() or "4242" not in log_path.read_text()
 
 
+def test_listener_attaches_detaches_and_receives_both_call_audio_directions(tmp_path):
+    realtime = FakeRealtime()
+    twilio = FakeTwilio(
+        [
+            {"event": "media", "media": {"payload": "representative-pcmu"}},
+            {"event": "stop"},
+        ]
+    )
+    listener = FakeListener()
+    session = ActiveRealtimeSession(realtime, twilio, "MZ1", task_id="task-1")
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        await hub.attach_listener("task-1", listener)
+        await hub._twilio_to_openai(session)
+        session.response_audio_buffers["resp-1"] = ["relay-pcmu"]
+        await hub._forward_buffered_response_audio(session, "resp-1")
+        await asyncio.sleep(0)
+        await hub.detach_listener("task-1", listener)
+
+    asyncio.run(run())
+
+    assert listener.accepted is True
+    assert listener.sent == [
+        {"source": "representative", "payload": "representative-pcmu"},
+        {"source": "relay", "payload": "relay-pcmu"},
+    ]
+    assert session.listener_sockets == {}
+    assert realtime.sent == [{"type": "input_audio_buffer.append", "audio": "representative-pcmu"}]
+    assert twilio.sent == [{"event": "media", "streamSid": "MZ1", "media": {"payload": "relay-pcmu"}}]
+
+
+def test_secure_mode_suppresses_listener_audio_in_both_directions(tmp_path):
+    realtime = FakeRealtime([{"type": "response.output_audio.delta", "delta": "relay-secret"}])
+    twilio = FakeTwilio(
+        [
+            {"event": "media", "media": {"payload": "representative-secret"}},
+            {"event": "stop"},
+        ]
+    )
+    listener = FakeListener()
+    session = ActiveRealtimeSession(realtime, twilio, "MZ1", task_id="task-1", secure_mode=True)
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        await hub.attach_listener("task-1", listener)
+        session.response_audio_buffers["resp-secure"] = ["buffered-relay-secret"]
+        await asyncio.gather(hub._twilio_to_openai(session), hub._openai_to_twilio(session, "task-1"))
+        await hub._forward_buffered_response_audio(session, "resp-secure")
+        await asyncio.sleep(0)
+        await hub.detach_listener("task-1", listener)
+
+    asyncio.run(run())
+
+    assert listener.sent == []
+    assert realtime.sent == []
+    assert twilio.sent == []
+
+
+def test_slow_listener_drops_frames_without_blocking_representative_audio(tmp_path):
+    realtime = FakeRealtime()
+    frames = [
+        {"event": "media", "media": {"payload": f"frame-{index}"}}
+        for index in range(160)
+    ]
+    twilio = FakeTwilio([*frames, {"event": "stop"}])
+    listener = SlowListener()
+    session = ActiveRealtimeSession(realtime, twilio, "MZ1", task_id="task-1")
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        await hub.attach_listener("task-1", listener)
+        await asyncio.wait_for(hub._twilio_to_openai(session), timeout=0.2)
+        await asyncio.sleep(0)
+        channel = session.listener_sockets[id(listener)]
+        queued = list(channel.queue._queue)
+        await hub.detach_listener("task-1", listener)
+        return queued
+
+    queued = asyncio.run(run())
+
+    assert len(realtime.sent) == 160
+    assert len(queued) <= 100
+    assert queued[-1] == {"source": "representative", "payload": "frame-159"}
+
+
+def test_disconnected_listener_is_removed_without_interrupting_call_audio(tmp_path):
+    realtime = FakeRealtime()
+    twilio = FakeTwilio(
+        [
+            {"event": "media", "media": {"payload": "representative-pcmu"}},
+            {"event": "stop"},
+        ]
+    )
+    listener = DisconnectedListener()
+    session = ActiveRealtimeSession(realtime, twilio, "MZ1", task_id="task-1")
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        await hub.attach_listener("task-1", listener)
+        await hub._twilio_to_openai(session)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+
+    assert realtime.sent == [{"type": "input_audio_buffer.append", "audio": "representative-pcmu"}]
+    assert session.listener_sockets == {}
+
+
 def test_general_typed_takeover_keeps_transcribing_but_pauses_speaker_and_gatekeeper(tmp_path):
     class NeverGatekeeper:
         async def classify(self, request):
@@ -1209,7 +1378,7 @@ def test_sensitive_handoff_stops_new_representative_audio_before_full_takeover(t
     assert realtime.sent == []
 
 
-def test_last_four_ssn_question_remains_in_normal_transcript_flow(tmp_path):
+def test_last_four_ssn_question_enters_protected_handoff(tmp_path):
     requested = []
     transcripts = []
     realtime = FakeRealtime(
@@ -1232,9 +1401,10 @@ def test_last_four_ssn_question_remains_in_normal_transcript_flow(tmp_path):
     asyncio.run(hub._openai_to_twilio(session, "task-1"))
 
     assert session.secure_mode is False
-    assert session.expected_field is None
+    assert session.expected_field == "ssn_last_four"
+    assert session.secure_handoff_field == "ssn_last_four"
     assert requested == []
-    assert transcripts == [("task-1", "representative", "What are the last four digits of your SSN?")]
+    assert transcripts == []
     assert [event["type"] for event in realtime.sent] == ["response.create"]
 
 

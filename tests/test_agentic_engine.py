@@ -159,6 +159,11 @@ def test_agentic_call_state_and_transcript_return_to_private_review(tmp_path):
     assert task["phase"] == "planning"
     assert task["stage"] == "post_call_review"
     assert any(event.get("speaker") == "representative" for event in task["events"])
+    summary = next(event for event in task["events"] if event["type"] == "call_summary")
+    assert summary["target"] == "Example Provider"
+    assert summary["outcome"] == "Call completed"
+    assert summary["highlights"] == ["I am comfortable continuing."]
+    assert task["prompt"]["options"] == []
 
 
 def test_live_user_input_request_populates_prompt_and_answer_resumes_call(tmp_path):
@@ -183,12 +188,12 @@ def test_live_user_input_request_populates_prompt_and_answer_resumes_call(tmp_pa
 
     assert waiting["call_state"] == "WAITING_FOR_USER"
     assert waiting["stage"] == "waiting_for_user"
-    assert waiting["prompt"] == {
-        "kind": "text_reply",
-        "question": "What is your apartment number?",
-        "options": [],
-        "blocking": True,
-    }
+    assert waiting["prompt"]["kind"] == "text_reply"
+    assert waiting["prompt"]["question"] == "What is your apartment number?"
+    assert waiting["prompt"]["options"] == []
+    assert waiting["prompt"]["blocking"] is True
+    assert waiting["prompt"]["input_kind"] == "text"
+    assert waiting["prompt"]["response_action"] == "instruction"
 
     resumed = engine.act(task["id"], "instruction", "Apartment 4B")
 
@@ -698,6 +703,29 @@ def test_sensitive_request_requires_typed_takeover_without_exposing_a_value(tmp_
     assert task["secure_mode"] is False
     assert task["takeover_active"] is False
     assert "card_number" in task["secure_fields_completed"]
+
+
+def test_sensitive_ssn_and_date_of_birth_prompts_use_protected_input_metadata(tmp_path):
+    engine = AgenticTaskEngine(
+        EventLog(tmp_path / "events.jsonl"),
+        FakePlanner(),
+        SQLiteTaskStore(tmp_path / "relay.db"),
+        lambda _: "",
+    )
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    engine.begin_call(task["id"], pending["index"], "CA123")
+
+    ssn = engine.request_secure_field(task["id"], "ssn_last_four")
+    assert ssn["prompt"]["input_kind"] == "masked_numeric"
+    assert ssn["prompt"]["max_length"] == 4
+
+    engine.begin_typed_takeover(task["id"], sensitive=True)
+    engine.resume_from_takeover(task["id"])
+    dob = engine.request_secure_field(task["id"], "date_of_birth")
+    assert dob["prompt"]["input_kind"] == "date"
+    assert dob["prompt"]["field"] == "date_of_birth"
 
 
 def test_human_takeover_can_explicitly_resume_the_active_call(tmp_path):
