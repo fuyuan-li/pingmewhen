@@ -28,7 +28,7 @@ Exit: `uv run relay` and `uv run relay demo` open a local application; tests pas
 - [x] Connect plan generation to bounded hosted web search for sourced official contact details.
 - [x] Add local first-run BYOK onboarding for OpenAI and Twilio credentials.
 - [x] Persist credentials in an owner-only local file with environment-variable precedence.
-- [x] Start `pycloudflared` after plan approval, verify the public health endpoint, reuse it across the task call queue, and provide visible retryable readiness status.
+- [x] Start `pycloudflared` in the background when a phone plan enters review, await the same 90-second configurable health-check budget at approval, reuse it across the task call queue, and provide visible retryable readiness status.
 - [x] Validate Twilio voice/status webhooks with the official SDK helper.
 - [x] Connect approved, sourced E.164 phone-call actions to the telephony control plane.
 

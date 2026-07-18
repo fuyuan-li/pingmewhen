@@ -17,7 +17,7 @@ Local FastAPI service ------ local JSONL events/transcripts
    |          +-- context and approvals
    |          +-- call plan and outcomes
    |
-   +------ session-long pycloudflared tunnel --- Twilio webhooks
+   +------ task-scoped pycloudflared tunnel ---- Twilio webhooks
    |                                                |
    |                                                +-- bidirectional PCMU Media Stream
    |
@@ -33,7 +33,7 @@ The local service owns user state, task state, presentation, approvals, durable 
 
 Standard mode resolves `OPENAI_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` from the environment first, then from an owner-only local credential file. The dashboard presents first-run setup only for missing values. The browser sends setup values only to the localhost service; it never calls OpenAI or Twilio directly.
 
-The production HTTPS tunnel is task-scoped and approval-triggered. Relay does not start `pycloudflared` with the localhost dashboard. After the user approves a plan with executable phone actions, Relay shows `Establishing a secure connection…`, obtains one `trycloudflare.com` URL, and verifies that the public URL reaches the local `/api/health` endpoint before placing any call. The approved task retains one lease across its queued calls while each active call holds its own lease; terminal callbacks release call leases, and the task lease is released when the queue completes or fails. A readiness failure places no call and returns a retry-or-revise prompt. Twilio console webhook configuration, a user-supplied fixed URL, and `RELAY_PUBLIC_BASE_URL` are not required.
+The production HTTPS tunnel is task-scoped and plan-review-triggered. Relay does not start `pycloudflared` with the localhost dashboard. When a plan containing phone actions is first shown for review, Relay begins one background tunnel preparation so propagation overlaps the user's review time. Approval awaits that same preparation rather than resetting its budget. Relay shows `Establishing a secure connection…` at the dial boundary and verifies that the public URL reaches the local `/api/health` endpoint before placing any call. The readiness budget defaults to 90 seconds and is configurable with `RELAY_TUNNEL_READINESS_TIMEOUT`. The approved task retains one lease across its queued calls while each active call holds its own lease; terminal callbacks release call leases, and the task lease is released when the queue completes or fails. A readiness failure places no call and returns a retry-or-revise prompt. Twilio console webhook configuration, a user-supplied fixed URL, and `RELAY_PUBLIC_BASE_URL` are not required.
 
 Every approved call receives separate random capability tokens for its voice, status, and media endpoints. Voice and status capabilities travel in callback query strings; the media capability travels in the WebSocket path because Twilio Media Streams do not support query strings. Relay binds each capability to the approved task, queue action, Twilio Account SID, and Call SID, and revokes all three at terminal call status. Missing or incorrect capabilities are rejected. When `X-Twilio-Signature` is present, Relay also validates it with the Twilio SDK, exact public URL, submitted form parameters, and local Auth Token; an invalid provided signature is rejected. A missing signature is accepted only when the scoped capability and call identity match. Capability tokens are redacted from event and server access logs.
 

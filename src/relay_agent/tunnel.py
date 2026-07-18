@@ -13,6 +13,20 @@ class TunnelError(RuntimeError):
     pass
 
 
+DEFAULT_TUNNEL_READINESS_TIMEOUT = 90.0
+
+
+def tunnel_readiness_timeout_from_environment() -> float:
+    configured = os.environ.get("RELAY_TUNNEL_READINESS_TIMEOUT", "").strip()
+    if not configured:
+        return DEFAULT_TUNNEL_READINESS_TIMEOUT
+    try:
+        timeout = float(configured)
+    except ValueError:
+        return DEFAULT_TUNNEL_READINESS_TIMEOUT
+    return timeout if timeout > 0 else DEFAULT_TUNNEL_READINESS_TIMEOUT
+
+
 def launch_cloudflare(port: int) -> Any:
     from pycloudflared import try_cloudflare
 
@@ -82,19 +96,21 @@ class TunnelManager:
     def wait_until_ready(
         self,
         checker: Callable[[str], bool] | None = None,
-        attempts: int = 20,
+        timeout: float = DEFAULT_TUNNEL_READINESS_TIMEOUT,
         interval: float = 0.5,
     ) -> str:
         public_url = self._public_url
         if not public_url:
             raise TunnelError("The local call tunnel is not active.")
         probe = checker or public_health_ready
-        total_attempts = max(1, attempts)
-        for attempt in range(total_attempts):
+        deadline = time.monotonic() + max(0, timeout)
+        while True:
             if probe(public_url):
                 return public_url
-            if attempt + 1 < total_attempts:
-                time.sleep(max(0, interval))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(max(0.01, interval), remaining))
         raise TunnelError("Relay's secure connection did not become ready in time.")
 
     def release(self) -> None:

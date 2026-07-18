@@ -1,6 +1,7 @@
 import json
 import logging
 from types import SimpleNamespace
+import time
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -20,7 +21,11 @@ from relay_agent.credentials import CredentialStore, RelayCredentials
 from relay_agent.planner import PlanAction, PlanningTurn
 from relay_agent.realtime_bridge import RealtimeSessionHub
 from relay_agent.telephony import TelephonyService
-from relay_agent.tunnel import TunnelManager
+from relay_agent.tunnel import (
+    DEFAULT_TUNNEL_READINESS_TIMEOUT,
+    TunnelManager,
+    tunnel_readiness_timeout_from_environment,
+)
 
 
 class FakeCalls:
@@ -101,7 +106,7 @@ def test_tunnel_url_is_used_for_per_call_webhooks(tmp_path):
     assert terminations == [8765]
 
 
-def test_production_runtime_starts_tunnel_only_after_approval_and_checks_health(monkeypatch, tmp_path):
+def test_production_runtime_starts_tunnel_when_phone_plan_enters_review(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     launches = []
@@ -126,6 +131,14 @@ def test_production_runtime_starts_tunnel_only_after_approval_and_checks_health(
         assert launches == []
         assert runtime["tunnel_active"] is False
         task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
+        for _ in range(100):
+            if health_checks:
+                break
+            time.sleep(0.01)
+
+        assert task["stage"] == "plan_review"
+        assert launches == [8765]
+        assert health_checks == ["https://warm.trycloudflare.com"]
         approved = client.post(
             f"/api/tasks/{task['id']}/actions",
             json={"action": "answer", "value": "approve"},
@@ -133,7 +146,6 @@ def test_production_runtime_starts_tunnel_only_after_approval_and_checks_health(
 
         assert approved.status_code == 200
         assert launches == [8765]
-        assert health_checks == ["https://warm.trycloudflare.com"]
         assert tunnel.active is True
         assert terminations == []
 
@@ -192,7 +204,7 @@ def test_task_tunnel_lease_reuses_one_ready_tunnel_across_calls(tmp_path):
     )
 
     tunnel.acquire()
-    tunnel.wait_until_ready(lambda url: url == "https://ready.trycloudflare.com", attempts=1, interval=0)
+    tunnel.wait_until_ready(lambda url: url == "https://ready.trycloudflare.com", timeout=0, interval=0)
     service.place_call("+12025550199", "task-1", 0)
     tunnel.release()
     assert tunnel.active is True
@@ -224,7 +236,7 @@ def test_failed_tunnel_readiness_is_retryable_and_places_no_call_until_ready(mon
             tunnel_manager=tunnel,
             twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
             tunnel_readiness_checker=lambda url: ready["value"],
-            tunnel_readiness_attempts=1,
+            tunnel_readiness_timeout=0,
             tunnel_readiness_interval=0,
         )
     )
@@ -249,6 +261,18 @@ def test_failed_tunnel_readiness_is_retryable_and_places_no_call_until_ready(mon
     assert retried["phase"] == "calling"
     assert calls.arguments["to"] == "+12025550199"
     assert launches == [8765, 8765]
+
+
+def test_tunnel_readiness_timeout_defaults_to_ninety_seconds_and_is_configurable(monkeypatch):
+    monkeypatch.delenv("RELAY_TUNNEL_READINESS_TIMEOUT", raising=False)
+    assert DEFAULT_TUNNEL_READINESS_TIMEOUT == 90
+    assert tunnel_readiness_timeout_from_environment() == 90
+
+    monkeypatch.setenv("RELAY_TUNNEL_READINESS_TIMEOUT", "135.5")
+    assert tunnel_readiness_timeout_from_environment() == 135.5
+
+    monkeypatch.setenv("RELAY_TUNNEL_READINESS_TIMEOUT", "invalid")
+    assert tunnel_readiness_timeout_from_environment() == 90
 
 
 def test_task_identity_is_attached_to_per_call_webhooks(tmp_path):

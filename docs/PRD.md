@@ -147,7 +147,7 @@ Relay begins calls with a concise disclosure such as:
 
 ### Telephony security
 
-- Start the local HTTPS tunnel only when an approved call is about to be placed.
+- Start the local HTTPS tunnel when a phone-call plan is first shown for review, then require public health readiness before an approved call is placed.
 - Supply voice and status webhook URLs dynamically on each Twilio call creation request.
 - Validate every inbound Twilio webhook with Twilio's official request validator and the user's Auth Token.
 - Stop the tunnel after the last active call or when Relay exits.
