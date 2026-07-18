@@ -113,6 +113,23 @@ def test_gatekeeper_routes_private_meta_without_speaker_update_and_answers_with_
     assert responses.calls[0]["text_format"] is PrivateMessageRoute
 
 
+def test_private_message_prompt_presumes_terse_reply_answers_pending_question():
+    request = PrivateMessageRequest(
+        text="7A",
+        context={},
+        context_updates=(),
+        waiting_for_user=True,
+        pending_question="What is the apartment number?",
+    )
+
+    instructions = request.messages()[0]["content"]
+
+    assert "strongly presume" in instructions
+    assert "Short or terse replies such as '7A'" in instructions
+    assert "Brevity alone is never a reason" in instructions
+    assert "Reserve private_meta for genuinely off-topic or meta conversation" in instructions
+
+
 def test_gatekeeper_repairs_answer_that_omits_speaker_update():
     class IncompleteRoutingResponses:
         def parse(self, **arguments):
