@@ -74,6 +74,14 @@ def test_realtime_session_uses_selected_transcription_model():
     assert update["session"]["audio"]["input"]["transcription"]["model"] == "gpt-4o-transcribe"
 
 
+def test_realtime_session_defensively_marks_opening_as_already_completed():
+    instructions = realtime_session_update(sample_context(), already_opened=True)["session"]["instructions"]
+
+    assert "already happened earlier in this call" in instructions
+    assert "Never repeat the disclosure" in instructions
+    assert "OPENING (say once" not in instructions
+
+
 def test_transcripts_are_classified():
     assert transcript_from_realtime_event(
         {"type": "response.output_audio_transcript.done", "transcript": "Hello"}
@@ -244,13 +252,58 @@ def test_live_instruction_is_reformulated_into_session_context_before_response(t
 
     delivery = asyncio.run(run())
     assert delivery.disposition == "call_instruction"
-    assert [event["type"] for event in realtime.sent] == ["session.update", "response.create"]
-    assert not any(event.get("type") == "conversation.item.create" for event in realtime.sent)
-    instructions = realtime.sent[0]["session"]["instructions"]
-    assert "Ask about a discount." in instructions
+    assert [event["type"] for event in realtime.sent] == ["conversation.item.create", "response.create"]
+    assert not any(event.get("type") == "session.update" for event in realtime.sent)
+    context_text = realtime.sent[0]["item"]["content"][0]["text"]
+    assert "Ask about a discount." in context_text
+    assert "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND" in context_text
     response_instruction = realtime.sent[-1]["response"]["instructions"]
-    assert "CONFIRMED PRIVATE CONTEXT UPDATES" in response_instruction
+    assert "CONFIRMED CONTEXT UPDATE conversation item" in response_instruction
     assert "acknowledge the represented person aloud" in response_instruction.lower()
+
+
+def test_context_update_requires_matching_conversation_item_ack_before_response(tmp_path):
+    realtime = FakeRealtime()
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        session_update_timeout=0.01,
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        try:
+            await hub.inject("task-1", "Ask about a discount.")
+        except RuntimeError as error:
+            return str(error)
+        raise AssertionError("Missing conversation-item acknowledgment should fail.")
+
+    error = asyncio.run(run())
+
+    assert "did not acknowledge the confirmed context update" in error
+    assert [event["type"] for event in realtime.sent] == ["conversation.item.create"]
+    assert session.context_updates == []
+
+
+def test_matching_conversation_item_added_event_acknowledges_dynamic_context(tmp_path):
+    realtime = FakeRealtime(
+        [{"type": "conversation.item.added", "item": {"id": "relay_context_known"}}]
+    )
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1")
+    session.pending_context_item_id = "relay_context_known"
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+    )
+
+    asyncio.run(hub._openai_to_twilio(session, "task-1"))
+
+    assert session.context_item_ack.is_set()
 
 
 def test_meta_private_question_stays_in_private_workspace_and_never_reaches_speaker(tmp_path):
@@ -310,6 +363,31 @@ def test_speaker_waits_for_answerable_gatekeeper_verdict_before_responding(tmp_p
     asyncio.run(run())
 
     assert [event["type"] for event in realtime.sent] == ["response.create"]
+
+
+def test_representative_turn_does_not_overlap_opening_response(tmp_path):
+    gatekeeper = SequenceGatekeeper([GatekeeperVerdict(verdict="answerable")])
+    realtime = FakeRealtime([{"type": "response.done"}])
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    session.response_pending = True
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        gatekeeper=gatekeeper,
+    )
+
+    async def run():
+        await hub._gate_representative_turn(session, "task-1", "Hello")
+        assert realtime.sent == []
+        assert session.deferred_representative_turns == ["Hello"]
+        await hub._openai_to_twilio(session, "task-1")
+
+    asyncio.run(run())
+
+    assert realtime.sent == [{"type": "response.create"}]
+    assert gatekeeper.requests[0].latest_utterance == "Hello"
 
 
 def test_trivial_acknowledgement_bypasses_gatekeeper_without_private_prompt(tmp_path):
@@ -431,6 +509,8 @@ def test_waiting_for_user_repeats_short_keepalive_after_hold_line(tmp_path):
     async def run():
         await hub._gate_representative_turn(session, "task-1", "What is the apartment number?")
         assert len(realtime.sent) == 1
+        session.response_pending = False
+        session.response_complete.set()
         session.hold_response_active = False
         session.hold_complete.set()
         while len(realtime.sent) < 2:
@@ -480,11 +560,17 @@ def test_unanswerable_gatekeeper_turn_waits_then_accumulates_user_updates(tmp_pa
 
     async def run():
         await hub._gate_representative_turn(session, "task-1", "What is the apartment number?")
+        session.response_pending = False
+        session.response_complete.set()
         session.hold_response_active = False
         session.hold_complete.set()
         hub._sessions["task-1"] = session
         assert (await hub.inject("task-1", "Apartment 4B")).resumed_call is True
+        session.response_pending = False
+        session.response_complete.set()
         await hub._gate_representative_turn(session, "task-1", "What installation date works?")
+        session.response_pending = False
+        session.response_complete.set()
         session.hold_response_active = False
         session.hold_complete.set()
         assert (await hub.inject("task-1", "Friday afternoon")).resumed_call is True
@@ -501,10 +587,10 @@ def test_unanswerable_gatekeeper_turn_waits_then_accumulates_user_updates(tmp_pa
     assert gatekeeper.requests[1].context_updates[0]["value"] == "Apartment 4B"
     assert [event["type"] for event in realtime.sent] == [
         "response.create",
-        "session.update",
+        "conversation.item.create",
         "response.create",
         "response.create",
-        "session.update",
+        "conversation.item.create",
         "response.create",
     ]
 
@@ -536,12 +622,12 @@ def test_answering_gatekeeper_question_resumes_with_structured_context_only(tmp_
     assert session.pending_question == ""
     assert session.context_updates[0]["value"] == "Apartment 4B"
     assert [event["type"] for event in realtime.sent] == [
-        "session.update",
+        "conversation.item.create",
         "response.create",
     ]
-    assert "Apartment 4B" in realtime.sent[0]["session"]["instructions"]
+    assert "Apartment 4B" in realtime.sent[0]["item"]["content"][0]["text"]
     assert "Apartment 4B" not in json.dumps(realtime.sent[1])
-    assert not any(event.get("type") == "conversation.item.create" for event in realtime.sent)
+    assert not any(event.get("type") == "session.update" for event in realtime.sent)
 
 
 def test_secure_mode_stops_audio_in_both_directions_and_suppresses_transcripts(tmp_path):
@@ -740,6 +826,7 @@ def test_bridge_twilio_stop_cancels_realtime_and_cleans_up_session(tmp_path):
     assert connected == ["task-1"]
     assert connector.calls[0][0].endswith("model=gpt-realtime-2.1")
     assert realtime.sent[0]["session"]["audio"]["input"]["transcription"]["model"] == "gpt-4o-transcribe"
+    assert [event["type"] for event in realtime.sent].count("session.update") == 1
     assert realtime.cancelled is True
     assert "task-1" not in hub._sessions
     assert [event["event"] for event in events] == ["realtime.connected", "realtime.disconnected"]
@@ -754,7 +841,8 @@ def test_bridge_debug_trace_captures_exact_speaker_and_gatekeeper_inputs(monkeyp
             {
                 "type": "conversation.item.input_audio_transcription.completed",
                 "transcript": "What is the installation address?",
-            }
+            },
+            {"type": "response.done"},
         ]
     )
     twilio = BlockingTwilio([start_message()])

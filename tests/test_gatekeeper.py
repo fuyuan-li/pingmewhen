@@ -106,9 +106,9 @@ def test_gatekeeper_routes_private_meta_without_speaker_update_and_answers_with_
     assert meta.speaker_update is None
     assert answer.speaker_update == ContextUpdate(
         kind="fact",
-        key="pending_question_answer",
+        key="apartment_number",
         value="It is 4B.",
-        summary="The represented person supplied this answer to the pending question: It is 4B.",
+        summary="The apartment number is 4B.",
     )
     assert responses.calls[0]["text_format"] is PrivateMessageRoute
 
@@ -159,10 +159,26 @@ def test_gatekeeper_repairs_answer_that_omits_speaker_update():
     assert route.private_reply == ""
     assert route.speaker_update == ContextUpdate(
         kind="fact",
-        key="pending_question_answer",
+        key="apartment_number",
         value="30C",
-        summary="The represented person supplied this answer to the pending question: 30C",
+        summary="The apartment/unit number is 30C.",
     )
+
+
+def test_private_answer_prompt_requires_question_specific_context_update():
+    request = PrivateMessageRequest(
+        text="2711",
+        context={},
+        context_updates=(),
+        waiting_for_user=True,
+        pending_question="What is the apartment number?",
+    )
+
+    instructions = request.messages()[0]["content"]
+
+    assert "stable, semantically specific key from PENDING QUESTION" in instructions
+    assert "apartment_number" in instructions
+    assert "Never use a generic key such as pending_question_answer" in instructions
 
 
 def test_gatekeeper_keeps_private_meta_isolated_when_model_returns_an_update():

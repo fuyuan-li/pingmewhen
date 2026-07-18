@@ -107,7 +107,12 @@ class ActiveRealtimeSession:
     hold_response_active: bool = False
     hold_complete: asyncio.Event = field(default_factory=asyncio.Event)
     debug_trace: CallDebugTrace | None = None
-    session_update_ack: asyncio.Event = field(default_factory=asyncio.Event)
+    context_item_ack: asyncio.Event = field(default_factory=asyncio.Event)
+    pending_context_item_id: str = ""
+    response_pending: bool = False
+    response_complete: asyncio.Event = field(default_factory=asyncio.Event)
+    response_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    deferred_representative_turns: list[str] = field(default_factory=list)
     keepalive_response_active: bool = False
     keepalive_complete: asyncio.Event = field(default_factory=asyncio.Event)
     keepalive_task: asyncio.Task | None = None
@@ -125,6 +130,7 @@ def realtime_session_update(
     context: dict[str, Any],
     transcription_model: str = "gpt-4o-mini-transcribe",
     context_updates: list[dict[str, Any]] | None = None,
+    already_opened: bool = False,
 ) -> dict[str, Any]:
     action = context["action"]
     caller_name = str(context.get("caller_name", "")).strip() or "the user"
@@ -134,6 +140,20 @@ def realtime_session_update(
     document_context = context.get("document_context", "")
     prior_calls = context.get("prior_call_transcript", "")
     confirmed_updates = json.dumps(context_updates or context.get("context_updates", []), ensure_ascii=False)
+    opening_guidance = (
+        "OPENING STATUS: The one-time disclosure and introduction already happened earlier in this call. Never "
+        "repeat the disclosure, either identity fact, your introduction, or the full purpose unless the "
+        "representative explicitly asks. Never deny being an AI if asked.\n\n"
+        if already_opened
+        else (
+            "OPENING (say once, at the very start of the call, then never again): say: 'Hi, Relay here — I'm an AI "
+            f"assistant on behalf of {caller_name}.' Then state the immediate reason for the call briefly. Do not "
+            "add another disclosure clause. Keep it warm and low-key. Do not ask whether the "
+            "representative is comfortable continuing. After this opening, never repeat the disclosure, either identity "
+            "fact above, your introduction, or the full purpose unless the representative explicitly asks. Never deny "
+            "being an AI if asked.\n\n"
+        )
+    )
     instructions = (
         "IDENTITY — read this first, keep these two facts separate for the whole call:\n"
         f"- You represent (you are calling ON BEHALF OF): {caller_name_literal}\n"
@@ -146,12 +166,7 @@ def realtime_session_update(
         "called. Private text comes from the person you represent; it is an answer or instruction for you, not "
         "speech from the representative. Never acknowledge or answer that private person aloud as though they were "
         "on the phone. Reformulate their information naturally for the representative.\n\n"
-        "OPENING (say once, at the very start of the call, then never again): say: 'Hi, Relay here — I'm an AI "
-        f"assistant on behalf of {caller_name}.' Then state the immediate reason for the call briefly. Do not "
-        "add another disclosure clause. Keep it warm and low-key. Do not ask whether the "
-        "representative is comfortable continuing. After this opening, never repeat the disclosure, either identity "
-        "fact above, your introduction, or the full purpose unless the representative explicitly asks. Never deny "
-        "being an AI if asked.\n\n"
+        f"{opening_guidance}"
         "GOAL: Pursue only this approved purpose: "
         f"{action['purpose']}. The overall user goal is: {context['goal']}. Continue each turn naturally from the "
         "immediately preceding conversation.\n\n"
@@ -265,6 +280,30 @@ class RealtimeSessionHub:
         self._sessions: dict[str, ActiveRealtimeSession] = {}
         self._lock = asyncio.Lock()
 
+    async def _send_response_create(
+        self,
+        session: ActiveRealtimeSession,
+        request: dict[str, Any] | None = None,
+        wait_for_available: bool = False,
+    ) -> bool:
+        request = request or {"type": "response.create"}
+        while True:
+            async with session.response_lock:
+                if not session.response_pending:
+                    session.response_pending = True
+                    session.response_complete.clear()
+                    try:
+                        await session.realtime.send(json.dumps(request))
+                    except Exception:
+                        session.response_pending = False
+                        session.response_complete.set()
+                        raise
+                    return True
+                completion = session.response_complete
+            if not wait_for_available:
+                return False
+            await completion.wait()
+
     async def inject(self, task_id: str, text: str) -> PrivateMessageDelivery | None:
         async with self._lock:
             session = self._sessions.get(task_id)
@@ -309,31 +348,50 @@ class RealtimeSessionHub:
             raise RuntimeError("Gatekeeper did not provide a Speaker update.")
         update_record = {"id": uuid4().hex, **update}
         session.context_updates.append(update_record)
-        refreshed_context = realtime_session_update(
-            session.context,
-            self._transcription_model(),
-            session.context_updates,
-        )
-        session.session_update_ack.clear()
-        await session.realtime.send(json.dumps(refreshed_context))
+        item_id = f"relay_context_{uuid4().hex}"
+        context_item = {
+            "type": "conversation.item.create",
+            "item": {
+                "id": item_id,
+                "type": "message",
+                "role": "system",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": (
+                            "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND\n"
+                            f"Key: {update_record['key']}\n"
+                            f"Value: {update_record['value']}\n"
+                            f"Meaning: {update_record['summary']}\n"
+                            "This is information from the person you represent, not speech from the representative."
+                        ),
+                    }
+                ],
+            },
+        }
+        session.pending_context_item_id = item_id
+        session.context_item_ack.clear()
+        await session.realtime.send(json.dumps(context_item))
         if self._session_update_timeout > 0:
             try:
-                await asyncio.wait_for(session.session_update_ack.wait(), timeout=self._session_update_timeout)
+                await asyncio.wait_for(session.context_item_ack.wait(), timeout=self._session_update_timeout)
             except TimeoutError:
                 session.context_updates.pop()
-                raise RuntimeError("Speaker did not acknowledge the context refresh.")
+                raise RuntimeError("Speaker did not acknowledge the confirmed context update.")
+            finally:
+                session.pending_context_item_id = ""
         response_request = {
             "type": "response.create",
             "response": {
                 "instructions": (
-                    "The backend added a confirmed context update after consulting the person you represent. Read "
-                    "CONFIRMED PRIVATE CONTEXT UPDATES in your session instructions. State the relevant information "
+                    "The backend appended a confirmed context update after consulting the person you represent. Use "
+                    "the newest CONFIRMED CONTEXT UPDATE conversation item. State the relevant information "
                     "naturally to the representative and continue the phone conversation. Do not acknowledge the "
                     "private exchange with phrases such as 'Got it,' and do not address the represented person aloud."
                     if waiting_for_user
                     else (
-                        "The backend added a confirmed context update or call direction. Read CONFIRMED PRIVATE "
-                        "CONTEXT UPDATES in your session instructions and apply the newest record naturally while "
+                        "The backend appended a confirmed context update or call direction. Use the newest CONFIRMED "
+                        "CONTEXT UPDATE conversation item naturally while "
                         "speaking only to the representative. Do not mention a private channel or acknowledge the "
                         "represented person aloud."
                     )
@@ -345,7 +403,7 @@ class RealtimeSessionHub:
                 "speaker.private_injection",
                 {
                     "waiting_for_user": waiting_for_user,
-                    "session_update": refreshed_context,
+                    "context_item": context_item,
                     "response_create": response_request,
                 },
             )
@@ -353,7 +411,7 @@ class RealtimeSessionHub:
             session.waiting_for_user = False
             session.pending_question = ""
         try:
-            await session.realtime.send(json.dumps(response_request))
+            await self._send_response_create(session, response_request, wait_for_available=True)
         except Exception:
             session.waiting_for_user = waiting_for_user
             if waiting_for_user:
@@ -401,18 +459,18 @@ class RealtimeSessionHub:
         await session.realtime.send(json.dumps({"type": "input_audio_buffer.clear"}))
         session.expected_field = None
         session.secure_mode = False
-        await session.realtime.send(
-            json.dumps(
-                {
-                    "type": "response.create",
-                    "response": {
-                        "instructions": (
-                            "The user supplied one protected field through local voice. Say only: "
-                            "'Thanks. Please continue.' Do not identify or repeat the field or its value."
-                        )
-                    },
-                }
-            )
+        await self._send_response_create(
+            session,
+            {
+                "type": "response.create",
+                "response": {
+                    "instructions": (
+                        "The user supplied one protected field through local voice. Say only: "
+                        "'Thanks. Please continue.' Do not identify or repeat the field or its value."
+                    )
+                },
+            },
+            wait_for_available=True,
         )
         self._events.append("secure_mode.exited", {"task_id": task_id})
 
@@ -426,19 +484,19 @@ class RealtimeSessionHub:
         session.expected_field = None
         session.secure_mode = False
         try:
-            await session.realtime.send(
-                json.dumps(
-                    {
-                        "type": "response.create",
-                        "response": {
-                            "instructions": (
-                                "The user has handed the active call back to you after handling a protected exchange "
-                                "personally. Continue naturally from here without identifying or repeating any "
-                                "protected information."
-                            )
-                        },
-                    }
-                )
+            await self._send_response_create(
+                session,
+                {
+                    "type": "response.create",
+                    "response": {
+                        "instructions": (
+                            "The user has handed the active call back to you after handling a protected exchange "
+                            "personally. Continue naturally from here without identifying or repeating any "
+                            "protected information."
+                        )
+                    },
+                },
+                wait_for_available=True,
             )
         except Exception:
             session.expected_field = expected_field
@@ -547,7 +605,7 @@ class RealtimeSessionHub:
                     {"context": context, "session_update": session_update, "initial_response": opening},
                 )
                 await realtime.send(json.dumps(session_update))
-                await realtime.send(json.dumps(opening))
+                await self._send_response_create(session, opening)
                 self._events.append("realtime.connected", {"task_id": task_id, "model": model})
                 to_openai = asyncio.create_task(self._twilio_to_openai(session))
                 to_twilio = asyncio.create_task(self._openai_to_twilio(session, task_id))
@@ -604,8 +662,10 @@ class RealtimeSessionHub:
         async for raw in session.realtime:
             event = json.loads(raw)
             event_type = event.get("type")
-            if event_type == "session.updated":
-                session.session_update_ack.set()
+            if event_type in {"conversation.item.created", "conversation.item.added"}:
+                item = event.get("item", {})
+                if str(item.get("id", "")) == session.pending_context_item_id:
+                    session.context_item_ack.set()
             if event_type == "response.output_audio.delta":
                 if not session.secure_mode and (
                     not session.waiting_for_user
@@ -625,12 +685,18 @@ class RealtimeSessionHub:
                 and not session.waiting_for_user
             ):
                 await session.twilio.send_json({"event": "clear", "streamSid": session.stream_sid})
-            if event_type == "response.done" and session.hold_response_active:
-                session.hold_response_active = False
-                session.hold_complete.set()
-            if event_type == "response.done" and session.keepalive_response_active:
-                session.keepalive_response_active = False
-                session.keepalive_complete.set()
+            if event_type == "response.done":
+                session.response_pending = False
+                session.response_complete.set()
+                if session.hold_response_active:
+                    session.hold_response_active = False
+                    session.hold_complete.set()
+                if session.keepalive_response_active:
+                    session.keepalive_response_active = False
+                    session.keepalive_complete.set()
+                if session.deferred_representative_turns and not session.waiting_for_user:
+                    utterance = session.deferred_representative_turns.pop(0)
+                    await self._gate_representative_turn(session, task_id, utterance)
             transcript = transcript_from_realtime_event(event)
             if transcript and transcript[1].strip() and not session.secure_mode:
                 sensitive_field = requested_sensitive_field(transcript[1])
@@ -653,12 +719,16 @@ class RealtimeSessionHub:
         task_id: str,
         utterance: str,
     ) -> None:
+        if session.response_pending:
+            session.deferred_representative_turns.append(utterance)
+            self._events.append("realtime.representative_turn_deferred", {"task_id": task_id})
+            return
         if is_trivial_acknowledgement(utterance):
             self._events.append(
                 "gatekeeper.bypassed",
                 {"task_id": task_id, "reason": "trivial_acknowledgement"},
             )
-            await session.realtime.send(json.dumps({"type": "response.create"}))
+            await self._send_response_create(session)
             return
         request = gatekeeper_request(utterance, gatekeeper_context(session.context), session.context_updates)
         session.debug_trace and session.debug_trace.append("gatekeeper.request", gatekeeper_debug_payload(request))
@@ -686,7 +756,7 @@ class RealtimeSessionHub:
             {"task_id": task_id, "verdict": verdict.verdict, "latency_ms": latency_ms},
         )
         if verdict.verdict == "answerable":
-            await session.realtime.send(json.dumps({"type": "response.create"}))
+            await self._send_response_create(session)
             return
         question = verdict.question.strip() or f'How should Relay answer: "{utterance}"?'
         session.waiting_for_user = True
@@ -695,19 +765,18 @@ class RealtimeSessionHub:
         session.hold_complete.clear()
         if self._user_input_requester is not None:
             self._user_input_requester(task_id, question, "text", True)
-        await session.realtime.send(
-            json.dumps(
-                {
-                    "type": "response.create",
-                    "response": {
-                        "instructions": (
-                            "Say exactly one brief natural hold line to the representative, such as "
-                            "'Let me check on that one second.' Do not answer the question, ask another question, "
-                            "restart the introduction, or call a tool."
-                        )
-                    },
-                }
-            )
+        await self._send_response_create(
+            session,
+            {
+                "type": "response.create",
+                "response": {
+                    "instructions": (
+                        "Say exactly one brief natural hold line to the representative, such as "
+                        "'Let me check on that one second.' Do not answer the question, ask another question, "
+                        "restart the introduction, or call a tool."
+                    )
+                },
+            },
         )
         self._start_waiting_keepalive(session, task_id)
         self._events.append("realtime.user_input_requested", {"task_id": task_id, "source": "gatekeeper"})
@@ -734,19 +803,19 @@ class RealtimeSessionHub:
                     return
                 session.keepalive_response_active = True
                 session.keepalive_complete.clear()
-                await session.realtime.send(
-                    json.dumps(
-                        {
-                            "type": "response.create",
-                            "response": {
-                                "instructions": (
-                                    "Say exactly one short natural keep-alive line, such as 'Just need one more "
-                                    "moment.' Say nothing else: do not answer any question, introduce a new topic, "
-                                    "repeat the pending question, or react to other representative speech."
-                                )
-                            },
-                        }
-                    )
+                await self._send_response_create(
+                    session,
+                    {
+                        "type": "response.create",
+                        "response": {
+                            "instructions": (
+                                "Say exactly one short natural keep-alive line, such as 'Just need one more "
+                                "moment.' Say nothing else: do not answer any question, introduce a new topic, "
+                                "repeat the pending question, or react to other representative speech."
+                            )
+                        },
+                    },
+                    wait_for_available=True,
                 )
                 self._events.append("realtime.waiting_keepalive", {"task_id": task_id})
                 try:

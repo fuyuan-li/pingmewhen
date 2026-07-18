@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Lock
@@ -108,7 +109,11 @@ class PrivateMessageRequest:
                     "such as 'Got it.' A question addressed to Relay itself, testing message, unrelated aside, or other "
                     "meta conversation is private_meta: answer it briefly in private_reply and provide no Speaker update. "
                     "When disposition is answer, speaker_update is mandatory: copy the factual meaning of the private "
-                    "message into its value and summary instead of restating that the answer is missing."
+                    "message into its value and summary instead of restating that the answer is missing. Derive a "
+                    "stable, semantically specific key from PENDING QUESTION, such as apartment_number, "
+                    "installation_date, or monthly_budget. The summary must state what the answer means, such as "
+                    "'The apartment/unit number is 2711.' Never use a generic key such as pending_question_answer, "
+                    "user_answer, or answer, and never write a summary that only says the user answered a question."
                 ),
             },
             {
@@ -203,17 +208,18 @@ class OpenAIGatekeeper:
                 }
             )
         if route.disposition == "answer":
+            speaker_update = route.speaker_update
+            if speaker_update is None or speaker_update.key.strip().lower() in {
+                "answer",
+                "pending_question_answer",
+                "user_answer",
+            }:
+                speaker_update = _pending_question_update(request.pending_question, request.text)
+            else:
+                speaker_update = speaker_update.model_copy(update={"value": request.text.strip()})
             return route.model_copy(
                 update={
-                    "speaker_update": ContextUpdate(
-                        kind="fact",
-                        key="pending_question_answer",
-                        value=request.text.strip(),
-                        summary=(
-                            "The represented person supplied this answer to the pending question: "
-                            f"{request.text.strip()}"
-                        ),
-                    ),
+                    "speaker_update": speaker_update,
                     "private_reply": "",
                 }
             )
@@ -233,3 +239,36 @@ class OpenAIGatekeeper:
                 self._client = self._client_factory(api_key=api_key)
             self._client_api_key = api_key
             return self._client
+
+
+def _pending_question_update(question: str, answer: str) -> ContextUpdate:
+    lowered = question.lower()
+    value = answer.strip()
+    if "apartment" in lowered or "unit number" in lowered:
+        key = "apartment_number"
+        summary = f"The apartment/unit number is {value}."
+    elif "date of birth" in lowered or "birth date" in lowered or "dob" in lowered:
+        key = "date_of_birth"
+        summary = f"The date of birth is {value}."
+    elif "installation" in lowered and any(word in lowered for word in ("date", "day", "when")):
+        key = "installation_date"
+        summary = f"The requested installation date or time is {value}."
+    elif "budget" in lowered:
+        key = "budget"
+        summary = f"The represented person's budget is {value}."
+    elif "address" in lowered:
+        key = "address"
+        summary = f"The requested address is {value}."
+    elif "email" in lowered:
+        key = "email_address"
+        summary = f"The email address is {value}."
+    else:
+        words = re.findall(r"[a-z0-9]+", lowered)
+        ignored = {
+            "a", "an", "are", "do", "does", "for", "is", "it", "of", "please", "the", "their",
+            "they", "to", "user", "what", "when", "which", "who", "your",
+        }
+        label = [word for word in words if word not in ignored][:5]
+        key = "_".join(label) or "confirmed_response"
+        summary = f'For the question "{question.strip()}", the confirmed answer is {value}.'
+    return ContextUpdate(kind="fact", key=key, value=value, summary=summary)
