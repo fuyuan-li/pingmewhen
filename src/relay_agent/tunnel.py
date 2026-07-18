@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from threading import Lock
 from typing import Any, Callable
 from urllib.parse import urljoin
@@ -11,20 +10,6 @@ from urllib.request import urlopen
 
 class TunnelError(RuntimeError):
     pass
-
-
-DEFAULT_TUNNEL_READINESS_TIMEOUT = 90.0
-
-
-def tunnel_readiness_timeout_from_environment() -> float:
-    configured = os.environ.get("RELAY_TUNNEL_READINESS_TIMEOUT", "").strip()
-    if not configured:
-        return DEFAULT_TUNNEL_READINESS_TIMEOUT
-    try:
-        timeout = float(configured)
-    except ValueError:
-        return DEFAULT_TUNNEL_READINESS_TIMEOUT
-    return timeout if timeout > 0 else DEFAULT_TUNNEL_READINESS_TIMEOUT
 
 
 def launch_cloudflare(port: int) -> Any:
@@ -92,26 +77,6 @@ class TunnelManager:
             raise TunnelError("The local call tunnel is not active.")
         result = urljoin(f"{self._public_url}/", path.lstrip("/"))
         return f"{result}?{query}" if query else result
-
-    def wait_until_ready(
-        self,
-        checker: Callable[[str], bool] | None = None,
-        timeout: float = DEFAULT_TUNNEL_READINESS_TIMEOUT,
-        interval: float = 0.5,
-    ) -> str:
-        public_url = self._public_url
-        if not public_url:
-            raise TunnelError("The local call tunnel is not active.")
-        probe = checker or public_health_ready
-        deadline = time.monotonic() + max(0, timeout)
-        while True:
-            if probe(public_url):
-                return public_url
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            time.sleep(min(max(0.01, interval), remaining))
-        raise TunnelError("Relay's secure connection did not become ready in time.")
 
     def release(self) -> None:
         with self._lock:

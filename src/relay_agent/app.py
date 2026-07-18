@@ -32,7 +32,7 @@ from relay_agent.realtime_bridge import RealtimeSessionHub
 from relay_agent.task_engine import DeterministicTaskEngine, InvalidAction, TaskNotFound
 from relay_agent.task_store import SQLiteTaskStore
 from relay_agent.telephony import TERMINAL_CALL_STATUSES, TelephonyService, validate_twilio_signature
-from relay_agent.tunnel import TunnelManager, tunnel_readiness_timeout_from_environment
+from relay_agent.tunnel import TunnelManager, public_health_ready
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -77,8 +77,7 @@ def create_app(
     capability_store: CallCapabilityStore | None = None,
     gatekeeper: Gatekeeper | None = None,
     tunnel_readiness_checker: Callable[[str], bool] | None = None,
-    tunnel_readiness_timeout: float | None = None,
-    tunnel_readiness_interval: float = 0.5,
+    connection_status_delay: float = 0.45,
 ) -> FastAPI:
     mode = os.environ.get("RELAY_MODE", "standard")
     events = EventLog()
@@ -106,11 +105,6 @@ def create_app(
 
     engine = build_engine()
     port = int(os.environ.get("RELAY_PORT", "8765"))
-    readiness_timeout = (
-        tunnel_readiness_timeout
-        if tunnel_readiness_timeout is not None
-        else tunnel_readiness_timeout_from_environment()
-    )
     tunnel = tunnel_manager or TunnelManager(port)
     telephony = TelephonyService(
         resolved_credentials,
@@ -118,8 +112,8 @@ def create_app(
         twilio_client_factory,
         capabilities=capability_store,
     )
-    task_tunnel_leases: set[str] = set()
-    tunnel_preparations: dict[str, asyncio.Task[str]] = {}
+    health_checker = tunnel_readiness_checker or public_health_ready
+    execution_tasks: set[asyncio.Task] = set()
     active_gatekeeper = gatekeeper or OpenAIGatekeeper(
         lambda: resolved_credentials().openai_api_key,
         lambda: model_settings.load().gatekeeper_model,
@@ -208,76 +202,37 @@ def create_app(
             raise HTTPException(status_code=403, detail="Twilio request validation failed.")
         return parameters, capability
 
-    def release_task_tunnel(task_id: str) -> None:
-        tunnel_preparations.pop(task_id, None)
-        if task_id not in task_tunnel_leases:
-            return
-        task_tunnel_leases.remove(task_id)
-        tunnel.release()
-
-    async def prepare_task_tunnel(task_id: str) -> str:
-        acquired = False
-        try:
-            public_url = await asyncio.to_thread(tunnel.acquire)
-            acquired = True
-            task_tunnel_leases.add(task_id)
-            events.append("tunnel.acquired", {"task_id": task_id, "public_url": public_url, "port": port})
-            await asyncio.to_thread(
-                tunnel.wait_until_ready,
-                tunnel_readiness_checker,
-                readiness_timeout,
-                tunnel_readiness_interval,
-            )
-            events.append("tunnel.ready", {"task_id": task_id, "public_url": public_url, "port": port})
-            return public_url
-        except BaseException as error:
-            if acquired and task_id in task_tunnel_leases:
-                task_tunnel_leases.remove(task_id)
-                tunnel.release()
-            if isinstance(error, Exception):
-                events.append("tunnel.failed", {"task_id": task_id, "reason": type(error).__name__, "port": port})
-            raise
-
-    def start_task_tunnel_preparation(task: dict) -> None:
-        if mode == "demo" or not isinstance(engine, AgenticTaskEngine):
-            return
-        actions = (task.get("current_plan") or {}).get("actions", [])
-        has_phone_plan = task.get("stage") == "plan_review" and any(
-            action.get("kind") == "phone_call" for action in actions
-        )
-        task_id = task.get("id", "")
-        if not has_phone_plan or not task_id or task_id in task_tunnel_leases or task_id in tunnel_preparations:
-            return
-        events.append("tunnel.preparing", {"task_id": task_id, "port": port})
-        preparation = asyncio.create_task(prepare_task_tunnel(task_id))
-        preparation.add_done_callback(lambda completed: completed.exception() if not completed.cancelled() else None)
-        tunnel_preparations[task_id] = preparation
-
-    async def establish_task_tunnel(task_id: str) -> dict | None:
-        engine.mark_connection_starting(task_id)
-        events.append("tunnel.establishing", {"task_id": task_id, "port": port})
-        preparation = tunnel_preparations.get(task_id)
-        if preparation is None:
-            preparation = asyncio.create_task(prepare_task_tunnel(task_id))
-            preparation.add_done_callback(lambda completed: completed.exception() if not completed.cancelled() else None)
-            tunnel_preparations[task_id] = preparation
-        try:
-            await asyncio.shield(preparation)
-        except Exception:
-            if tunnel_preparations.get(task_id) is preparation:
-                tunnel_preparations.pop(task_id, None)
-            return engine.fail_connection(task_id)
-        return None
-
-    async def execute_next_call(task_id: str) -> dict:
+    async def execute_next_call(task_id: str, connection_status_started: bool = False) -> dict:
         if not isinstance(engine, AgenticTaskEngine):
             return engine.get(task_id)
         pending = engine.next_phone_action(task_id)
         if pending is None:
             return engine.get(task_id)
-        connection_failure = await establish_task_tunnel(task_id)
-        if connection_failure is not None:
-            return connection_failure
+        if not connection_status_started:
+            engine.mark_connection_starting(task_id)
+        if connection_status_delay > 0:
+            await asyncio.sleep(connection_status_delay)
+        public_url = tunnel.public_url
+        events.append(
+            "tunnel.health_check_started",
+            {"task_id": task_id, "public_url": public_url, "tunnel_active": tunnel.active, "port": port},
+        )
+        healthy = False
+        try:
+            healthy = bool(public_url) and await asyncio.to_thread(health_checker, public_url)
+        except Exception as error:
+            events.append(
+                "tunnel.health_check_error",
+                {"task_id": task_id, "reason": type(error).__name__, "public_url": public_url, "port": port},
+            )
+        events.append(
+            "tunnel.health_check_succeeded" if healthy else "tunnel.health_check_inconclusive",
+            {"task_id": task_id, "public_url": public_url, "port": port},
+        )
+        engine.record_tunnel_health(task_id, healthy)
+        if connection_status_delay > 0:
+            await asyncio.sleep(connection_status_delay)
+        engine.mark_call_starting(task_id)
         action = pending["action"]
         try:
             result = await asyncio.to_thread(
@@ -288,7 +243,6 @@ def create_app(
             )
             task = engine.begin_call(task_id, pending["index"], result["sid"])
         except Exception as error:
-            release_task_tunnel(task_id)
             events.append("call.failed", {"task_id": task_id, "reason": type(error).__name__})
             return engine.fail_execution(task_id, type(error).__name__)
         events.append("call.placed", {"task_id": task_id, "call_sid": result["sid"]})
@@ -297,15 +251,26 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         events.append("runtime.started", {"mode": mode})
+        warmup_task = None
+        if mode != "demo":
+            async def warm_tunnel() -> None:
+                try:
+                    public_url = await asyncio.to_thread(tunnel.acquire)
+                    events.append("tunnel.started", {"public_url": public_url, "port": port})
+                except Exception as error:
+                    events.append("tunnel.failed", {"reason": type(error).__name__, "port": port})
+
+            warmup_task = asyncio.create_task(warm_tunnel())
         try:
             yield
         finally:
-            for preparation in tunnel_preparations.values():
-                preparation.cancel()
-            if tunnel_preparations:
-                await asyncio.gather(*tunnel_preparations.values(), return_exceptions=True)
-            tunnel_preparations.clear()
-            task_tunnel_leases.clear()
+            for execution_task in execution_tasks:
+                execution_task.cancel()
+            if execution_tasks:
+                await asyncio.gather(*execution_tasks, return_exceptions=True)
+            if warmup_task is not None and not warmup_task.done():
+                warmup_task.cancel()
+                await asyncio.gather(warmup_task, return_exceptions=True)
             tunnel.stop()
             events.append("runtime.stopped", {"mode": mode})
 
@@ -410,9 +375,7 @@ def create_app(
         if setup_required():
             raise HTTPException(status_code=428, detail="Complete local credential setup before starting a task.")
         try:
-            task = engine.create(request.goal, request.contexts)
-            start_task_tunnel_preparation(task)
-            return task
+            return engine.create(request.goal, request.contexts)
         except PlannerError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         except InvalidAction as error:
@@ -431,9 +394,7 @@ def create_app(
     async def attach_task_context(task_id: str, file: UploadFile = File(...)) -> dict:
         try:
             metadata = contexts.save_pdf(file.filename or "context.pdf", await file.read())
-            task = engine.attach_context(task_id, metadata)
-            start_task_tunnel_preparation(task)
-            return task
+            return engine.attach_context(task_id, metadata)
         except TaskNotFound as error:
             raise HTTPException(status_code=404, detail="Task not found.") from error
         except InvalidContext as error:
@@ -489,8 +450,13 @@ def create_app(
                 )
             task = engine.act(task_id, request.action, request.value)
             if isinstance(engine, AgenticTaskEngine) and task["stage"] == "execution_ready":
-                return await execute_next_call(task_id)
-            start_task_tunnel_preparation(task)
+                checking = engine.mark_connection_starting(task_id)
+                execution_task = asyncio.create_task(execute_next_call(task_id, connection_status_started=True))
+                execution_tasks.add(execution_task)
+                execution_task.add_done_callback(execution_tasks.discard)
+                if connection_status_delay <= 0:
+                    await execution_task
+                return checking
             return task
         except TaskNotFound as error:
             raise HTTPException(status_code=404, detail="Task not found.") from error
@@ -572,8 +538,6 @@ def create_app(
                         finished = engine.finish_call(task_id, call_sid, parameters["CallStatus"].lower())
                         if finished.get("stage") == "execution_ready":
                             await execute_next_call(task_id)
-                        else:
-                            release_task_tunnel(task_id)
             finally:
                 telephony.capabilities.revoke(call_sid)
                 tunnel.release()

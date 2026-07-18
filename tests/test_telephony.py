@@ -21,11 +21,7 @@ from relay_agent.credentials import CredentialStore, RelayCredentials
 from relay_agent.planner import PlanAction, PlanningTurn
 from relay_agent.realtime_bridge import RealtimeSessionHub
 from relay_agent.telephony import TelephonyService
-from relay_agent.tunnel import (
-    DEFAULT_TUNNEL_READINESS_TIMEOUT,
-    TunnelManager,
-    tunnel_readiness_timeout_from_environment,
-)
+from relay_agent.tunnel import TunnelManager
 
 
 class FakeCalls:
@@ -75,6 +71,17 @@ def configured_store(tmp_path):
     return store
 
 
+def wait_for_call(client, task_id, calls):
+    for _ in range(200):
+        task = client.get(f"/api/tasks/{task_id}").json()
+        if calls.arguments is not None and task["phase"] == "calling":
+            return task
+        if task["stage"] == "execution_failed":
+            return task
+        time.sleep(0.01)
+    raise AssertionError("The background call attempt did not finish in time.")
+
+
 def test_tunnel_url_is_used_for_per_call_webhooks(tmp_path):
     launches = []
     terminations = []
@@ -106,7 +113,7 @@ def test_tunnel_url_is_used_for_per_call_webhooks(tmp_path):
     assert terminations == [8765]
 
 
-def test_production_runtime_starts_tunnel_when_phone_plan_enters_review(monkeypatch, tmp_path):
+def test_production_runtime_starts_tunnel_at_application_start_and_checks_health_on_approval(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     launches = []
@@ -124,28 +131,31 @@ def test_production_runtime_starts_tunnel_when_phone_plan_enters_review(monkeypa
         tunnel_manager=tunnel,
         twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
         tunnel_readiness_checker=lambda url: health_checks.append(url) or True,
+        connection_status_delay=0,
     )
 
     with TestClient(app) as client:
-        runtime = client.get("/api/runtime").json()
-        assert launches == []
-        assert runtime["tunnel_active"] is False
-        task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
         for _ in range(100):
-            if health_checks:
+            if tunnel.active:
                 break
             time.sleep(0.01)
 
-        assert task["stage"] == "plan_review"
         assert launches == [8765]
-        assert health_checks == ["https://warm.trycloudflare.com"]
+        assert health_checks == []
+        runtime = client.get("/api/runtime").json()
+        assert runtime["tunnel_active"] is True
+        task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
         approved = client.post(
             f"/api/tasks/{task['id']}/actions",
             json={"action": "answer", "value": "approve"},
         )
+        calling = wait_for_call(client, task["id"], calls)
 
         assert approved.status_code == 200
+        assert approved.json()["stage"] == "connection_starting"
         assert launches == [8765]
+        assert health_checks == ["https://warm.trycloudflare.com"]
+        assert calling["phase"] == "calling"
         assert tunnel.active is True
         assert terminations == []
 
@@ -180,7 +190,7 @@ def test_failed_call_releases_only_call_lease_when_session_keeps_tunnel_warm(tmp
     assert terminations == [8765]
 
 
-def test_task_tunnel_lease_reuses_one_ready_tunnel_across_calls(tmp_path):
+def test_session_tunnel_lease_reuses_one_tunnel_across_calls(tmp_path):
     class SequencedCalls:
         def __init__(self):
             self.count = 0
@@ -204,7 +214,6 @@ def test_task_tunnel_lease_reuses_one_ready_tunnel_across_calls(tmp_path):
     )
 
     tunnel.acquire()
-    tunnel.wait_until_ready(lambda url: url == "https://ready.trycloudflare.com", timeout=0, interval=0)
     service.place_call("+12025550199", "task-1", 0)
     tunnel.release()
     assert tunnel.active is True
@@ -218,10 +227,9 @@ def test_task_tunnel_lease_reuses_one_ready_tunnel_across_calls(tmp_path):
     assert terminations == [8765]
 
 
-def test_failed_tunnel_readiness_is_retryable_and_places_no_call_until_ready(monkeypatch, tmp_path):
+def test_inconclusive_tunnel_health_check_is_logged_but_call_is_still_attempted(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
-    ready = {"value": False}
     launches = []
     calls = FakeCalls()
     tunnel = TunnelManager(
@@ -235,44 +243,25 @@ def test_failed_tunnel_readiness_is_retryable_and_places_no_call_until_ready(mon
             credential_store=configured_store(tmp_path),
             tunnel_manager=tunnel,
             twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
-            tunnel_readiness_checker=lambda url: ready["value"],
-            tunnel_readiness_timeout=0,
-            tunnel_readiness_interval=0,
+            tunnel_readiness_checker=lambda url: False,
+            connection_status_delay=0,
         )
     )
     task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
 
-    failed = client.post(
+    checking = client.post(
         f"/api/tasks/{task['id']}/actions",
         json={"action": "answer", "value": "approve"},
     ).json()
+    calling = wait_for_call(client, task["id"], calls)
 
-    assert failed["stage"] == "connection_failed"
-    assert failed["prompt"]["options"][0] == {"value": "retry_connection", "label": "Retry connection"}
-    assert calls.arguments is None
-    assert tunnel.active is False
-
-    ready["value"] = True
-    retried = client.post(
-        f"/api/tasks/{task['id']}/actions",
-        json={"action": "answer", "value": "retry_connection"},
-    ).json()
-
-    assert retried["phase"] == "calling"
+    assert checking["stage"] == "connection_starting"
+    assert calling["phase"] == "calling"
     assert calls.arguments["to"] == "+12025550199"
-    assert launches == [8765, 8765]
-
-
-def test_tunnel_readiness_timeout_defaults_to_ninety_seconds_and_is_configurable(monkeypatch):
-    monkeypatch.delenv("RELAY_TUNNEL_READINESS_TIMEOUT", raising=False)
-    assert DEFAULT_TUNNEL_READINESS_TIMEOUT == 90
-    assert tunnel_readiness_timeout_from_environment() == 90
-
-    monkeypatch.setenv("RELAY_TUNNEL_READINESS_TIMEOUT", "135.5")
-    assert tunnel_readiness_timeout_from_environment() == 135.5
-
-    monkeypatch.setenv("RELAY_TUNNEL_READINESS_TIMEOUT", "invalid")
-    assert tunnel_readiness_timeout_from_environment() == 90
+    events = [json.loads(line)["event"] for line in (tmp_path / "runtime" / "logs" / "events.jsonl").read_text().splitlines()]
+    assert "tunnel.health_check_started" in events
+    assert "tunnel.health_check_inconclusive" in events
+    assert events.index("tunnel.health_check_inconclusive") < events.index("call.placed")
 
 
 def test_task_identity_is_attached_to_per_call_webhooks(tmp_path):
@@ -315,6 +304,7 @@ def test_approved_agentic_plan_places_the_verified_call(monkeypatch, tmp_path):
             tunnel_manager=tunnel,
             twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
             tunnel_readiness_checker=lambda url: True,
+            connection_status_delay=0,
         )
     )
     task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
@@ -325,7 +315,9 @@ def test_approved_agentic_plan_places_the_verified_call(monkeypatch, tmp_path):
     )
 
     assert approved.status_code == 200
-    assert approved.json()["phase"] == "calling"
+    calling = wait_for_call(client, task["id"], calls)
+    assert approved.json()["stage"] == "connection_starting"
+    assert calling["phase"] == "calling"
     assert calls.arguments["to"] == "+12025550199"
     assert parse_qs(urlparse(calls.arguments["url"]).query)["task_id"] == [task["id"]]
 
@@ -347,13 +339,16 @@ def test_live_instruction_reports_when_realtime_injection_fails(monkeypatch, tmp
             tunnel_manager=tunnel,
             twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
             tunnel_readiness_checker=lambda url: True,
+            connection_status_delay=0,
         )
     )
     task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
-    calling = client.post(
+    checking = client.post(
         f"/api/tasks/{task['id']}/actions",
         json={"action": "answer", "value": "approve"},
     ).json()
+    calling = wait_for_call(client, task["id"], calls)
+    assert checking["stage"] == "connection_starting"
     assert calling["phase"] == "calling"
 
     response = client.post(
@@ -392,10 +387,12 @@ def test_terminal_status_callback_revokes_the_call_capabilities(monkeypatch, tmp
             twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
             capability_store=capabilities,
             tunnel_readiness_checker=lambda url: True,
+            connection_status_delay=0,
         )
     )
     task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
     client.post(f"/api/tasks/{task['id']}/actions", json={"action": "answer", "value": "approve"})
+    wait_for_call(client, task["id"], calls)
     status_path = urlparse(calls.arguments["status_callback"]).path + "?" + urlparse(
         calls.arguments["status_callback"]
     ).query

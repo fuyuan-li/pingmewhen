@@ -122,5 +122,5 @@ def test_dashboard_keeps_private_speakers_left_and_restores_failed_text():
 
     assert "event.speaker !== 'representative' && event.speaker !== 'relay_private'" in source
     assert "if (!planningInstruction.value) planningInstruction.value = optimistic.text;" in source
-    assert "Establishing a secure connection…" in source
+    assert "Checking secure call tunnel reachability…" in source
     assert "appendConnectionProgress()" in source

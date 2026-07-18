@@ -557,8 +557,7 @@
         actionInFlight = true;
         clearTimeout(advanceTimer);
         const userAction = action !== 'advance';
-        const connectionProgress = runtimeMode !== 'demo' && action === 'answer' &&
-          ['approve', 'retry_connection'].includes(value)
+        const connectionProgress = runtimeMode !== 'demo' && action === 'answer' && value === 'approve'
           ? appendConnectionProgress()
           : null;
         if (userAction) setControlsDisabled(true);
@@ -586,7 +585,7 @@
         progress.className = 'event pending-indicator';
         progress.setAttribute('role', 'status');
         progress.setAttribute('aria-live', 'polite');
-        progress.textContent = 'Establishing a secure connection…';
+        progress.textContent = 'Checking secure call tunnel reachability…';
         planningTimeline.appendChild(progress);
         requestAnimationFrame(() => { planningTimeline.scrollTop = planningTimeline.scrollHeight; });
         return progress;
@@ -680,13 +679,14 @@
         if (task.auto_advance) {
           advanceTimer = setTimeout(() => act('advance'), 850);
         }
-        if (task.phase === 'calling' && task.status !== 'complete') {
-          refreshTimer = setTimeout(refreshTask, 750);
+        const connectionPending = task.stage === 'connection_starting';
+        if ((task.phase === 'calling' || connectionPending) && task.status !== 'complete') {
+          refreshTimer = setTimeout(refreshTask, connectionPending ? 250 : 750);
         }
       }
 
       async function refreshTask() {
-        if (!task || actionInFlight || task.phase !== 'calling') return;
+        if (!task || actionInFlight || (task.phase !== 'calling' && task.stage !== 'connection_starting')) return;
         try {
           const response = await fetch(`/api/tasks/${task.id}`);
           task = await readResponse(response);

@@ -237,25 +237,6 @@ class AgenticTaskEngine:
         }
 
     def _answer(self, task: dict[str, Any], value: str) -> None:
-        if task["stage"] == "connection_failed":
-            if value == "retry_connection":
-                self._append(task, "message", speaker="user_private", text="Retry the secure connection.")
-                task.update(stage="execution_ready", status="waiting_for_execution", prompt=None)
-                return
-            if value == "hold":
-                self._append(task, "message", speaker="user_private", text="Hold. I want to revise the plan.")
-                self._append(
-                    task,
-                    "message",
-                    speaker="relay_private",
-                    text="The approved calls remain stopped. Tell me what to change and I will prepare a revised plan.",
-                )
-                task.update(stage="agent_planning", status="waiting_for_user")
-                task["approved_plan"] = None
-                task["execution_queue"] = []
-                task["prompt"] = {"kind": "text_reply", "question": "Type your plan changes below.", "options": []}
-                return
-            raise InvalidAction("Retry the secure connection or hold to revise the plan.")
         if task["stage"] != "plan_review":
             raise InvalidAction("Relay is not waiting for an approval response.")
         if value == "hold":
@@ -337,32 +318,35 @@ class AgenticTaskEngine:
             if task.get("stage") != "execution_ready" or task.get("current_call"):
                 raise InvalidAction("Relay is not ready to establish the call connection.")
             task.update(phase="planning", stage="connection_starting", status="running", prompt=None)
-            self._append(task, "status", text="Establishing a secure connection…")
+            self._append(task, "status", text="Checking secure call tunnel reachability…")
             self._store.save("production", task)
             return self._snapshot(task)
 
-    def fail_connection(self, task_id: str) -> dict[str, Any]:
+    def record_tunnel_health(self, task_id: str, healthy: bool) -> dict[str, Any]:
         with self._lock:
             task = self._require(task_id)
-            task.update(phase="planning", stage="connection_failed", status="waiting_for_user")
-            self._append(task, "status", text="Secure connection could not be established · no call was placed")
+            if task.get("stage") != "connection_starting":
+                raise InvalidAction("Relay is not checking the call tunnel.")
             self._append(
                 task,
-                "message",
-                speaker="relay_private",
+                "status",
                 text=(
-                    "I could not make the local call connection ready in time. No phone call was placed. "
-                    "You can retry the connection or hold and revise the plan."
+                    "Secure call tunnel reachability confirmed"
+                    if healthy
+                    else "Tunnel health check inconclusive · proceeding with the approved call as requested"
                 ),
             )
-            task["prompt"] = {
-                "kind": "approval",
-                "question": "Would you like Relay to retry the secure connection?",
-                "options": [
-                    {"value": "retry_connection", "label": "Retry connection"},
-                    {"value": "hold", "label": "Hold · revise plan"},
-                ],
-            }
+            self._store.save("production", task)
+            return self._snapshot(task)
+
+    def mark_call_starting(self, task_id: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            if task.get("stage") != "connection_starting":
+                raise InvalidAction("Relay is not ready to start the approved call.")
+            pending = next((item for item in task.get("execution_queue", []) if item["status"] == "pending"), None)
+            target = (pending or {}).get("action", {}).get("target", "the approved destination")
+            self._append(task, "status", text=f"Calling {target} through the secure call tunnel…")
             self._store.save("production", task)
             return self._snapshot(task)
 
