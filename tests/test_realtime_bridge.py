@@ -7,7 +7,6 @@ from relay_agent.gatekeeper import AuthorityVeto, ContextUpdate, GatekeeperVerdi
 from relay_agent.realtime_bridge import (
     ActiveRealtimeSession,
     RealtimeSessionHub,
-    initial_response,
     realtime_session_update,
     requested_sensitive_field,
     transcript_from_realtime_event,
@@ -35,13 +34,13 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert 'You represent (you are calling ON BEHALF OF): "Mina"' in instructions
     assert 'You are calling (the organization/person you dial and speak to): "Example Provider"' in instructions
     assert 'Never say you are calling "Mina"' in instructions
-    assert "There is no opening phase to finish" in instructions
-    assert "treat the interruption as normal barge-in" in instructions
+    assert "You never speak first" in instructions
+    assert "stay silent and keep waiting" in instructions
     assert "outbound caller" in instructions
     assert "spoken audio is always addressed to the representative" in instructions
     assert "Private text comes from the person you represent" in instructions
     assert "Never acknowledge or answer that private person aloud" in instructions
-    assert "never restart, complete, or repeat the introduction or disclosure" in instructions
+    assert "never restart it if interrupted" in instructions
     assert "Never deny being an AI if asked" in instructions
     assert "backend Gatekeeper is the sole authority" in instructions
     assert "Gatekeeper is the sole authority" in instructions
@@ -61,18 +60,6 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert update["session"]["tool_choice"] == "none"
     assert update["session"]["audio"]["input"]["turn_detection"]["create_response"] is False
     assert update["session"]["tools"] == []
-    opening = initial_response(context)
-    assert opening["type"] == "response.create"
-    assert "You are calling Example Provider" in opening["response"]["instructions"]
-    assert "on behalf of Mina" in opening["response"]["instructions"]
-    assert "do not say you are calling Mina" in opening["response"]["instructions"]
-    assert "ask permission to continue" in opening["response"]["instructions"]
-    assert "Hi, Relay here — I'm an AI assistant on behalf of Mina." in opening["response"]["instructions"]
-    assert "following along" not in opening["response"]["instructions"]
-    assert "two short sentences" in opening["response"]["instructions"]
-    assert "first audible words must be 'Hi, Relay here.'" in opening["response"]["instructions"]
-    assert "Do not vocalize planning, analysis, self-talk" in opening["response"]["instructions"]
-    assert "never restart or finish this first turn later" in opening["response"]["instructions"]
 
 
 def test_realtime_session_uses_selected_transcription_model():
@@ -84,8 +71,8 @@ def test_realtime_session_uses_selected_transcription_model():
 def test_realtime_session_has_no_persistent_opening_obligation():
     instructions = realtime_session_update(sample_context())["session"]["instructions"]
 
-    assert "There is no opening phase to finish" in instructions
-    assert "never restart, complete, or repeat the introduction" in instructions
+    assert "You never speak first" in instructions
+    assert "never repeat that disclosure later in the call" in instructions
     assert "OPENING (say once" not in instructions
 
 
@@ -361,6 +348,7 @@ def test_speaker_waits_for_answerable_gatekeeper_verdict_before_responding(tmp_p
         ]
     )
     session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    session.has_disclosed = True
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
@@ -386,6 +374,7 @@ def test_representative_turn_does_not_overlap_opening_response(tmp_path):
     realtime = FakeRealtime([{"type": "response.done"}])
     session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
     session.response_pending = True
+    session.has_disclosed = True
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
@@ -395,18 +384,43 @@ def test_representative_turn_does_not_overlap_opening_response(tmp_path):
     )
 
     async def run():
-        await hub._gate_representative_turn(session, "task-1", "Hello")
+        await hub._gate_representative_turn(session, "task-1", "What plans are available?")
         assert realtime.sent == []
-        assert session.deferred_representative_turns == ["Hello"]
+        assert session.deferred_representative_turns == ["What plans are available?"]
         await hub._openai_to_twilio(session, "task-1")
 
     asyncio.run(run())
 
-    assert realtime.sent == [{"type": "response.create"}]
-    assert gatekeeper.requests[0].latest_utterance == "Hello"
+    assert len(realtime.sent) == 1
+    assert realtime.sent[0]["type"] == "response.create"
+    assert gatekeeper.requests[0].latest_utterance == "What plans are available?"
 
 
 def test_trivial_acknowledgement_bypasses_gatekeeper_without_private_prompt(tmp_path):
+    gatekeeper = SequenceGatekeeper([])
+    realtime = FakeRealtime()
+    log_path = tmp_path / "events.jsonl"
+    session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    session.has_disclosed = True
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(log_path),
+        gatekeeper=gatekeeper,
+    )
+
+    asyncio.run(hub._gate_representative_turn(session, "task-1", "Mhm."))
+
+    assert gatekeeper.requests == []
+    assert len(realtime.sent) == 1
+    assert realtime.sent[0]["type"] == "response.create"
+    logged = logged_events(log_path)[0]
+    assert logged["event"] == "gatekeeper.bypassed"
+    assert logged["payload"]["reason"] == "trivial_acknowledgement"
+
+
+def test_first_representative_turn_bypasses_the_gatekeeper_regardless_of_content(tmp_path):
     gatekeeper = SequenceGatekeeper([])
     realtime = FakeRealtime()
     log_path = tmp_path / "events.jsonl"
@@ -419,11 +433,20 @@ def test_trivial_acknowledgement_bypasses_gatekeeper_without_private_prompt(tmp_
         gatekeeper=gatekeeper,
     )
 
-    asyncio.run(hub._gate_representative_turn(session, "task-1", "Mhm."))
+    asyncio.run(
+        hub._gate_representative_turn(
+            session, "task-1", "Hi, this is Alex from Verizon customer care, thanks for calling, how can I help?"
+        )
+    )
 
     assert gatekeeper.requests == []
-    assert realtime.sent == [{"type": "response.create"}]
-    assert logged_events(log_path)[0]["event"] == "gatekeeper.bypassed"
+    assert len(realtime.sent) == 1
+    assert realtime.sent[0]["type"] == "response.create"
+    assert "AI assistant on behalf of" in realtime.sent[0]["response"]["instructions"]
+    logged = logged_events(log_path)[0]
+    assert logged["event"] == "gatekeeper.bypassed"
+    assert logged["payload"]["reason"] == "first_turn"
+    assert session.has_disclosed is True
 
 
 def test_material_offer_is_shown_faithfully_and_waits_for_user_decision(tmp_path):
@@ -442,6 +465,7 @@ def test_material_offer_is_shown_faithfully_and_waits_for_user_decision(tmp_path
     prompts = []
     realtime = FakeRealtime()
     session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    session.has_disclosed = True
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
@@ -475,6 +499,7 @@ def test_authority_veto_blocks_a_gatekeeper_continuation_before_speaker_responds
     gatekeeper = VetoingGatekeeper([GatekeeperVerdict(route="continue", reason="none")])
     realtime = FakeRealtime()
     session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    session.has_disclosed = True
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
@@ -540,6 +565,7 @@ def test_gatekeeper_receives_only_approved_call_facts_not_private_planning_histo
     }
     context["action"]["known_facts"] = ["Service address: 123 Main Street"]
     session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=context)
+    session.has_disclosed = True
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: context,
@@ -621,6 +647,7 @@ def test_waiting_for_user_repeats_short_keepalive_after_hold_line(tmp_path):
     )
     realtime = FakeRealtime()
     session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    session.has_disclosed = True
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
@@ -683,6 +710,7 @@ def test_unanswerable_gatekeeper_turn_waits_then_accumulates_user_updates(tmp_pa
     prompts = []
     realtime = FakeRealtime()
     session = ActiveRealtimeSession(realtime, FakeTwilio(), "MZ1", context=sample_context())
+    session.has_disclosed = True
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
@@ -775,7 +803,7 @@ def test_answering_gatekeeper_question_resumes_with_structured_context_only(tmp_
     assert not any(event.get("type") == "session.update" for event in realtime.sent)
 
 
-def test_pending_question_clears_only_after_private_answer_response_completes(tmp_path):
+def test_pending_question_clears_before_the_answer_response_streams_so_its_audio_is_not_dropped(tmp_path):
     realtime = FakeRealtime(
         [
             {"type": "response.created", "response": {"id": "resp-answer"}},
@@ -803,7 +831,10 @@ def test_pending_question_clears_only_after_private_answer_response_completes(tm
         delivery_task = asyncio.create_task(hub.inject("task-1", "Aug 1"))
         while not any(event.get("type") == "response.create" for event in realtime.sent):
             await asyncio.sleep(0)
-        assert session.waiting_for_user is True
+        # waiting_for_user must already be clear before the answer's audio starts streaming, otherwise the
+        # audio-forwarding gate in _openai_to_twilio drops every delta of the spoken answer.
+        assert session.waiting_for_user is False
+        assert session.pending_question == ""
         await hub._openai_to_twilio(session, "task-1")
         return await delivery_task
 
@@ -812,6 +843,45 @@ def test_pending_question_clears_only_after_private_answer_response_completes(tm
     assert delivery.resumed_call is True
     assert session.waiting_for_user is False
     assert session.pending_question == ""
+
+
+def test_private_answer_audio_is_forwarded_to_twilio_while_it_streams(tmp_path):
+    realtime = FakeRealtime(
+        [
+            {"type": "response.created", "response": {"id": "resp-answer"}},
+            {"type": "response.output_audio.delta", "delta": "answer-audio-chunk"},
+            {"type": "response.done", "response": {"id": "resp-answer", "status": "completed"}},
+        ]
+    )
+    twilio = FakeTwilio()
+    session = ActiveRealtimeSession(
+        realtime,
+        twilio,
+        "MZ1",
+        waiting_for_user=True,
+        pending_question="What installation date works?",
+        context=sample_context(),
+    )
+    hub = RealtimeSessionHub(
+        lambda: RelayCredentials(openai_api_key="sk-test"),
+        lambda task_id, index: sample_context(),
+        lambda task_id, speaker, text: {},
+        EventLog(tmp_path / "events.jsonl"),
+        response_delivery_timeout=1,
+    )
+
+    async def run():
+        hub._sessions["task-1"] = session
+        delivery_task = asyncio.create_task(hub.inject("task-1", "Aug 1"))
+        while not any(event.get("type") == "response.create" for event in realtime.sent):
+            await asyncio.sleep(0)
+        await hub._openai_to_twilio(session, "task-1")
+        return await delivery_task
+
+    asyncio.run(run())
+
+    audio_sent = [message for message in twilio.sent if message.get("event") == "media"]
+    assert audio_sent == [{"event": "media", "streamSid": "MZ1", "media": {"payload": "answer-audio-chunk"}}]
 
 
 def test_secure_mode_stops_audio_in_both_directions_and_suppresses_transcripts(tmp_path):
@@ -1014,7 +1084,6 @@ def test_bridge_twilio_stop_cancels_realtime_and_cleans_up_session(tmp_path):
     assert realtime.cancelled is True
     assert "task-1" not in hub._sessions
     assert [event["event"] for event in events] == [
-        "realtime.response_requested",
         "realtime.connected",
         "realtime.disconnected",
     ]
@@ -1028,8 +1097,13 @@ def test_bridge_debug_trace_captures_exact_speaker_and_gatekeeper_inputs(monkeyp
         [
             {
                 "type": "conversation.item.input_audio_transcription.completed",
+                "transcript": "Hello?",
+            },
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
                 "transcript": "What is the installation address?",
             },
+            {"type": "response.done"},
             {"type": "response.done"},
         ]
     )
@@ -1064,6 +1138,7 @@ def test_bridge_debug_trace_captures_exact_speaker_and_gatekeeper_inputs(monkeyp
         "gatekeeper.verdict",
         "gatekeeper.authority_veto",
         "speaker.response_requested",
+        "speaker.response_completed",
     ]
     speaker_context = next(record for record in records if record["event"] == "speaker.context")
     gatekeeper_request_record = next(record for record in records if record["event"] == "gatekeeper.request")
@@ -1180,7 +1255,7 @@ def test_gatekeeper_identity_extracts_caller_and_target_with_fallbacks():
     assert default_representative == "the representative"
 
 
-def test_interrupted_opening_reminds_speaker_not_to_repeat_it(tmp_path):
+def test_first_representative_turn_carries_the_ai_disclosure_once(tmp_path):
     hub = RealtimeSessionHub(
         lambda: RelayCredentials(openai_api_key="sk-test"),
         lambda task_id, index: sample_context(),
@@ -1188,13 +1263,13 @@ def test_interrupted_opening_reminds_speaker_not_to_repeat_it(tmp_path):
         EventLog(tmp_path / "events.jsonl"),
     )
     session = ActiveRealtimeSession(FakeRealtime(), FakeTwilio(), "MZ1")
+    session.context = {**sample_context(), "caller_name": "mina"}
 
-    assert hub._representative_turn_request(session) is None
-
-    session.opening_interrupted = True
     request = hub._representative_turn_request(session)
 
     assert request is not None
-    assert "interrupted" in request["response"]["instructions"]
-    assert "Do not restart or repeat" in request["response"]["instructions"]
-    assert session.opening_interrupted is False
+    assert "Hi, Relay here — I'm an AI assistant on behalf of Mina." in request["response"]["instructions"]
+    assert session.has_disclosed is True
+    followup = hub._representative_turn_request(session)
+    assert followup is not None
+    assert "do not restate who you are" in followup["response"]["instructions"]

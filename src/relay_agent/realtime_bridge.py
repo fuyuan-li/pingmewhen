@@ -130,7 +130,7 @@ class ActiveRealtimeSession:
     keepalive_response_active: bool = False
     keepalive_complete: asyncio.Event = field(default_factory=asyncio.Event)
     keepalive_task: asyncio.Task | None = None
-    opening_interrupted: bool = False
+    has_disclosed: bool = False
 
 
 @dataclass(frozen=True)
@@ -170,10 +170,13 @@ def realtime_session_update(
         "called. Private text comes from the person you represent; it is an answer or instruction for you, not "
         "speech from the representative. Never acknowledge or answer that private person aloud as though they were "
         "on the phone. Reformulate their information naturally for the representative.\n\n"
-        "FIRST TURN: A separate ordinary first response handles the concise AI disclosure. There is no opening phase "
-        "to finish. If that first response is interrupted, treat the interruption as normal barge-in and continue from "
-        "what the representative said; never restart, complete, or repeat the introduction or disclosure unless the "
-        "representative explicitly asks. Never deny being an AI if asked.\n\n"
+        "FIRST TURN: You never speak first. This is an outbound call you placed, so wait for the representative to "
+        "speak — a greeting, 'hello,' or asking who is calling — before saying anything. If instead you hear hold "
+        "music, an automated queue message, or silence, stay silent and keep waiting; never fill the silence, "
+        "greet first, or ask if anyone is there. Once the representative actually speaks, your first reply must "
+        "open with a short AI disclosure before anything else; never repeat that disclosure later in the call, "
+        "and never restart it if interrupted — continue from what the representative said. Never deny being an AI "
+        "if asked.\n\n"
         "GOAL: Pursue only this approved purpose: "
         f"{action['purpose']}. The overall user goal is: {context['goal']}. Continue each turn naturally from the "
         "immediately preceding conversation.\n\n"
@@ -219,33 +222,6 @@ def realtime_session_update(
                 },
                 "output": {"format": {"type": "audio/pcmu"}, "voice": "marin"},
             },
-        },
-    }
-
-
-def initial_response(context: dict[str, Any] | None = None) -> dict[str, Any]:
-    context = context or {}
-    action = context.get("action", {})
-    caller_name = normalize_display_name(str(context.get("caller_name", ""))) or "the user"
-    target = action.get("target", "the representative")
-    return {
-        "type": "response.create",
-        "response": {
-            "instructions": (
-                "Start one ordinary outbound conversational turn addressed to the representative. Do not vocalize "
-                "planning, analysis, self-talk, rehearsal, or commentary about composing the turn. Your first audible words must be "
-                f"'Hi, Relay here.' You are calling {target}. You represent {caller_name} — say you are "
-                f"calling on behalf of {caller_name}, do not say you are calling {caller_name}. Open with exactly this "
-                f"short disclosure: 'Hi, Relay here — I'm an AI assistant on behalf of {caller_name}.' Add no other "
-                f"disclosure clause. Then state only the immediate reason for calling: "
-                f"{action.get('purpose', 'the approved purpose')}. Mention only the primary service or topic; do not "
-                "enumerate later steps, constraints, addresses, prices, or contingencies in the opening. Keep the "
-                "entire first turn to two short sentences and pause for the representative. If the representative "
-                "interrupts, stop normally and continue from the interruption on the next turn; never restart or finish "
-                "this first turn later. "
-                "Do not welcome the recipient, offer generic support, ask what they want to do, or ask permission to "
-                "continue."
-            ),
         },
     }
 
@@ -468,6 +444,14 @@ class RealtimeSessionHub:
                     "response_create": response_request,
                 },
             )
+        # Clear waiting_for_user before the response streams, not after it completes: the audio-forwarding gate in
+        # _openai_to_twilio checks this flag on every output_audio.delta as the answer is spoken, so leaving it set
+        # until response.done would silently drop the entire spoken answer even though it plays out normally.
+        if waiting_for_user:
+            session.waiting_for_user = False
+            session.pending_question = ""
+            session.pending_interaction_id = ""
+            session.pending_interaction_reason = ""
         try:
             await self._send_response_create(
                 session,
@@ -484,18 +468,15 @@ class RealtimeSessionHub:
             if isinstance(error, TimeoutError):
                 with suppress(Exception):
                     await session.realtime.send(json.dumps({"type": "response.cancel"}))
-            session.waiting_for_user = waiting_for_user
             if waiting_for_user:
+                session.waiting_for_user = True
                 session.pending_question = request.pending_question
+                session.pending_interaction_id = interaction_id
+                session.pending_interaction_reason = request.pending_reason
                 self._start_waiting_keepalive(session, task_id)
             if isinstance(error, TimeoutError):
                 raise RuntimeError("Speaker did not complete the confirmed answer in time.") from error
             raise
-        if waiting_for_user:
-            session.waiting_for_user = False
-            session.pending_question = ""
-            session.pending_interaction_id = ""
-            session.pending_interaction_reason = ""
         self._events.append("realtime.instruction_injected", {"task_id": task_id})
         return PrivateMessageDelivery(
             disposition=route.disposition,
@@ -685,13 +666,11 @@ class RealtimeSessionHub:
                 session_update = realtime_session_update(
                     context, self._transcription_model(), session.context_updates
                 )
-                opening = initial_response(context)
                 session.debug_trace.append(
                     "speaker.context",
-                    {"context": context, "session_update": session_update, "initial_response": opening},
+                    {"context": context, "session_update": session_update},
                 )
                 await realtime.send(json.dumps(session_update))
-                await self._send_response_create(session, opening, purpose="opening")
                 self._events.append("realtime.connected", {"task_id": task_id, "model": model})
                 to_openai = asyncio.create_task(self._twilio_to_openai(session))
                 to_twilio = asyncio.create_task(self._openai_to_twilio(session, task_id))
@@ -794,8 +773,6 @@ class RealtimeSessionHub:
                 }
                 self._events.append("realtime.response_completed", payload)
                 session.debug_trace and session.debug_trace.append("speaker.response_completed", payload)
-                if session.response_purpose == "opening" and payload["status"] == "cancelled":
-                    session.opening_interrupted = True
                 session.response_pending = False
                 session.response_request_id = ""
                 session.response_server_id = ""
@@ -833,17 +810,30 @@ class RealtimeSessionHub:
                 )
 
     def _representative_turn_request(self, session: ActiveRealtimeSession) -> dict[str, Any] | None:
-        if not session.opening_interrupted:
-            return None
-        session.opening_interrupted = False
+        if session.has_disclosed:
+            return {
+                "type": "response.create",
+                "response": {
+                    "instructions": (
+                        "Continue the conversation naturally. You already gave your AI disclosure earlier in this "
+                        "call — do not restate who you are, that you're an AI, or who you represent in this reply, "
+                        "in any form or wording. Go straight to answering or reacting to what the representative "
+                        "just said."
+                    )
+                },
+            }
+        session.has_disclosed = True
+        caller_name = normalize_display_name(str(session.context.get("caller_name", ""))) or "the user"
         return {
             "type": "response.create",
             "response": {
                 "instructions": (
-                    "Your opening was interrupted before you finished delivering it. Do not restart or repeat the "
-                    "opening — do not reintroduce yourself, your identity, or the call's purpose again. Respond "
-                    "briefly and naturally to what the representative just said, continuing the conversation as if "
-                    "already underway."
+                    "This is your first reply on this call. Open with exactly this short disclosure and nothing "
+                    f"else before it: 'Hi, Relay here — I'm an AI assistant on behalf of {caller_name}.' Add no "
+                    "other greeting, pleasantry, or small talk — do not also say things like 'nice to meet you' or "
+                    "'what's going on today.' Immediately after that one sentence, respond briefly to what the "
+                    "representative just said. Never repeat this disclosure again later in the call, even if this "
+                    "reply is interrupted."
                 )
             },
         }
@@ -858,6 +848,18 @@ class RealtimeSessionHub:
         if session.response_pending:
             session.deferred_representative_turns.append(utterance)
             self._events.append("realtime.representative_turn_deferred", {"task_id": task_id})
+            return
+        if not session.has_disclosed:
+            # The representative's first-ever utterance on the call cannot require user authority: no terms,
+            # offers, or decisions have been exchanged yet, whatever they open with (a bare greeting or a long
+            # self-introduction). Bypass Gatekeeper on turn position, not on guessing the utterance's content.
+            self._events.append(
+                "gatekeeper.bypassed",
+                {"task_id": task_id, "reason": "first_turn"},
+            )
+            await self._send_response_create(
+                session, self._representative_turn_request(session), purpose="representative_turn"
+            )
             return
         if is_trivial_acknowledgement(utterance):
             self._events.append(
@@ -974,7 +976,8 @@ class RealtimeSessionHub:
                 "response": {
                     "instructions": (
                         "Say exactly one brief natural hold line to the representative, such as "
-                        "'Let me check on that one second.' Do not answer the question, ask another question, "
+                        "'Let me check on that one second.' Say it once and stop; do not repeat it, restate it in "
+                        "other words, or say anything else. Do not answer the question, ask another question, "
                         "restart the introduction, or call a tool."
                     )
                 },
