@@ -16,9 +16,10 @@ class PlanAction(BaseModel):
     label: str
     purpose: str = Field(
         description=(
-            "Concrete call briefing with every already-known fact needed for the call written literally, including "
-            "full addresses, dates, names, constraints, and requested outcomes; never vague placeholders such as "
-            "'the provided address'."
+            "Clean third-person natural-language description of the call's purpose and desired outcome, with concrete "
+            "facts such as full addresses, dates, constraints, and names written literally. Never address Relay with "
+            "an imperative instruction, never include the phone number or routing metadata, and never use vague "
+            "placeholders such as 'the provided address'."
         )
     )
     target: str
@@ -51,6 +52,14 @@ class PlanAction(BaseModel):
         )
         if vague_fact:
             raise ValueError("Phone-call purpose must inline concrete known facts instead of vague placeholders.")
+        if re.search(r"\+[1-9](?:[\s().-]*\d){7,14}", self.purpose):
+            raise ValueError("Phone-call purpose must not duplicate the structured phone number.")
+        if re.match(
+            r"^\s*(?:please\s+)?(?:call|dial|contact)\b|^\s*请(?:致电|拨打|联系|帮忙)",
+            self.purpose,
+            re.IGNORECASE,
+        ):
+            raise ValueError("Phone-call purpose must describe the goal rather than instruct Relay to place the call.")
         return self
 
 
@@ -122,6 +131,10 @@ class OpenAIPlanner:
                     "conversation directly into purpose and known_facts. Preserve exact full addresses, dates, names, "
                     "amounts, constraints, and requested outcomes. Never replace a known value with vague wording such "
                     "as 'the provided address', 'the address above', 'the requested date', or 'the user's details'. "
+                    "Write purpose as a clean third-person natural-language description of what the call is for and "
+                    "what outcome is desired, never as an imperative instruction addressed to Relay. Do not put a "
+                    "phone number, source URL, or other routing metadata in purpose; those belong only in their typed "
+                    "fields. A phone number may remain in known_facts as internal reference data. "
                     "The call-time models must be able to execute from the action without rediscovering known facts. "
                     "Before returning plan_ready with any phone_call action, make sure you know the display name or "
                     "nickname Relay should use when introducing the person it represents. If it is not already clear "

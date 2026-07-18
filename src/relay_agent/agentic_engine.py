@@ -237,6 +237,25 @@ class AgenticTaskEngine:
         }
 
     def _answer(self, task: dict[str, Any], value: str) -> None:
+        if task["stage"] == "connection_failed":
+            if value == "retry_connection":
+                self._append(task, "message", speaker="user_private", text="Retry the secure connection.")
+                task.update(stage="execution_ready", status="waiting_for_execution", prompt=None)
+                return
+            if value == "hold":
+                self._append(task, "message", speaker="user_private", text="Hold. I want to revise the plan.")
+                self._append(
+                    task,
+                    "message",
+                    speaker="relay_private",
+                    text="The approved calls remain stopped. Tell me what to change and I will prepare a revised plan.",
+                )
+                task.update(stage="agent_planning", status="waiting_for_user")
+                task["approved_plan"] = None
+                task["execution_queue"] = []
+                task["prompt"] = {"kind": "text_reply", "question": "Type your plan changes below.", "options": []}
+                return
+            raise InvalidAction("Retry the secure connection or hold to revise the plan.")
         if task["stage"] != "plan_review":
             raise InvalidAction("Relay is not waiting for an approval response.")
         if value == "hold":
@@ -311,6 +330,41 @@ class AgenticTaskEngine:
         ]
         self._append(task, "status", text=f"Plan approved · {len(executable)} external call(s) queued")
         task.update(stage="execution_ready", status="waiting_for_execution", prompt=None)
+
+    def mark_connection_starting(self, task_id: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            if task.get("stage") != "execution_ready" or task.get("current_call"):
+                raise InvalidAction("Relay is not ready to establish the call connection.")
+            task.update(phase="planning", stage="connection_starting", status="running", prompt=None)
+            self._append(task, "status", text="Establishing a secure connection…")
+            self._store.save("production", task)
+            return self._snapshot(task)
+
+    def fail_connection(self, task_id: str) -> dict[str, Any]:
+        with self._lock:
+            task = self._require(task_id)
+            task.update(phase="planning", stage="connection_failed", status="waiting_for_user")
+            self._append(task, "status", text="Secure connection could not be established · no call was placed")
+            self._append(
+                task,
+                "message",
+                speaker="relay_private",
+                text=(
+                    "I could not make the local call connection ready in time. No phone call was placed. "
+                    "You can retry the connection or hold and revise the plan."
+                ),
+            )
+            task["prompt"] = {
+                "kind": "approval",
+                "question": "Would you like Relay to retry the secure connection?",
+                "options": [
+                    {"value": "retry_connection", "label": "Retry connection"},
+                    {"value": "hold", "label": "Hold · revise plan"},
+                ],
+            }
+            self._store.save("production", task)
+            return self._snapshot(task)
 
     def next_phone_action(self, task_id: str) -> dict[str, Any] | None:
         with self._lock:

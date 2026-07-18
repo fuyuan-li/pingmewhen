@@ -317,6 +317,40 @@ def test_phone_action_requires_concrete_known_facts_in_purpose():
     assert "1079 Commonwealth Ave" in action.known_facts[0]
 
 
+def test_phone_action_purpose_rejects_routing_metadata_and_relay_directives():
+    base = {
+        "kind": "phone_call",
+        "label": "Call Verizon",
+        "target": "Alex at Verizon",
+        "known_facts": ["Alex's reference phone number is +1 202-701-0927."],
+        "needs_lookup": False,
+        "phone_number": "+12027010927",
+        "contact_provided_by": "user",
+        "contact_source_url": "",
+    }
+
+    with pytest.raises(ValueError, match="must not duplicate"):
+        PlanAction(
+            **base,
+            purpose="Negotiate internet installation pricing by calling +1 202-701-0927.",
+        )
+    with pytest.raises(ValueError, match="rather than instruct Relay"):
+        PlanAction(
+            **base,
+            purpose="请致电 Verizon 联系人 Alex，并协助安排网络安装。",
+        )
+
+    action = PlanAction(
+        **base,
+        purpose=(
+            "Negotiation of internet-only installation pricing at 1079 Commonwealth Ave, Boston, MA 02215, "
+            "followed by enrollment and installation scheduling if the price is acceptable."
+        ),
+    )
+    assert action.phone_number not in action.purpose
+    assert action.phone_number in action.known_facts[0].replace(" ", "").replace("-", "")
+
+
 def test_approval_refuses_an_unsourced_phone_action(tmp_path):
     class UnsourcedPlanner:
         ready = True

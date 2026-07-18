@@ -557,6 +557,10 @@
         actionInFlight = true;
         clearTimeout(advanceTimer);
         const userAction = action !== 'advance';
+        const connectionProgress = runtimeMode !== 'demo' && action === 'answer' &&
+          ['approve', 'retry_connection'].includes(value)
+          ? appendConnectionProgress()
+          : null;
         if (userAction) setControlsDisabled(true);
         try {
           const response = await fetch(`/api/tasks/${task.id}/actions`, {
@@ -571,9 +575,21 @@
           failOptimisticInstruction(optimistic);
           showError(error.message);
         } finally {
+          connectionProgress?.remove();
           actionInFlight = false;
           if (userAction) setControlsDisabled(task?.status === 'complete');
         }
+      }
+
+      function appendConnectionProgress() {
+        const progress = document.createElement('div');
+        progress.className = 'event pending-indicator';
+        progress.setAttribute('role', 'status');
+        progress.setAttribute('aria-live', 'polite');
+        progress.textContent = 'Establishing a secure connection…';
+        planningTimeline.appendChild(progress);
+        requestAnimationFrame(() => { planningTimeline.scrollTop = planningTimeline.scrollHeight; });
+        return progress;
       }
 
       function appendOptimisticInstruction(phase, text) {

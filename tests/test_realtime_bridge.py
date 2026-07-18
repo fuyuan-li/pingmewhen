@@ -47,6 +47,8 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert "Gatekeeper is the sole authority" in instructions
     assert "Never invent a missing fact" in instructions
     assert "Do not provide payment-card data or a full Social Security number" in instructions
+    assert "Never read phone numbers, account numbers, or other reference identifiers aloud" in instructions
+    assert "internal reference by default" in instructions
     assert "Do not choose a regulated product for the user" in instructions
     assert "Hi, Relay here — I'm an AI assistant on behalf of" in instructions
     assert "Do not front-load every detail" in instructions

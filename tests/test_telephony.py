@@ -1,7 +1,6 @@
 import json
 import logging
 from types import SimpleNamespace
-import time
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -102,11 +101,13 @@ def test_tunnel_url_is_used_for_per_call_webhooks(tmp_path):
     assert terminations == [8765]
 
 
-def test_production_runtime_starts_and_keeps_a_warm_tunnel(monkeypatch, tmp_path):
+def test_production_runtime_starts_tunnel_only_after_approval_and_checks_health(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     launches = []
     terminations = []
+    health_checks = []
+    calls = FakeCalls()
     tunnel = TunnelManager(
         8765,
         launcher=lambda port: launches.append(port) or SimpleNamespace(tunnel="https://warm.trycloudflare.com"),
@@ -116,17 +117,24 @@ def test_production_runtime_starts_and_keeps_a_warm_tunnel(monkeypatch, tmp_path
         planner=ExecutablePlanner(),
         credential_store=configured_store(tmp_path),
         tunnel_manager=tunnel,
+        twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
+        tunnel_readiness_checker=lambda url: health_checks.append(url) or True,
     )
 
     with TestClient(app) as client:
-        for _ in range(100):
-            if tunnel.active:
-                break
-            time.sleep(0.01)
         runtime = client.get("/api/runtime").json()
+        assert launches == []
+        assert runtime["tunnel_active"] is False
+        task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
+        approved = client.post(
+            f"/api/tasks/{task['id']}/actions",
+            json={"action": "answer", "value": "approve"},
+        )
+
+        assert approved.status_code == 200
         assert launches == [8765]
-        assert runtime["tunnel_active"] is True
-        assert runtime["tunnel_public_url"] == "https://warm.trycloudflare.com"
+        assert health_checks == ["https://warm.trycloudflare.com"]
+        assert tunnel.active is True
         assert terminations == []
 
     assert tunnel.active is False
@@ -158,6 +166,89 @@ def test_failed_call_releases_only_call_lease_when_session_keeps_tunnel_warm(tmp
     assert terminations == []
     tunnel.stop()
     assert terminations == [8765]
+
+
+def test_task_tunnel_lease_reuses_one_ready_tunnel_across_calls(tmp_path):
+    class SequencedCalls:
+        def __init__(self):
+            self.count = 0
+
+        def create(self, **arguments):
+            self.count += 1
+            return SimpleNamespace(sid=f"CA{self.count}", status="queued")
+
+    launches = []
+    terminations = []
+    tunnel = TunnelManager(
+        8765,
+        launcher=lambda port: launches.append(port) or SimpleNamespace(tunnel="https://ready.trycloudflare.com"),
+        terminator=terminations.append,
+    )
+    calls = SequencedCalls()
+    service = TelephonyService(
+        configured_store(tmp_path).resolve,
+        tunnel,
+        lambda account_sid, auth_token: SimpleNamespace(calls=calls),
+    )
+
+    tunnel.acquire()
+    tunnel.wait_until_ready(lambda url: url == "https://ready.trycloudflare.com", attempts=1, interval=0)
+    service.place_call("+12025550199", "task-1", 0)
+    tunnel.release()
+    assert tunnel.active is True
+    service.place_call("+12025550200", "task-1", 1)
+    tunnel.release()
+
+    assert calls.count == 2
+    assert launches == [8765]
+    assert tunnel.active is True
+    tunnel.release()
+    assert terminations == [8765]
+
+
+def test_failed_tunnel_readiness_is_retryable_and_places_no_call_until_ready(monkeypatch, tmp_path):
+    monkeypatch.setenv("RELAY_MODE", "standard")
+    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
+    ready = {"value": False}
+    launches = []
+    calls = FakeCalls()
+    tunnel = TunnelManager(
+        8765,
+        launcher=lambda port: launches.append(port) or SimpleNamespace(tunnel="https://relay.trycloudflare.com"),
+        terminator=lambda port: None,
+    )
+    client = TestClient(
+        create_app(
+            planner=ExecutablePlanner(),
+            credential_store=configured_store(tmp_path),
+            tunnel_manager=tunnel,
+            twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
+            tunnel_readiness_checker=lambda url: ready["value"],
+            tunnel_readiness_attempts=1,
+            tunnel_readiness_interval=0,
+        )
+    )
+    task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
+
+    failed = client.post(
+        f"/api/tasks/{task['id']}/actions",
+        json={"action": "answer", "value": "approve"},
+    ).json()
+
+    assert failed["stage"] == "connection_failed"
+    assert failed["prompt"]["options"][0] == {"value": "retry_connection", "label": "Retry connection"}
+    assert calls.arguments is None
+    assert tunnel.active is False
+
+    ready["value"] = True
+    retried = client.post(
+        f"/api/tasks/{task['id']}/actions",
+        json={"action": "answer", "value": "retry_connection"},
+    ).json()
+
+    assert retried["phase"] == "calling"
+    assert calls.arguments["to"] == "+12025550199"
+    assert launches == [8765, 8765]
 
 
 def test_task_identity_is_attached_to_per_call_webhooks(tmp_path):
@@ -199,6 +290,7 @@ def test_approved_agentic_plan_places_the_verified_call(monkeypatch, tmp_path):
             credential_store=configured_store(tmp_path),
             tunnel_manager=tunnel,
             twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
+            tunnel_readiness_checker=lambda url: True,
         )
     )
     task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
@@ -230,6 +322,7 @@ def test_live_instruction_reports_when_realtime_injection_fails(monkeypatch, tmp
             credential_store=configured_store(tmp_path),
             tunnel_manager=tunnel,
             twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
+            tunnel_readiness_checker=lambda url: True,
         )
     )
     task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()
@@ -274,6 +367,7 @@ def test_terminal_status_callback_revokes_the_call_capabilities(monkeypatch, tmp
             tunnel_manager=tunnel,
             twilio_client_factory=lambda account_sid, auth_token: SimpleNamespace(calls=calls),
             capability_store=capabilities,
+            tunnel_readiness_checker=lambda url: True,
         )
     )
     task = client.post("/api/tasks", json={"goal": "Request a service quote."}).json()

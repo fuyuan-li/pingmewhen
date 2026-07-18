@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
+import time
 from threading import Lock
 from typing import Any, Callable
 from urllib.parse import urljoin
+from urllib.request import urlopen
 
 
 class TunnelError(RuntimeError):
@@ -21,6 +24,17 @@ def terminate_cloudflare(port: int) -> None:
     from pycloudflared import try_cloudflare
 
     try_cloudflare.terminate(port)
+
+
+def public_health_ready(public_url: str) -> bool:
+    try:
+        with urlopen(f"{public_url.rstrip('/')}/api/health", timeout=2) as response:
+            if response.status != 200:
+                return False
+            payload = json.loads(response.read().decode("utf-8"))
+            return payload.get("status") == "ok"
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
 
 
 class TunnelManager:
@@ -64,6 +78,24 @@ class TunnelManager:
             raise TunnelError("The local call tunnel is not active.")
         result = urljoin(f"{self._public_url}/", path.lstrip("/"))
         return f"{result}?{query}" if query else result
+
+    def wait_until_ready(
+        self,
+        checker: Callable[[str], bool] | None = None,
+        attempts: int = 20,
+        interval: float = 0.5,
+    ) -> str:
+        public_url = self._public_url
+        if not public_url:
+            raise TunnelError("The local call tunnel is not active.")
+        probe = checker or public_health_ready
+        total_attempts = max(1, attempts)
+        for attempt in range(total_attempts):
+            if probe(public_url):
+                return public_url
+            if attempt + 1 < total_attempts:
+                time.sleep(max(0, interval))
+        raise TunnelError("Relay's secure connection did not become ready in time.")
 
     def release(self) -> None:
         with self._lock:
