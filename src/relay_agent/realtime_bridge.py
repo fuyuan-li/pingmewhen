@@ -32,14 +32,15 @@ from relay_agent.names import normalize_display_name
 SENSITIVE_FIELD_PATTERNS = {
     "card_number": (r"\b(?:credit|debit|payment)?\s*card\s+number\b", r"\b(?:\d[ -]?){13,19}\b"),
     "expiration": (r"\bexpir(?:ation|y|es)\b", r"\bexp(?:iry)?\s*(?:date)?\b"),
-    "cvv": (r"\bcvv\b", r"\bcvc\b", r"\bsecurity\s+code\b"),
+    "cvv": (r"\bcvv\b", r"\bcvc\b", r"\bccv\b", r"\bsecurity\s+code\b", r"\bcard\s+verification\b"),
     "ssn_last_four": (
         r"\blast\s+(?:four|4)\b.{0,30}\b(?:social security|ssn)\b",
         r"\b(?:social security|ssn)\b.{0,30}\blast\s+(?:four|4)\b",
     ),
     "full_ssn": (
-        r"\bfull\s+(?:social security|ssn)\b",
-        r"\bsocial security (?:number|no\.?|#)\b",
+        r"\bssn\b",
+        r"\bsocial security\b",
+        r"\bsocial\b.{0,15}\bnumber\b",
         r"\b\d{3}[ -]\d{2}[ -]\d{4}\b",
     ),
     "date_of_birth": (r"\bdate of birth\b", r"\bbirth\s*date\b", r"\bdob\b"),

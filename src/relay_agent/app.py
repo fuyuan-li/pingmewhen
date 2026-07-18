@@ -537,8 +537,6 @@ def create_app(
                     raise InvalidAction("Relay will not repeat a protected value. Type a non-sensitive response instead.")
                 if field != "verification_request" and not is_valid_sensitive_value(field, text):
                     raise InvalidAction("Enter a valid value for the protected field Relay detected.")
-            elif looks_like_protected_value(text):
-                raise InvalidAction("That looks like protected data. Use the protected takeover flow instead.")
             events.append(
                 "call.takeover_speech_started",
                 {"task_id": task_id, "sensitive": bool(task.get("takeover_sensitive"))},

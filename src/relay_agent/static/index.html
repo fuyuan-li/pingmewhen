@@ -182,6 +182,11 @@
       .instruction-row .task-context-input { position: absolute; width: 1px; min-width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; }
       .secure-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 10px 0; }
       .secure-form input { min-width: 0; padding: 10px; border: 1px solid #cbd1da; border-radius: 9px; }
+      .masked-field { display: flex; gap: 8px; align-items: stretch; margin: 10px 0; }
+      .masked-field input { flex: 1 1 auto; min-width: 0; padding: 11px 12px; border: 1px solid #cbd1da; border-radius: 10px; font: 600 16px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .38em; }
+      .masked-field input[type="date"], .masked-field input[type="month"] { letter-spacing: normal; font-family: inherit; }
+      .masked-field .reveal { flex: 0 0 auto; width: 44px; border: 1px solid #cbd1da; border-radius: 10px; background: #f4f5f7; font-size: 16px; }
+      .masked-field .reveal.on { border-color: #7580e8; background: #e9ebff; }
       .error { display: none; margin: 0 0 10px; padding: 9px 11px; border-radius: 9px; color: #9b342d; background: #fff0ef; font-size: 12px; }
       @media (max-width: 650px) {
         .shell { width: min(100% - 16px, 1120px); padding: 12px 0; }
@@ -796,18 +801,24 @@
         const hangup = document.querySelector('#hangup');
         hangup.style.display = activePhase === 'calling' && runtimeMode !== 'demo' && task.status !== 'complete' ? 'block' : 'none';
         hangup.disabled = task.status === 'complete' || !task.current_call;
-        planningInstruction.disabled = task.status === 'complete' || (task.secure_mode && !task.takeover_active);
+        const sensitiveFieldEntry = Boolean(
+          task.takeover_active
+          && task.takeover_sensitive
+          && task.secure_expected_field
+          && task.secure_expected_field !== 'verification_request'
+        );
+        planningInstruction.disabled = task.status === 'complete' || sensitiveFieldEntry || (task.secure_mode && !task.takeover_active);
         const defaultPlaceholder = activePhase === 'calling'
           ? task.takeover_active
             ? task.takeover_sensitive
               ? task.secure_expected_field === 'verification_request'
                 ? 'Type a non-sensitive response · protected values will be rejected…'
-                : 'Type the protected value to speak locally…'
+                : 'Use the protected field above to speak this value…'
               : 'Type what you want to say to the representative…'
             : 'Message Relay privately · answer, update context, or change call strategy…'
           : 'Reply to Relay or revise the plan…';
-        if (!task.prompt?.placeholder && !task.takeover_active) planningInstruction.placeholder = defaultPlaceholder;
-        document.querySelector('#planning-send').disabled = task.status === 'complete' || (task.secure_mode && !task.takeover_active);
+        if (!task.prompt?.placeholder && (!task.takeover_active || sensitiveFieldEntry)) planningInstruction.placeholder = defaultPlaceholder;
+        document.querySelector('#planning-send').disabled = task.status === 'complete' || sensitiveFieldEntry || (task.secure_mode && !task.takeover_active);
         document.querySelector('#task-attach-label').style.display = activePhase === 'planning' && task.status !== 'complete' ? 'inline-flex' : 'none';
         if (task.auto_advance) {
           advanceTimer = setTimeout(() => act('advance'), 850);
@@ -1076,7 +1087,10 @@
         const samples = decodeMuLaw(payload);
         const now = context.currentTime;
         let startAt = Math.max(listenPlayheads[source] || 0, now + 0.06);
-        if (startAt > now + 0.8) return;
+        // Relay speech is buffered on the backend and delivered to the monitor as one burst per response, so a
+        // whole utterance can be scheduled at once. Only drop if the lead grows implausibly large (a stalled tab
+        // or a runaway backlog), not for a normal multi-second reply.
+        if (startAt > now + 20) return;
         const buffer = context.createBuffer(1, samples.length, 8000);
         buffer.copyToChannel(samples, 0);
         const node = context.createBufferSource();
@@ -1103,6 +1117,63 @@
         if (context && context.state !== 'closed') context.close();
         listenPlayheads = {representative: 0, relay: 0};
         updateListenButton();
+      }
+
+      const TAKEOVER_FIELD_META = {
+        card_number: {label: 'card number', maxlen: 19, min: 13},
+        cvv: {label: 'security code', maxlen: 4, min: 3},
+        full_ssn: {label: 'Social Security number', maxlen: 9, min: 9},
+        ssn_last_four: {label: 'last four of the SSN', maxlen: 4, min: 4},
+      };
+
+      function renderTakeoverFieldInput(promptBox, field) {
+        const wrap = document.createElement('div');
+        wrap.className = 'masked-field';
+        const input = document.createElement('input');
+        input.autocomplete = 'off';
+        input.setAttribute('aria-label', 'Value spoken locally to the representative');
+        const speak = document.createElement('button');
+        speak.className = 'choice';
+        speak.textContent = 'Speak to the representative';
+
+        if (field === 'date_of_birth' || field === 'expiration') {
+          input.type = field === 'expiration' ? 'month' : 'date';
+          wrap.appendChild(input);
+          speak.onclick = () => {
+            const value = input.value.trim();
+            if (!value) return showError('Pick a date first.');
+            sendTakeoverText(value);
+          };
+          promptBox.append(wrap, speak);
+          return;
+        }
+
+        const meta = TAKEOVER_FIELD_META[field] || {label: 'value', maxlen: 19, min: 1};
+        input.type = 'password';
+        input.inputMode = 'numeric';
+        input.maxLength = meta.maxlen;
+        input.placeholder = `Enter the ${meta.label}`;
+        input.oninput = () => { input.value = input.value.replace(/\D/g, '').slice(0, meta.maxlen); };
+        const reveal = document.createElement('button');
+        reveal.className = 'reveal';
+        reveal.type = 'button';
+        reveal.textContent = '👁';
+        reveal.title = 'Show value';
+        reveal.onclick = () => {
+          const shown = input.type === 'text';
+          input.type = shown ? 'password' : 'text';
+          reveal.classList.toggle('on', !shown);
+        };
+        wrap.append(input, reveal);
+        speak.onclick = () => {
+          const digits = input.value.replace(/\D/g, '');
+          if (digits.length < meta.min) return showError(`Enter the full ${meta.label} first.`);
+          sendTakeoverText(digits);
+        };
+        const hint = document.createElement('div');
+        hint.className = 'hint';
+        hint.textContent = 'Typed here, spoken to the representative by local voice only — never sent to the AI or logged.';
+        promptBox.append(wrap, speak, hint);
       }
 
       function renderPrompt(prompt, promptBox) {
@@ -1158,6 +1229,16 @@
             window.speechSynthesis.speak(utterance);
           };
           promptBox.append(warning, form, speak);
+        }
+
+        if (
+          prompt.kind === 'takeover_required'
+          && runtimeMode !== 'demo'
+          && task?.takeover_active
+          && task?.secure_expected_field
+          && task.secure_expected_field !== 'verification_request'
+        ) {
+          renderTakeoverFieldInput(promptBox, task.secure_expected_field);
         }
 
         const choices = document.createElement('div');

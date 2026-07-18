@@ -162,6 +162,12 @@ def test_transcripts_are_classified():
     assert requested_sensitive_field("May I repeat that number back to verify it?") == "verification_request"
     assert requested_sensitive_field("What are the last four digits of your SSN?") == "ssn_last_four"
     assert requested_sensitive_field("What is your date of birth?") == "date_of_birth"
+    # A bare SSN / social-security request (no "full" or "number") and a "CCV" misspelling must still be caught,
+    # so the deterministic takeover triggers instead of looping through the Gatekeeper.
+    assert requested_sensitive_field("Ok, what's your SSN?") == "full_ssn"
+    assert requested_sensitive_field("I need your social security to verify identity.") == "full_ssn"
+    assert requested_sensitive_field("What is the CCV?") == "cvv"
+    assert requested_sensitive_field("Please hold for one moment.") is None
 
 
 def test_takeover_continuity_redacts_identifiers_and_secrets():
