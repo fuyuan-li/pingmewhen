@@ -58,8 +58,8 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert "one or two short sentences" in instructions
     assert "Always refer to the represented person by the exact name" in instructions
     assert "Never replace \"Mina\" with 'the customer,'" in instructions
-    assert 'ADDRESSING: You are speaking directly to "Example Provider"' in instructions
-    assert 'Address "Example Provider" as \'you\'' in instructions
+    assert 'ADDRESSING: The person who answered this phone IS "Example Provider"' in instructions
+    assert "Address them as 'you', always" in instructions
     assert "Never vocalize planning, analysis, self-talk" in instructions
     assert "while they follow along by text" not in instructions
     assert update["session"]["tool_choice"] == "none"
@@ -1834,5 +1834,5 @@ def test_representative_turn_request_carries_full_context_and_toggles_disclosure
     # Later turns keep the full context but switch to "already disclosed, do not reintroduce".
     assert "Ask for price and availability." in later["response"]["instructions"]
     assert "CONTINUING" in later["response"]["instructions"]
-    assert "Do NOT introduce yourself again" in later["response"]["instructions"]
+    assert "Do NOT re-introduce" in later["response"]["instructions"]
     assert "FIRST TURN" not in later["response"]["instructions"]

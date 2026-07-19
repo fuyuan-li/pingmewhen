@@ -132,7 +132,8 @@ def test_dashboard_keeps_private_speakers_left_and_restores_failed_text():
     assert "Private local voice" in source
     assert "callSummaryMarkup" in source
     assert "configureComposer" in source
-    assert "type = kind === 'date' ? 'date'" in source
+    assert "renderTakeoverFieldInput" in source
+    assert "Enter the protected value in the field above" in source
     assert "optimisticStart" in source
     assert 'id="listen"' in source
     assert "/listen-capability" in source

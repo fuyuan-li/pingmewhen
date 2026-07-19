@@ -164,7 +164,7 @@
       .representative { border-bottom-left-radius: 5px; background: white; border: 1px solid #e1e4e9; }
       .relay { border-bottom-right-radius: 5px; background: #0f9d6b; color: white; }
       .user_private { border: 1px solid #abd8c4; border-bottom-right-radius: 5px; background: #e6f7ef; color: #14533b; }
-      .relay_private { border: 1px dashed #9ca6f5; border-bottom-right-radius: 5px; background: #f0f1ff; color: #3540a1; }
+      .relay_private { border: 1px dashed #cbd1da; border-bottom-right-radius: 5px; background: #f4f5f7; color: #24282e; }
       .planning-board .relay_private { border-bottom-right-radius: 16px; border-bottom-left-radius: 5px; }
       .speaker { margin: 0 4px 4px; color: #7a818c; font-size: 10px; font-weight: 750; text-transform: uppercase; }
       .align-right { text-align: right; }
@@ -1114,20 +1114,25 @@
 
       function configureComposer(prompt, activePhase) {
         const hint = document.querySelector('#composer-field-hint');
-        let kind = prompt?.input_kind || 'text';
-        if (task?.takeover_active && task?.takeover_sensitive) kind = task.prompt?.input_kind || 'masked_numeric';
-        const modeKey = `${kind}:${task?.secure_expected_field || ''}:${prompt?.question || ''}`;
-        if (modeKey !== composerModeKey && (composerModeKey.includes('masked') || kind.includes('masked'))) {
-          planningInstruction.value = '';
-        }
-        composerModeKey = modeKey;
-        planningInstruction.type = kind === 'date' ? 'date' : kind === 'month' ? 'month' : kind.includes('masked') ? 'password' : 'text';
-        planningInstruction.inputMode = kind.includes('numeric') ? 'numeric' : 'text';
-        planningInstruction.pattern = kind.includes('numeric') ? '[0-9]*' : '';
-        planningInstruction.maxLength = Number(prompt?.max_length || 1000);
-        planningInstruction.autocomplete = kind.includes('masked') ? 'off' : 'on';
-        planningInstruction.placeholder = prompt?.placeholder || (activePhase === 'calling' ? 'Message PingMeWhen privately…' : 'Reply to PingMeWhen…');
-        const hintText = prompt?.hint || (kind.includes('masked') ? 'Protected input is hidden as you type.' : '');
+        // Structured protected input (card, CVV, SSN, dates) lives in the prompt-box widget above, not in this
+        // composer. Never turn the composer into a date/masked input — that produced a disabled duplicate that
+        // looked like the field to use. The composer stays a plain text box (private messages, general takeover,
+        // and non-sensitive verification replies).
+        const widgetField = Boolean(
+          task?.takeover_active
+          && task?.takeover_sensitive
+          && task?.secure_expected_field
+          && task.secure_expected_field !== 'verification_request'
+        );
+        planningInstruction.type = 'text';
+        planningInstruction.inputMode = 'text';
+        planningInstruction.pattern = '';
+        planningInstruction.maxLength = 1000;
+        planningInstruction.autocomplete = 'on';
+        planningInstruction.placeholder = widgetField
+          ? 'Enter the protected value in the field above ↑'
+          : (prompt?.placeholder || (activePhase === 'calling' ? 'Message PingMeWhen privately…' : 'Reply to PingMeWhen…'));
+        const hintText = widgetField ? '' : (prompt?.hint || '');
         hint.textContent = hintText;
         hint.classList.toggle('visible', Boolean(hintText));
       }
