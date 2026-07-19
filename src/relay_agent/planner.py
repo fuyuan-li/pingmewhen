@@ -76,6 +76,21 @@ class PlanningTurn(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
 
 
+class CallSummary(BaseModel):
+    outcome: str = Field(
+        description="One sentence stating what was actually achieved or settled on the call, from the caller's "
+        "point of view. Not a description of the call happening — the result."
+    )
+    highlights: list[str] = Field(
+        default_factory=list,
+        description="3-6 short bullet points of the concrete facts that matter: prices, dates, confirmation or "
+        "reference numbers, commitments made, and anything still open. Synthesize, never quote verbatim.",
+    )
+    next_step: str = Field(
+        description="One sentence naming the single most useful next action for the user."
+    )
+
+
 class Planner(Protocol):
     ready: bool
     model: str
@@ -166,6 +181,47 @@ class OpenAIPlanner:
         if parsed is None:
             raise PlannerError("The production planner returned no usable plan.")
         return parsed
+
+    def summarize_call(
+        self,
+        goal: str,
+        purpose: str,
+        target: str,
+        transcript: str,
+        confirmed: list[str],
+    ) -> CallSummary | None:
+        confirmed_block = "\n".join(f"- {line}" for line in confirmed) or "None recorded."
+        input_messages = [
+            {
+                "role": "developer",
+                "content": (
+                    "You are PingMeWhen's post-call summarizer. You are given the transcript of a phone call that "
+                    "PingMeWhen (an AI assistant) made to a representative on the user's behalf. Write a short, "
+                    "useful summary for the user who delegated the call. Do NOT transcribe or quote the call "
+                    "verbatim — synthesize it. State what was actually achieved or decided (the result, not that a "
+                    "call happened), the concrete facts that matter (prices, dates, reference or confirmation "
+                    "numbers, commitments, anything left unresolved), and the single most useful next step. Be "
+                    "concise and strictly factual; never invent anything that is not supported by the transcript. "
+                    "If the call achieved little, say so plainly."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"USER GOAL:\n{goal}\n\nCALL PURPOSE:\n{purpose}\n\nWHO WAS CALLED: {target}\n\n"
+                    f"FACTS THE USER CONFIRMED DURING THE CALL:\n{confirmed_block}\n\nTRANSCRIPT:\n{transcript}"
+                ),
+            },
+        ]
+        try:
+            response = self._client.responses.parse(
+                model=self.model,
+                input=input_messages,
+                text_format=CallSummary,
+            )
+        except Exception:
+            return None
+        return response.output_parsed
 
 
 def planner_from_environment() -> Planner:

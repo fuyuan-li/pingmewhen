@@ -166,6 +166,42 @@ def test_agentic_call_state_and_transcript_return_to_private_review(tmp_path):
     assert task["prompt"]["options"] == []
 
 
+def test_completed_call_uses_the_planner_generated_summary_when_available(tmp_path):
+    from relay_agent.planner import CallSummary
+
+    class SummarizingPlanner(FakePlanner):
+        def __init__(self):
+            super().__init__()
+            self.summarize_args = None
+
+        def summarize_call(self, goal, purpose, target, transcript, confirmed):
+            self.summarize_args = {"transcript": transcript, "target": target}
+            return CallSummary(
+                outcome="Provider agreed to $100/month with a 12-month contract.",
+                highlights=["Price: $100/month", "Contract: 12 months", "Install: Aug 1"],
+                next_step="Confirm the Aug 1 install window with the user.",
+            )
+
+    planner = SummarizingPlanner()
+    engine = AgenticTaskEngine(EventLog(tmp_path / "events.jsonl"), planner, SQLiteTaskStore(tmp_path / "relay.db"), lambda _: "")
+    task = engine.create("Call a provider using 123 Main Street, Washington, DC 20001.")
+    task = engine.act(task["id"], "answer", "approve")
+    pending = engine.next_phone_action(task["id"])
+    engine.begin_call(task["id"], pending["index"], "CA123")
+    engine.mark_call_connected(task["id"])
+    engine.append_transcript(task["id"], "relay", "Hi, I'm an AI assistant calling on behalf of Taylor.")
+    engine.append_transcript(task["id"], "representative", "Sure, $100 a month on a 12-month contract, install Aug 1.")
+    task = engine.finish_call(task["id"], "CA123", "completed")
+
+    summary = next(event for event in task["events"] if event["type"] == "call_summary")
+    assert summary["outcome"] == "Provider agreed to $100/month with a 12-month contract."
+    assert summary["highlights"] == ["Price: $100/month", "Contract: 12 months", "Install: Aug 1"]
+    assert summary["next_step"] == "Confirm the Aug 1 install window with the user."
+    # The synthesized transcript, not a verbatim excerpt, is what gets summarized.
+    assert "Representative:" in planner.summarize_args["transcript"]
+    assert "PingMeWhen:" in planner.summarize_args["transcript"]
+
+
 def test_live_user_input_request_populates_prompt_and_answer_resumes_call(tmp_path):
     engine = AgenticTaskEngine(
         EventLog(tmp_path / "events.jsonl"),

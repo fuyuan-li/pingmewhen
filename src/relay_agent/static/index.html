@@ -1106,7 +1106,7 @@
         return `<div class="call-summary-head"><span>${escapeHtml(event.text || 'Post-call summary')}</span><span class="call-summary-status">${escapeHtml(event.outcome || 'Complete')}</span></div>
           <div class="call-summary-body">
             <div class="call-summary-section"><strong>${escapeHtml(event.target || 'External call')}</strong></div>
-            <div class="call-summary-section"><strong>Representative highlights</strong>${list(event.highlights, 'No representative transcript was captured.')}</div>
+            <div class="call-summary-section"><strong>Key points</strong>${list(event.highlights, 'No key points were captured.')}</div>
             <div class="call-summary-section"><strong>Confirmed during the call</strong>${list(event.confirmed, 'No additional user-confirmed facts were recorded.')}</div>
             <div class="call-summary-section"><strong>Next</strong>${escapeHtml(event.next_step || 'Review the transcript or give PingMeWhen the next instruction.')}</div>
           </div>`;
@@ -1351,6 +1351,15 @@
       }
 
       function renderPrompt(prompt, promptBox) {
+        // The call view re-renders every ~750ms poll. If a protected-field takeover input for the same field is
+        // already on screen, leave it in place — rebuilding it would wipe what the user is part-way through typing
+        // (most visible on the native date picker, but it hit every takeover field).
+        const activeTakeoverField =
+          prompt && prompt.kind === 'takeover_required' && task?.takeover_active && task?.secure_expected_field
+            ? task.secure_expected_field
+            : '';
+        if (activeTakeoverField && promptBox.dataset.takeoverField === activeTakeoverField) return;
+        promptBox.dataset.takeoverField = activeTakeoverField;
         promptBox.innerHTML = '';
         promptBox.style.display = prompt ? 'block' : 'none';
         if (!prompt) return;

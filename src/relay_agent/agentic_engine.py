@@ -672,6 +672,7 @@ class AgenticTaskEngine:
         return snapshot
 
     def finish_call(self, task_id: str, call_sid: str, status: str) -> dict[str, Any]:
+        summary_inputs: dict[str, Any] | None = None
         with self._lock:
             task = self._require(task_id)
             item = next((entry for entry in task.get("execution_queue", []) if entry.get("call_sid") == call_sid), None)
@@ -744,21 +745,16 @@ class AgenticTaskEngine:
                     for update in task.get("context_updates", [])
                     if str(update.get("summary", "")).strip()
                 ]
+                transcript_lines = [
+                    f"{'Representative' if event['speaker'] == 'representative' else 'PingMeWhen'}: {event['text']}"
+                    for event in task["events"]
+                    if event["type"] == "message" and event.get("speaker") in {"representative", "relay"}
+                ]
                 self._append(
                     task,
                     "message",
                     speaker="relay_private",
                     text="The approved calls are complete. Here is the call summary and retained transcript.",
-                )
-                self._append(
-                    task,
-                    "call_summary",
-                    text="Post-call summary",
-                    target=", ".join(completed_targets) or item["action"]["target"],
-                    outcome="Call completed",
-                    highlights=representative_turns[-5:],
-                    confirmed=confirmed_updates[-5:],
-                    next_step="Review the outcome, ask a follow-up, or tell PingMeWhen what to do next.",
                 )
                 task["prompt"] = {
                     "kind": "text_reply",
@@ -767,6 +763,50 @@ class AgenticTaskEngine:
                     "input_kind": "text",
                     "placeholder": "Ask about the call or give the next instruction…",
                 }
+                summary_inputs = {
+                    "goal": task.get("goal", ""),
+                    "purpose": item["action"].get("purpose", ""),
+                    "target": ", ".join(completed_targets) or item["action"]["target"],
+                    "transcript": "\n".join(transcript_lines)[-12000:],
+                    "confirmed": confirmed_updates,
+                    "fallback_highlights": representative_turns[-5:],
+                }
+            self._store.save("production", task)
+            snapshot = self._snapshot(task)
+        if summary_inputs is not None:
+            snapshot = self._attach_call_summary(task_id, summary_inputs)
+        return snapshot
+
+    def _attach_call_summary(self, task_id: str, inputs: dict[str, Any]) -> dict[str, Any]:
+        summary = None
+        summarizer = getattr(self._planner, "summarize_call", None)
+        if summarizer is not None and inputs["transcript"].strip():
+            try:
+                summary = summarizer(
+                    inputs["goal"], inputs["purpose"], inputs["target"], inputs["transcript"], inputs["confirmed"]
+                )
+            except Exception:
+                summary = None
+        with self._lock:
+            task = self._require(task_id)
+            if summary is not None:
+                outcome = summary.outcome.strip() or "Call completed"
+                highlights = [line.strip() for line in summary.highlights if line.strip()][:6]
+                next_step = summary.next_step.strip() or "Ask a follow-up or give PingMeWhen the next instruction."
+            else:
+                outcome = "Call completed"
+                highlights = inputs["fallback_highlights"]
+                next_step = "Review the outcome, ask a follow-up, or tell PingMeWhen what to do next."
+            self._append(
+                task,
+                "call_summary",
+                text="Post-call summary",
+                target=inputs["target"],
+                outcome=outcome,
+                highlights=highlights,
+                confirmed=inputs["confirmed"][-5:],
+                next_step=next_step,
+            )
             self._store.save("production", task)
             return self._snapshot(task)
 
