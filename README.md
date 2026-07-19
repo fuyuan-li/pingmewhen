@@ -8,13 +8,13 @@ The name is the point: the agent works in the background and pings you only when
 
 ## What it does
 
-- **Real outbound calls on your own keys.** Bring your own Twilio and OpenAI credentials. There is no hosted backend, shared account, or shared credential store — everything runs on your machine.
-- **Plan first, approve, then act.** A model-driven planner turns your goal and any attached PDF or text file into a reviewable plan. Nothing is dialed until you approve it.
-- **Two surfaces.** The **Call Console** shows the representative's speech and the agent's replies live; the **Private Workspace** is where you steer, answer, and approve — privately, never heard on the call.
-- **Asks before it commits.** Prices, scheduling, enrollment, and payments pause and consult you; a budget or preference is context, never permission.
-- **Human takeover.** Tap **Take over** and type — your words are spoken to the representative by on-device voice, and the whole interface drops into a private dark mode while you're on the line.
-- **Listen in.** Monitor the live call audio in your browser, read-only, whenever you want to hear how it's going.
-- **Sensitive data stays local.** When a card number or SSN is requested, the cloud model is muted and you type the value yourself; it's spoken by local voice only — never sent to the model, never logged.
+These are the product's highlights, ranked. See [`docs/HIGHLIGHTS.md`](docs/HIGHLIGHTS.md) for the full positioning.
+
+- **You stay in control — it knows when to stop.** A model-driven planner turns your goal and any attached PDF or text into a plan you approve before anything happens. Prices, scheduling, enrollment, and payments pause and consult you; a budget or preference is context, never permission. The agent handles the mechanical part and hands the conversation back the moment judgment is needed.
+- **It gives you your attention back.** It does the tedious, repetitive, waiting part and pings you in only for the few seconds that actually need a person — you're not stuck on the line.
+- **Private by design.** Runs on your machine and your own Twilio/OpenAI keys — no hosted backend or shared credentials. Calls run over a secure tunnel with per-call, revocable capability tokens. Sensitive fields (card number, CVV, SSN) never touch the model: it's muted, you type the value, and it's spoken by on-device voice only — never sent to a model, never logged.
+- **It talks to the real phone world.** Doctors, insurers, landlords, offices — the places that matter have no API, only a phone number. PingMeWhen reaches them over the actual phone network, calling real people.
+- **Fully observable, always yours to take back.** The **Call Console** shows both sides of the call live and the **Private Workspace** is where you steer, privately. Listen in on the audio, or tap **Take over** and type — your words are spoken to the representative, and the interface drops into a private dark mode while you're on the line.
 
 ## Install and run
 
