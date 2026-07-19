@@ -1,55 +1,69 @@
-# Relay
+# PingMeWhen
 
-> Give Relay a goal and the relevant context. It handles the phone calls, keeps you informed visually, and brings you in only when your knowledge, approval, or voice is needed.
+> Hand off the call. PingMeWhen makes it for you, keeps you in the loop visually, and pings you in only when your knowledge, approval, or voice is actually needed.
 
-Relay is a local-first, human-supervised task agent that can use phone calls as an action channel. It converts synchronous voice workflows into a low-attention visual experience: the user can follow a live conversation, answer with quick controls or text, redirect strategy, approve consequential actions, or take over the call.
+PingMeWhen is a local-first, human-supervised voice agent. Give it a goal and the relevant context; it plans the call, dials in real time, and turns a synchronous phone conversation into a low-attention visual experience. You watch the live transcript, answer with quick replies or text, redirect strategy, approve anything consequential, listen to the audio, or take over and speak — by typing — whenever you want.
 
-The OpenAI Build Week demo asks several simulated insurers for renters-insurance quotes, shows a factual comparison, waits for the user to select one, calls back to continue the application, and completes a sandboxed secure-payment flow.
+The name is the point: the agent works in the background and pings you only when you're needed.
 
-## Current state
+## What it does
 
-The standard `relay` mode has a model-driven private planning loop backed by the OpenAI Responses API and Structured Outputs. It reads the goal and locally extracted PDF text, asks blocking questions, uses hosted web search to resolve current official contact details, produces a structured action plan, and waits for explicit approval. An approved phone action with a sourced E.164 number now dials through Twilio, opens a bidirectional Media Stream to OpenAI Realtime, starts the representative conversation, accepts private live instructions, persists both transcript sides, advances sequential calls, and returns to private review. Complete task state is stored in local SQLite and reloads after restart. Relay is a bring-your-own-key, single-user local tool: it has no hosted backend, Relay account, or shared credential store.
+- **Real outbound calls on your own keys.** Bring your own Twilio and OpenAI credentials. There is no hosted backend, shared account, or shared credential store — everything runs on your machine.
+- **Plan first, approve, then act.** A model-driven planner turns your goal and any attached PDF or text file into a reviewable plan. Nothing is dialed until you approve it.
+- **Two surfaces.** The **Call Console** shows the representative's speech and the agent's replies live; the **Private Workspace** is where you steer, answer, and approve — privately, never heard on the call.
+- **Asks before it commits.** Prices, scheduling, enrollment, and payments pause and consult you; a budget or preference is context, never permission.
+- **Human takeover.** Tap **Take over** and type — your words are spoken to the representative by on-device voice, and the whole interface drops into a private dark mode while you're on the line.
+- **Listen in.** Monitor the live call audio in your browser, read-only, whenever you want to hear how it's going.
+- **Sensitive data stays local.** When a card number or SSN is requested, the cloud model is muted and you type the value yourself; it's spoken by local voice only — never sent to the model, never logged.
 
-`relay demo` remains the deterministic end-to-end insurance preview. The **Private Workspace** holds task memory; the **Call Console** presents paced simulated calls, barge-in, approval gates, per-call history, and the field-by-field fake payment handoff.
+## Install and run
 
-## How Codex and OpenAI models are used
-
-Relay is built with Codex as the repository-scale engineering agent. The repo-level [`AGENTS.md`](AGENTS.md) gives Codex the durable product, safety, architecture, and verification contract; Codex uses that contract together with the PRD and design docs to implement, review, and test changes across the application rather than generating isolated snippets. Concrete results include the schema-validated planner, application-owned approval state machine, persistent task store, redacted event log, deterministic call simulator, and their tests.
-
-The two OpenAI layers have deliberately different jobs:
-
-- **Codex builds and verifies Relay:** it works across the repository, keeps implementation aligned with the product constraints, runs the test suite, and records key decisions in the docs.
-- **A user-selected GPT model runs Relay's private planner:** standard `relay` calls the Responses API with Pydantic Structured Outputs to clarify goals and produce typed action plans; application code, not model output, owns approval and execution boundaries.
-
-Codex is therefore central to the engineering workflow, but it is not an audio transport or a substitute credential for the Realtime API. The submission's Codex Session ID identifies the session in which the core functionality was built.
-
-## Commands
+From source with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync --dev
-uv run relay
+uv run pingmewhen          # standard mode (uses your credentials)
+uv run pingmewhen demo     # fully simulated demo, no credentials needed
 ```
 
-Open the single demo mode with:
+To install it as a command-line tool:
 
 ```bash
-uv run relay demo
+uv tool install .          # then run `pingmewhen` or `pingmewhen demo` from anywhere
 ```
 
-Use `relay demo` to test the complete simulated workflow without credentials. Standard `relay` opens a first-run setup screen when any required credential is missing:
+Standard mode opens a first-run setup screen when any required credential is missing:
 
 - `OPENAI_API_KEY`
 - `TWILIO_ACCOUNT_SID`
 - `TWILIO_AUTH_TOKEN`
 - `TWILIO_FROM_NUMBER`
 
-Environment variables take precedence, so a local `.env` remains supported. Otherwise the dashboard stores credentials in `~/.relay/credentials.json` with owner-only permissions. Relay's maintainers never receive them and pay none of the user's provider costs.
+Environment variables take precedence, so a local `.env` works too. Otherwise the dashboard stores credentials in an owner-only local file. PingMeWhen's maintainers never receive them and pay none of your provider costs.
 
-The dashboard's **Models** control configures the three roles independently. Planning offers `gpt-5.4-mini` (default), `gpt-5.4`, and `gpt-5.6`; Realtime voice offers `gpt-realtime-2.1-mini` (default) and `gpt-realtime-2.1`; transcription offers `gpt-4o-mini-transcribe` (default) and `gpt-4o-transcribe`. Choices are stored locally in `~/.relay/model-settings.json`, not in `.env`. A changed planning model applies to the next planning turn, while changed voice and transcription models apply to the next Realtime call session.
+The dashboard's **Models** control configures three roles independently: planning (`gpt-5.4-mini` default), Realtime voice (`gpt-realtime-2.1-mini` default), and transcription (`gpt-4o-mini-transcribe` default). Choices are stored locally. By default the dashboard runs at `http://127.0.0.1:8765`; set `RELAY_DATA_DIR` to relocate local data or `RELAY_PORT` to change the port.
 
-Production `relay` starts `pycloudflared` in the background with the localhost server, keeps that HTTPS address warm while the user plans, and reuses it for Twilio voice/status callbacks and the WSS media endpoint until Relay exits. There is no `RELAY_PUBLIC_BASE_URL` setup step. Each call gets separate random, call-bound capabilities for voice, status, and media; they are revoked when the call ends and redacted from logs. A supplied Twilio signature is also validated with the local `TWILIO_AUTH_TOKEN` and rejected if invalid. Audio remains PCMU end to end between Twilio Media Streams and OpenAI Realtime; the dashboard polls durable local task state to show completed transcript turns.
+Production calls start a `pycloudflared` tunnel alongside the local server so Twilio can reach the voice, status, and media webhooks over HTTPS/WSS. Each call gets separate random, call-bound capability tokens that are revoked when the call ends and redacted from logs; a supplied Twilio signature is also validated locally. Audio stays PCMU end to end between Twilio Media Streams and OpenAI Realtime.
 
-By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `~/.relay/logs/`, stores durable task state in `~/.relay/state/relay.db`, and keeps credentials in `~/.relay/credentials.json`. Set `RELAY_DATA_DIR` to place all of these under one chosen local directory, or `RELAY_PORT` to change the local port.
+## How Codex and OpenAI models are used
+
+PingMeWhen is built with Codex as the repository-scale engineering agent. The repo-level [`AGENTS.md`](AGENTS.md) gives Codex the durable product, safety, architecture, and verification contract; Codex uses that contract together with the PRD and design docs to implement, review, and test changes across the application rather than generating isolated snippets.
+
+The two OpenAI layers have deliberately different jobs:
+
+- **Codex builds and verifies PingMeWhen:** it works across the repository, keeps the implementation aligned with the product constraints, runs the test suite, and records key decisions in the docs.
+- **A user-selected GPT model runs PingMeWhen's private planner and live call:** the planner uses the Responses API with Pydantic Structured Outputs to clarify goals and produce typed action plans, and the call uses OpenAI Realtime for live voice. Application code, not model output, owns every approval and execution boundary.
+
+Codex is central to the engineering workflow, but it is not an audio transport or a substitute credential for the Realtime API.
+
+## Important boundaries
+
+- The agent discloses that it is an AI when it speaks, and never gives itself a fake human name.
+- You select outcomes and approve consequential actions; a budget or preference never authorizes a decision on its own.
+- Sensitive fields (card number, CVV, SSN) are handled locally: the cloud model is removed from the media path, transcription is paused, and the value you type is synthesized to speech on-device and injected only into the representative's call leg. It is never sent to the model or written to logs.
+- Human takeover is text-to-speech today (you type; local voice speaks). Live browser-microphone takeover is not connected yet and is not represented as available.
+- Attached context (PDF or text) is stored locally. Standard planning sends bounded extracted text to the configured model; the simulated demo does not.
+- The `pingmewhen demo` workflow is fully simulated and uses only fake data.
 
 ## Repository map
 
@@ -57,37 +71,22 @@ By default, Relay opens `http://127.0.0.1:8765`, writes redacted events under `~
 .
 ├── AGENTS.md
 ├── README.md
-├── idea.md
 ├── pyproject.toml
 ├── docs/
 │   ├── DECISIONS.md
 │   ├── DESIGN.md
 │   ├── IMPLEMENTATION_PLAN.md
 │   └── PRD.md
-├── src/relay_agent/
+├── src/relay_agent/          # internal package name (the shipped command is `pingmewhen`)
 │   ├── app.py
 │   ├── cli.py
 │   ├── agentic_engine.py
-│   ├── credentials.py
-│   ├── event_log.py
-│   ├── local_tts.py
 │   ├── planner.py
+│   ├── gatekeeper.py
 │   ├── realtime_bridge.py
-│   ├── task_store.py
 │   ├── telephony.py
+│   ├── local_tts.py
 │   ├── tunnel.py
 │   └── static/
 └── tests/
 ```
-
-## Important boundaries
-
-- Relay discloses that it is an AI voice assistant.
-- The insurance demo presents factual quote information; Relay does not recommend or rank policies.
-- The user selects the insurer and approves consequential actions.
-- Secure mode removes the cloud AI from the media path and pauses transcription. The fake payment demo requests and speaks card number, expiration, and CVV separately, returning control to Relay between fields.
-- In deterministic demo mode, browser TTS plays on the user device. During a production call, protected fake card/SSN fields are synthesized in memory with macOS speech, converted to PCMU, and injected only into the representative’s Twilio leg while both Realtime directions and transcript persistence are gated.
-- Real browser microphone takeover is not connected yet. The production Call Console must not be represented as supporting live takeover until that media leg exists.
-- Only fake card and identity data are used in the demo.
-- PDF context is stored locally under `~/.relay/contexts/`. Standard production planning sends bounded extracted text to the configured model; deterministic demo mode does not.
-- ChatGPT/Codex authentication is used only for Codex workloads; Relay does not reuse it as a third-party API credential. Standard mode uses the local user's OpenAI and Twilio credentials, while deterministic demo mode needs neither.

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Relay</title>
+    <title>PingMeWhen</title>
     <style>
       :root {
         color-scheme: light;
@@ -240,7 +240,7 @@
   <body>
     <div class="shell">
       <header>
-        <div class="brand">Relay</div>
+        <div class="brand">PingMeWhen</div>
         <div class="header-actions">
           <span id="mode-flag" class="mode-flag"><span class="dot"></span><span class="mode-flag-text">Agent mode · you're behind the scenes</span></span>
           <button id="model-settings-open" class="model-settings-open">Models</button>
@@ -261,7 +261,7 @@
             <div class="settings-field">
               <label for="gatekeeper-model">Gatekeeper</label>
               <select id="gatekeeper-model"></select>
-              <span class="settings-help">Fast text-only check before Relay answers each representative turn.</span>
+              <span class="settings-help">Fast text-only check before PingMeWhen answers each representative turn.</span>
             </div>
             <div class="settings-field">
               <label for="realtime-model">Realtime voice</label>
@@ -282,8 +282,8 @@
       </div>
       <section id="setup" style="display:none">
         <section class="panel setup-panel">
-          <h1>Connect your local Relay</h1>
-          <p class="setup-copy">Relay runs on this computer with your own OpenAI and Twilio accounts. These credentials are saved only in a private local file and are never sent to Relay’s maintainers.</p>
+          <h1>Connect your local PingMeWhen</h1>
+          <p class="setup-copy">PingMeWhen runs on this computer with your own OpenAI and Twilio accounts. These credentials are saved only in a private local file and are never sent to PingMeWhen’s maintainers.</p>
           <div id="setup-error" class="error"></div>
           <div class="setup-grid">
             <div class="setup-field" data-credential="TWILIO_ACCOUNT_SID">
@@ -313,7 +313,7 @@
         <div class="hero">
           <span class="eyebrow"><span class="eyebrow-dot"></span>Local-first voice agent</span>
           <h1>Delegate the call.<br/>Keep the control.</h1>
-          <p class="lede">Give Relay a goal and the relevant context. It handles the phone calls, keeps you informed visually, and brings you in only when your knowledge, approval, or voice is needed.</p>
+          <p class="lede">Give PingMeWhen a goal and the relevant context. It handles the phone calls, keeps you informed visually, and brings you in only when your knowledge, approval, or voice is needed.</p>
           <div class="hero-chips">
             <span class="hero-chip">Real calls, on your keys</span>
             <span class="hero-chip">Approves before it acts</span>
@@ -321,12 +321,12 @@
           </div>
         </div>
         <section id="intake-panel" class="panel intake">
-          <label for="goal">What should Relay accomplish?</label>
+          <label for="goal">What should PingMeWhen accomplish?</label>
           <textarea id="goal" placeholder="Describe your goal and constraints…"></textarea>
           <div id="intake-error" class="error"></div>
           <div id="start-progress" class="start-progress" role="status" aria-live="polite">
             <span class="spinner" aria-hidden="true"></span>
-            <span>Relay is researching your goal and building a reviewable plan. Web research can take several seconds.</span>
+            <span>PingMeWhen is researching your goal and building a reviewable plan. Web research can take several seconds.</span>
           </div>
           <div class="intake-footer">
             <label class="attach-plus" for="context-file" title="Attach a context file" aria-label="Attach a context file">
@@ -356,7 +356,7 @@
                   <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                 </label>
                 <input id="task-context-file" class="task-context-input" type="file" accept=".pdf,.txt,.md,.markdown,.csv,.tsv,.log,.text" />
-                <input id="planning-instruction" type="text" placeholder="Reply to Relay or revise the plan…" />
+                <input id="planning-instruction" type="text" placeholder="Reply to PingMeWhen or revise the plan…" />
                 <button id="planning-send" class="send">Send</button>
               </div>
             </div>
@@ -622,7 +622,7 @@
         landing.style.display = 'none';
         workspace.style.display = 'block';
         const optimisticStart = appendOptimisticInstruction('planning', submittedGoal);
-        optimisticStart.pending.textContent = 'Relay is researching your goal and preparing its first response';
+        optimisticStart.pending.textContent = 'PingMeWhen is researching your goal and preparing its first response';
         try {
           const contexts = [];
           if (contextFile.files[0]) {
@@ -815,7 +815,7 @@
         message.classList.add('optimistic');
         const pending = document.createElement('div');
         pending.className = 'event pending-indicator';
-        pending.textContent = workflowPhase === 'calling' ? 'Relay is routing this privately' : 'Relay is thinking';
+        pending.textContent = workflowPhase === 'calling' ? 'PingMeWhen is routing this privately' : 'PingMeWhen is thinking';
         let timeline = planningTimeline;
         if (!timeline) return null;
         timeline.append(message, pending);
@@ -840,7 +840,7 @@
 
       async function readResponse(response) {
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || 'Relay could not complete that action.');
+        if (!response.ok) throw new Error(data.detail || 'PingMeWhen could not complete that action.');
         return data;
       }
 
@@ -905,7 +905,7 @@
         takeover.textContent = runtimeMode === 'demo'
           ? 'Simulate takeover · no audio'
           : task.takeover_active
-            ? 'You’re speaking · tap to hand back to Relay'
+            ? 'You’re speaking · tap to hand back to PingMeWhen'
             : 'Take over & speak by typing';
         takeover.disabled = task.status === 'complete' || !task.current_call || (runtimeMode === 'demo' && task.stage === 'takeover');
         const listen = document.querySelector('#listen');
@@ -929,8 +929,8 @@
                 ? 'Type a non-sensitive response · protected values will be rejected…'
                 : 'Use the protected field above to speak this value…'
               : 'Type what you want to say to the representative…'
-            : 'Message Relay privately · answer, update context, or change call strategy…'
-          : 'Reply to Relay or revise the plan…';
+            : 'Message PingMeWhen privately · answer, update context, or change call strategy…'
+          : 'Reply to PingMeWhen or revise the plan…';
         if (!task.prompt?.placeholder && (!task.takeover_active || sensitiveFieldEntry)) planningInstruction.placeholder = defaultPlaceholder;
         document.querySelector('#planning-send').disabled = task.status === 'complete' || sensitiveFieldEntry || (task.secure_mode && !task.takeover_active);
         document.querySelector('#task-attach-label').style.display = activePhase === 'planning' && task.status !== 'complete' ? 'inline-flex' : 'none';
@@ -1031,9 +1031,9 @@
           wrapper.className = `event message-event ${isRight ? 'right' : 'left'}`;
           const labels = {
             representative: event.company || 'Representative',
-            relay: 'Relay · spoken to representative',
-            user_private: 'You · private to Relay',
-            relay_private: 'Relay · private to you'
+            relay: 'PingMeWhen · spoken to representative',
+            user_private: 'You · private to PingMeWhen',
+            relay_private: 'PingMeWhen · private to you'
           };
           const speaker = document.createElement('div');
           speaker.className = `speaker ${isRight ? 'align-right' : ''}`;
@@ -1107,7 +1107,7 @@
             <div class="call-summary-section"><strong>${escapeHtml(event.target || 'External call')}</strong></div>
             <div class="call-summary-section"><strong>Representative highlights</strong>${list(event.highlights, 'No representative transcript was captured.')}</div>
             <div class="call-summary-section"><strong>Confirmed during the call</strong>${list(event.confirmed, 'No additional user-confirmed facts were recorded.')}</div>
-            <div class="call-summary-section"><strong>Next</strong>${escapeHtml(event.next_step || 'Review the transcript or give Relay the next instruction.')}</div>
+            <div class="call-summary-section"><strong>Next</strong>${escapeHtml(event.next_step || 'Review the transcript or give PingMeWhen the next instruction.')}</div>
           </div>`;
       }
 
@@ -1125,7 +1125,7 @@
         planningInstruction.pattern = kind.includes('numeric') ? '[0-9]*' : '';
         planningInstruction.maxLength = Number(prompt?.max_length || 1000);
         planningInstruction.autocomplete = kind.includes('masked') ? 'off' : 'on';
-        planningInstruction.placeholder = prompt?.placeholder || (activePhase === 'calling' ? 'Message Relay privately…' : 'Reply to Relay…');
+        planningInstruction.placeholder = prompt?.placeholder || (activePhase === 'calling' ? 'Message PingMeWhen privately…' : 'Reply to PingMeWhen…');
         const hintText = prompt?.hint || (kind.includes('masked') ? 'Protected input is hidden as you type.' : '');
         hint.textContent = hintText;
         hint.classList.toggle('visible', Boolean(hintText));
@@ -1166,11 +1166,11 @@
               }
             } catch (_) {
               stopListening(false);
-              showError('Relay received an invalid live-monitor audio frame.');
+              showError('PingMeWhen received an invalid live-monitor audio frame.');
             }
           };
           socket.onerror = () => {
-            if (listenWanted) showError('Relay could not open the live audio monitor. You can retry Listen.');
+            if (listenWanted) showError('PingMeWhen could not open the live audio monitor. You can retry Listen.');
           };
           socket.onclose = () => {
             if (socket !== listenSocket) return;
@@ -1203,7 +1203,7 @@
         const samples = decodeMuLaw(payload);
         const now = context.currentTime;
         let startAt = Math.max(listenPlayheads[source] || 0, now + 0.06);
-        // Relay speech is buffered on the backend and delivered to the monitor as one burst per response, so a
+        // PingMeWhen speech is buffered on the backend and delivered to the monitor as one burst per response, so a
         // whole utterance can be scheduled at once. Only drop if the lead grows implausibly large (a stalled tab
         // or a runaway backlog), not for a normal multi-second reply.
         if (startAt > now + 20) return;

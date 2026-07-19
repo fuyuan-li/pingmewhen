@@ -280,7 +280,7 @@ def create_app(
             tunnel.stop()
             events.append("runtime.stopped", {"mode": mode})
 
-    app = FastAPI(title="Relay", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="PingMeWhen", version="0.1.0", lifespan=lifespan)
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
@@ -450,7 +450,7 @@ def create_app(
                     )
                     raise HTTPException(
                         status_code=502,
-                        detail="Relay could not hang up the call. It may have already ended.",
+                        detail="PingMeWhen could not hang up the call. It may have already ended.",
                     ) from error
                 snapshot = engine.hang_up_call_by_user(task_id)
                 telephony.capabilities.revoke(call_sid)
@@ -473,7 +473,7 @@ def create_app(
                     raise HTTPException(
                         status_code=409,
                         detail=(
-                            "The instruction was not delivered to the live call because Relay is disconnected or "
+                            "The instruction was not delivered to the live call because PingMeWhen is disconnected or "
                             "its Realtime participation is paused."
                         ),
                     )
@@ -534,9 +534,9 @@ def create_app(
             if task.get("takeover_sensitive"):
                 field = str(task.get("secure_expected_field") or "")
                 if field == "verification_request" and looks_like_protected_value(text):
-                    raise InvalidAction("Relay will not repeat a protected value. Type a non-sensitive response instead.")
+                    raise InvalidAction("PingMeWhen will not repeat a protected value. Type a non-sensitive response instead.")
                 if field != "verification_request" and not is_valid_sensitive_value(field, text):
-                    raise InvalidAction("Enter a valid value for the protected field Relay detected.")
+                    raise InvalidAction("Enter a valid value for the protected field PingMeWhen detected.")
             events.append(
                 "call.takeover_speech_started",
                 {"task_id": task_id, "sensitive": bool(task.get("takeover_sensitive"))},
@@ -562,7 +562,7 @@ def create_app(
         try:
             task = engine.get(task_id)
             if task.get("call_state") != "HUMAN_TAKEOVER" or not task.get("takeover_active"):
-                raise InvalidAction("Relay can resume only after human takeover.")
+                raise InvalidAction("PingMeWhen can resume only after human takeover.")
             context_update = await realtime.exit_typed_takeover(task_id)
             return engine.resume_from_takeover(task_id, context_update)
         except TaskNotFound as error:
@@ -573,7 +573,7 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from error
         except Exception as error:
             events.append("call.takeover_resume_failed", {"task_id": task_id, "reason": type(error).__name__})
-            raise HTTPException(status_code=502, detail="Relay could not safely return to the call.") from error
+            raise HTTPException(status_code=502, detail="PingMeWhen could not safely return to the call.") from error
 
     @app.post("/api/twilio/voice")
     async def twilio_voice(request: Request) -> Response:
@@ -581,7 +581,7 @@ def create_app(
         from twilio.twiml.voice_response import VoiceResponse
 
         if not capability.task_id:
-            raise HTTPException(status_code=422, detail="This call is not attached to an approved Relay task.")
+            raise HTTPException(status_code=422, detail="This call is not attached to an approved PingMeWhen task.")
         stream_url = tunnel.url(f"/api/twilio/media/{capability.media_token}").replace("https://", "wss://", 1)
         response = VoiceResponse()
         stream = response.connect().stream(url=stream_url)

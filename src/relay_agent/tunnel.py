@@ -65,7 +65,7 @@ class TunnelManager:
                     result = self._launcher(self.port)
                     public_url = result.tunnel if hasattr(result, "tunnel") else result[0]
                 except Exception as error:
-                    raise TunnelError(f"Relay could not start its local call tunnel: {error}") from error
+                    raise TunnelError(f"PingMeWhen could not start its local call tunnel: {error}") from error
                 if not str(public_url).startswith("https://"):
                     raise TunnelError("The local call tunnel did not return an HTTPS URL.")
                 self._public_url = str(public_url).rstrip("/")

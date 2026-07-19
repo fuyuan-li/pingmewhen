@@ -23,7 +23,7 @@ class FakePlanner:
                 status="needs_input",
                 message="I need the service address before I can make a call plan.",
                 plan_summary="",
-                questions=["What service address should Relay use?"],
+                questions=["What service address should PingMeWhen use?"],
             )
         return PlanningTurn(
             status="plan_ready",
@@ -152,7 +152,7 @@ def test_agentic_call_state_and_transcript_return_to_private_review(tmp_path):
     task = engine.begin_call(task["id"], pending["index"], "CA123")
     assert task["phase"] == "calling"
     engine.mark_call_connected(task["id"])
-    engine.append_transcript(task["id"], "relay", "Hello, I am Relay, an AI tool speaking for my user.")
+    engine.append_transcript(task["id"], "relay", "Hello, I am PingMeWhen, an AI tool speaking for my user.")
     engine.append_transcript(task["id"], "representative", "I am comfortable continuing.")
     task = engine.finish_call(task["id"], "CA123", "completed")
 
@@ -224,7 +224,7 @@ def test_private_call_routing_keeps_meta_private_and_persists_confirmed_updates(
         "Who are you?",
         "private_meta",
         None,
-        "I am Relay, your private call assistant.",
+        "I am PingMeWhen, your private call assistant.",
         False,
     )
     assert private["call_state"] == "WAITING_FOR_USER"
@@ -447,7 +447,7 @@ def test_phone_action_purpose_rejects_routing_metadata_and_relay_directives():
             **base,
             purpose="Negotiate internet installation pricing by calling +1 202-701-0927.",
         )
-    with pytest.raises(ValueError, match="rather than instruct Relay"):
+    with pytest.raises(ValueError, match="rather than instruct PingMeWhen"):
         PlanAction(
             **base,
             purpose="请致电 Verizon 联系人 Alex，并协助安排网络安装。",
@@ -752,7 +752,7 @@ def test_human_takeover_can_explicitly_resume_the_active_call(tmp_path):
     assert resumed["takeover_active"] is False
     assert resumed["secure_expected_field"] is None
     assert resumed["prompt"] is None
-    assert resumed["events"][-1]["text"] == "Human takeover ended · Relay returned to the active call"
+    assert resumed["events"][-1]["text"] == "Human takeover ended · PingMeWhen returned to the active call"
 
 
 def test_general_typed_takeover_records_state_and_context_on_resume(tmp_path):
@@ -849,7 +849,7 @@ def test_failed_replan_does_not_corrupt_persisted_task(tmp_path):
                 status="needs_input",
                 message="I need one detail.",
                 plan_summary="",
-                questions=["Which provider should Relay contact?"],
+                questions=["Which provider should PingMeWhen contact?"],
             )
 
     store = SQLiteTaskStore(tmp_path / "relay.db")

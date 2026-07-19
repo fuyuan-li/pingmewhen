@@ -42,7 +42,7 @@ class TelephonyService:
     def place_call(self, to: str, task_id: str = "", queue_index: int = 0) -> dict[str, str]:
         credentials = self._credentials()
         if not credentials.complete:
-            raise RuntimeError("Relay telephony credentials are incomplete.")
+            raise RuntimeError("PingMeWhen telephony credentials are incomplete.")
         self.tunnel.acquire()
         capability = self.capabilities.issue(task_id, queue_index, credentials.twilio_account_sid)
         voice_query = urlencode(
@@ -76,7 +76,7 @@ class TelephonyService:
             raise RuntimeError("Cannot end a call without a call SID.")
         credentials = self._credentials()
         if not credentials.complete:
-            raise RuntimeError("Relay telephony credentials are incomplete.")
+            raise RuntimeError("PingMeWhen telephony credentials are incomplete.")
         client = self._client_factory(credentials.twilio_account_sid, credentials.twilio_auth_token)
         call = client.calls(call_sid).update(status="completed")
         return str(getattr(call, "status", "") or "completed")

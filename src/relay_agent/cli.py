@@ -22,8 +22,8 @@ def relay_log_config() -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="relay",
-        description="Start the local Relay task-agent dashboard.",
+        prog="pingmewhen",
+        description="Start the local PingMeWhen task-agent dashboard.",
     )
     parser.add_argument(
         "command",

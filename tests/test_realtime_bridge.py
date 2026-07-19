@@ -39,7 +39,7 @@ def test_realtime_session_uses_twilio_native_pcmu_and_opens_the_call():
     assert 'Never say you are calling "Mina"' in instructions
     assert "You never speak first" in instructions
     assert "stay silent and keep waiting" in instructions
-    assert "outbound caller" in instructions
+    assert "outbound AI caller" in instructions
     assert "spoken audio is always addressed to the representative" in instructions
     assert "Private text comes from the person you represent" in instructions
     assert "Never acknowledge or answer that private person aloud" in instructions
@@ -438,7 +438,7 @@ def test_meta_private_question_stays_in_private_workspace_and_never_reaches_spea
         async def route_private_message(self, request):
             return PrivateMessageRoute(
                 disposition="private_meta",
-                private_reply="I am Relay, your private call assistant.",
+                private_reply="I am PingMeWhen, your private call assistant.",
             )
 
     hub = RealtimeSessionHub(
@@ -455,7 +455,7 @@ def test_meta_private_question_stays_in_private_workspace_and_never_reaches_spea
 
     delivery = asyncio.run(run())
     assert delivery.disposition == "private_meta"
-    assert delivery.private_reply == "I am Relay, your private call assistant."
+    assert delivery.private_reply == "I am PingMeWhen, your private call assistant."
     assert realtime.sent == []
 
 
@@ -582,7 +582,7 @@ def test_material_offer_is_shown_faithfully_and_waits_for_user_decision(tmp_path
                 representative_update=(
                     "Alex offered $100 per month, conditioned on enrolling with a contract device."
                 ),
-                question_to_user="Do you want Relay to accept, counter, or decline?",
+                question_to_user="Do you want PingMeWhen to accept, counter, or decline?",
             )
         ]
     )
@@ -1759,7 +1759,7 @@ def test_speaker_addressing_preamble_anchors_identity_and_direction():
     assert "never call Andy 'they', 'them'" in preamble
     assert "You are not Andy and you are not Alex" in preamble
     assert "do not reintroduce yourself" in preamble
-    assert "Relay the information in the correct direction" in preamble
+    assert "Convey the information in the correct direction" in preamble
 
 
 def test_private_answer_response_carries_the_identity_anchor(tmp_path):

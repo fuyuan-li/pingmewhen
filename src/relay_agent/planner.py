@@ -17,7 +17,7 @@ class PlanAction(BaseModel):
     purpose: str = Field(
         description=(
             "Clean third-person natural-language description of the call's purpose and desired outcome, with concrete "
-            "facts such as full addresses, dates, constraints, and names written literally. Never address Relay with "
+            "facts such as full addresses, dates, constraints, and names written literally. Never address PingMeWhen with "
             "an imperative instruction, never include the phone number or routing metadata, and never use vague "
             "placeholders such as 'the provided address'."
         )
@@ -30,7 +30,7 @@ class PlanAction(BaseModel):
     needs_lookup: bool
     phone_number: str = Field(description="Exact E.164 number for executable phone calls, otherwise an empty string.")
     contact_provided_by: Literal["user", "research"] = Field(
-        description="Whether the phone number came directly from the user or from Relay's research."
+        description="Whether the phone number came directly from the user or from PingMeWhen's research."
     )
     contact_source_url: str = Field(
         description="Official source URL for a researched phone number; empty for a user-provided number."
@@ -59,7 +59,7 @@ class PlanAction(BaseModel):
             self.purpose,
             re.IGNORECASE,
         ):
-            raise ValueError("Phone-call purpose must describe the goal rather than instruct Relay to place the call.")
+            raise ValueError("Phone-call purpose must describe the goal rather than instruct PingMeWhen to place the call.")
         return self
 
 
@@ -89,7 +89,7 @@ class UnavailablePlanner:
 
     def plan(self, goal: str, messages: list[dict[str, str]], contexts: list[dict[str, str]]) -> PlanningTurn:
         raise PlannerError(
-            "Relay's production planner needs your OpenAI API key. "
+            "PingMeWhen's production planner needs your OpenAI API key. "
             "Complete local setup in the dashboard or set OPENAI_API_KEY."
         )
 
@@ -111,7 +111,7 @@ class OpenAIPlanner:
             {
                 "role": "developer",
                 "content": (
-                    "You are Relay's private task planner. Turn the user's goal and documents into a concrete, "
+                    "You are PingMeWhen's private task planner. Turn the user's goal and documents into a concrete, "
                     "reviewable plan. Ask only for genuinely blocking information. Never invent contact details, "
                     "facts, completed research, or completed calls. Use web search when current contact details are "
                     "needed, prefer the organization's official website, set contact_provided_by to research, and "
@@ -132,16 +132,16 @@ class OpenAIPlanner:
                     "amounts, constraints, and requested outcomes. Never replace a known value with vague wording such "
                     "as 'the provided address', 'the address above', 'the requested date', or 'the user's details'. "
                     "Write purpose as a clean third-person natural-language description of what the call is for and "
-                    "what outcome is desired, never as an imperative instruction addressed to Relay. Do not put a "
+                    "what outcome is desired, never as an imperative instruction addressed to PingMeWhen. Do not put a "
                     "phone number, source URL, or other routing metadata in purpose; those belong only in their typed "
                     "fields. A phone number may remain in known_facts as internal reference data. "
                     "The call-time models must be able to execute from the action without rediscovering known facts. "
                     "Before returning plan_ready with any phone_call action, make sure you know the display name or "
-                    "nickname Relay should use when introducing the person it represents. If the user has stated "
+                    "nickname PingMeWhen should use when introducing the person it represents. If the user has stated "
                     "their own name or nickname anywhere in the conversation, treat it as the confirmed caller_name "
                     "and do not ask for it again; put it straight into caller_name and proceed. Only when no usable "
                     "self-provided name appears anywhere in the whole conversation should you return needs_input and "
-                    "ask once, warmly and in the user's language, briefly explaining that Relay needs it to introduce "
+                    "ask once, warmly and in the user's language, briefly explaining that PingMeWhen needs it to introduce "
                     "the call on their behalf; a first name or nickname is enough, and never demand a legal name. If "
                     "the conversation says the caller name is already confirmed, preserve it and do not ask again. "
                     "Phone calls are actions, not the product boundary. Consequential actions always require user "

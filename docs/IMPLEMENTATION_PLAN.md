@@ -1,4 +1,4 @@
-# Relay implementation plan
+# PingMeWhen implementation plan
 
 The plan is deliberately narrow. Finish each vertical slice before expanding scope.
 
@@ -28,11 +28,11 @@ Exit: `uv run relay` and `uv run relay demo` open a local application; tests pas
 - [x] Connect plan generation to bounded hosted web search for sourced official contact details.
 - [x] Add local first-run BYOK onboarding for OpenAI and Twilio credentials.
 - [x] Persist credentials in an owner-only local file with environment-variable precedence.
-- [x] Start a session-long `pycloudflared` tunnel with standard Relay, show and log a public health probe before approved calls, and continue dialing on an inconclusive probe.
+- [x] Start a session-long `pycloudflared` tunnel with standard PingMeWhen, show and log a public health probe before approved calls, and continue dialing on an inconclusive probe.
 - [x] Validate Twilio voice/status webhooks with the official SDK helper.
 - [x] Connect approved, sourced E.164 phone-call actions to the telephony control plane.
 
-Exit: a simulated event source drives the real UI, and private instructions change subsequent Relay output.
+Exit: a simulated event source drives the real UI, and private instructions change subsequent PingMeWhen output.
 
 ## Milestone 2 — insurer simulator
 
@@ -51,7 +51,7 @@ Exit: `relay demo` completes three distinct dynamic quote conversations and wait
 
 ## Milestone 3 — Realtime voice and local media bridge
 
-- Connect the simulated representative and Relay through real audio.
+- Connect the simulated representative and PingMeWhen through real audio.
 - Add a browser WebRTC microphone leg and shared media conference for genuine takeover.
 - Route the simulated representative as a separate audio participant before enabling general PSTN execution from the task engine.
 - [x] Bridge approved PSTN calls through Twilio Media Streams and OpenAI Realtime using PCMU audio.
@@ -79,7 +79,7 @@ Exit: the demo is driven by actual voice runtime events rather than scripted UI 
 - [x] Protect last-four SSN and date-of-birth exchanges and render field-specific masked/date controls.
 - [x] Render adaptive regular-call prompts, a distinct takeover visual mode, and a dedicated default post-call summary.
 - [x] Route repeated protected-field requests to `HUMAN_TAKEOVER` without repeating the value.
-- [x] Resume Relay only after Twilio confirms local playback and capture only non-sensitive content.
+- [x] Resume PingMeWhen only after Twilio confirms local playback and capture only non-sensitive content.
 
 Exit: a fake end-to-end policy purchase completes without sensitive values appearing in model context, transcripts, or logs.
 

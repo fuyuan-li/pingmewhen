@@ -130,13 +130,14 @@ def speaker_addressing_preamble(context: dict[str, Any]) -> str:
     caller_name = normalize_display_name(str(context.get("caller_name", ""))) or "the user"
     target = str(context.get("action", {}).get("target", "")).strip() or "the representative"
     return (
-        "WHO YOU ARE ON THIS REPLY: You are Relay, an AI phone caller, speaking OUT LOUD on a live call to "
+        "WHO YOU ARE ON THIS REPLY: You are an AI phone caller (never state a product, app, or bot name aloud, and "
+        "never give yourself a name), speaking OUT LOUD on a live call to "
         f"{target}. You represent {caller_name} and are calling on their behalf. Speak TO {target}, addressing "
         f"them directly as 'you'. Refer to the person you represent as {caller_name} by name; never call "
         f"{caller_name} 'they', 'them', 'the customer', 'the client', or 'the user', and never talk about "
         f"{caller_name} in the third person. You are not {caller_name} and you are not {target}: you speak for "
         f"{caller_name} to {target}. You already introduced yourself earlier in this call — do not reintroduce "
-        "yourself or restate that you are an AI unless asked. Relay the information in the correct direction: keep "
+        "yourself or restate that you are an AI unless asked. Convey the information in the correct direction: keep "
         "who is asking, offering, conceding, or requesting exactly as it actually is, and never swap it. You are "
         f"the one telling {target} what {caller_name} has decided — say it as your own statement to {target}, for "
         f"example 'I can confirm {caller_name} is okay going ahead at $100 a month', never 'you can let "
@@ -234,7 +235,9 @@ def build_speaker_instructions(
             "representative to speak — a greeting, 'hello,' or asking who is calling — before saying anything. If "
             "instead you hear hold music, an automated queue message, or silence, stay silent and keep waiting; "
             "never fill the silence, greet first, or ask if anyone is there. Once the representative actually "
-            "speaks, your first reply must open with a short AI disclosure and nothing else before it, then "
+            "speaks, your first reply must open with a short AI disclosure and nothing else before it — say only "
+            f"that you are an AI assistant calling on behalf of {caller_name_literal}; do NOT state a product, "
+            "app, bot, or agent name, and never give yourself a name. Then "
             "briefly state ONLY the primary service or topic you are calling about (see GOAL below) in the same "
             "reply — for example 'setting up internet service at his address.' Do NOT announce your negotiation "
             "strategy, a target or maximum price, discounts you are hoping for, or your full multi-step plan in "
@@ -256,7 +259,7 @@ def build_speaker_instructions(
         f"'you'. Never refer to {target_literal} in the third person as 'they' or 'them' while speaking to them. "
         f"When you relay something {caller_name_literal} wants, say it in the correct direction — for example, "
         f"'{caller_name} is hoping you can lower the price', not 'they are hoping they can lower the price'.\n\n"
-        "ROLE: You are Relay, the outbound caller who initiated this call to accomplish a specific approved goal. "
+        "ROLE: You are the outbound AI caller who initiated this call to accomplish a specific approved goal. "
         "You are not an inbound support agent: never welcome the other person to a support service, ask what they "
         "called about, or offer generic help. Your spoken audio is always addressed to the representative you "
         "called. Private text comes from the person you represent; it is an answer or instruction for you, not "
@@ -697,7 +700,7 @@ class RealtimeSessionHub:
             if session.takeover_sensitive:
                 field_name = session.expected_field
                 if not field_name:
-                    raise RuntimeError("Relay is not waiting for a protected field.")
+                    raise RuntimeError("PingMeWhen is not waiting for a protected field.")
                 if field_name == "verification_request":
                     renderer = getattr(self._tts_renderer, "render_text", None)
                     if renderer is None:
@@ -1321,7 +1324,7 @@ class RealtimeSessionHub:
                 route="consult_user",
                 reason="uncertainty",
                 representative_update=utterance,
-                question_to_user="How should Relay respond?",
+                question_to_user="How should PingMeWhen respond?",
             )
         else:
             latency_ms = round((monotonic() - started) * 1000)
@@ -1354,7 +1357,7 @@ class RealtimeSessionHub:
                     requires_user=True,
                     reason="uncertainty",
                     representative_update=utterance,
-                    question_to_user="How should Relay respond?",
+                    question_to_user="How should PingMeWhen respond?",
                 )
             else:
                 veto_latency_ms = round((monotonic() - veto_started) * 1000)

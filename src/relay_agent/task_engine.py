@@ -105,7 +105,7 @@ def secure_field_prompt(field: str, simulated: bool = True) -> dict[str, Any]:
         "field": field,
         "question": (
             f"The {context} asked only for: {spec['label']}. Enter fake test data; "
-            "Relay and cloud transcription remain paused until local speech finishes."
+            "PingMeWhen and cloud transcription remain paused until local speech finishes."
         ),
         "label": spec["label"],
         "placeholder": spec["placeholder"],
@@ -119,7 +119,7 @@ def queued(event_type: str, **payload: Any) -> dict[str, Any]:
 
 
 class DeterministicTaskEngine:
-    """An interruptible deterministic workflow for validating Relay's UX."""
+    """An interruptible deterministic workflow for validating PingMeWhen's UX."""
 
     def __init__(
         self,
@@ -136,7 +136,7 @@ class DeterministicTaskEngine:
     def create(self, goal: str, contexts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         cleaned_goal = goal.strip()
         if not cleaned_goal:
-            raise InvalidAction("Describe what Relay should accomplish.")
+            raise InvalidAction("Describe what PingMeWhen should accomplish.")
 
         task_id = uuid4().hex
         task: dict[str, Any] = {
@@ -343,7 +343,7 @@ class DeterministicTaskEngine:
             return
 
         if task["stage"] != "plan_review":
-            raise InvalidAction("Relay is not accepting planning changes right now.")
+            raise InvalidAction("PingMeWhen is not accepting planning changes right now.")
 
         changed_carriers = self._apply_carrier_edits(task, instruction)
         lower = instruction.lower()
@@ -394,7 +394,7 @@ class DeterministicTaskEngine:
         task["status"] = "waiting_for_user"
         task["prompt"] = {
             "kind": "approval",
-            "question": "Relay is ready to begin the simulated calls. Approve this plan, hold to make edits, or decline.",
+            "question": "PingMeWhen is ready to begin the simulated calls. Approve this plan, hold to make edits, or decline.",
             "options": [
                 {"value": "approve", "label": "Approve and start calls"},
                 {"value": "hold", "label": "Hold · edit plan"},
@@ -420,7 +420,7 @@ class DeterministicTaskEngine:
         }
         handler = handlers.get(task["stage"])
         if handler is None:
-            raise InvalidAction("Relay is not waiting for that answer right now.")
+            raise InvalidAction("PingMeWhen is not waiting for that answer right now.")
         handler(task, value)
 
     def _handle_address_confirmation(self, task: dict[str, Any], value: str) -> None:
@@ -448,7 +448,7 @@ class DeterministicTaskEngine:
             self._append(task, "message", speaker="relay_private", text="Of course. Tell me what to add, remove, or change.")
             task["prompt"] = {
                 "kind": "text_reply",
-                "question": "Type your plan changes below. Relay will return a revised plan for approval.",
+                "question": "Type your plan changes below. PingMeWhen will return a revised plan for approval.",
                 "options": [],
             }
             return
@@ -476,7 +476,7 @@ class DeterministicTaskEngine:
                 "message",
                 speaker="relay",
                 text=(
-                    "Hi, I’m Relay, an AI voice assistant speaking for Alex, who is online with us but not convenient "
+                    "Hi, I’m PingMeWhen, an AI voice assistant speaking for Alex, who is online with us but not convenient "
                     "to speak. Alex will provide personal information and decisions by text. Is that okay?"
                 ),
             ),
@@ -528,7 +528,7 @@ class DeterministicTaskEngine:
                         "message",
                         speaker="relay",
                         text=(
-                            "Hi, I’m Relay, an AI voice assistant speaking for Alex, who is following by text. "
+                            "Hi, I’m PingMeWhen, an AI voice assistant speaking for Alex, who is following by text. "
                             "Alex would like a renters-insurance quote and will personally provide facts and decisions. Is that okay?"
                         ),
                     ),
@@ -551,7 +551,7 @@ class DeterministicTaskEngine:
 
     def _call_interruption(self, task: dict[str, Any], instruction: str) -> None:
         if task["stage"] == "takeover":
-            raise InvalidAction("Return control to Relay before sending an instruction.")
+            raise InvalidAction("Return control to PingMeWhen before sending an instruction.")
         self._append(task, "message", speaker="user_private", text=instruction)
         lower = instruction.lower()
         if "multi" in lower and "discount" in lower:
@@ -608,7 +608,7 @@ class DeterministicTaskEngine:
                 "message",
                 speaker="relay",
                 text=(
-                    "Hi, I’m Relay, an AI voice assistant speaking for Alex, who is following by text. "
+                    "Hi, I’m PingMeWhen, an AI voice assistant speaking for Alex, who is following by text. "
                     f"Alex previously received a renters quote from {insurer}, selected it, and approved this callback "
                     "to continue the application. Alex will personally confirm facts and decisions. Is that okay?"
                 ),
@@ -643,7 +643,7 @@ class DeterministicTaskEngine:
             "options": [
                 {"value": "takeover", "label": "Simulate takeover · no audio"},
                 {"value": "local_tts", "label": "Use local device voice"},
-                {"value": "risky", "label": "Let Relay speak it · risky"},
+                {"value": "risky", "label": "Let PingMeWhen speak it · risky"},
             ],
         }
         self._schedule(task, events, prompt, "payment_method")
@@ -679,7 +679,7 @@ class DeterministicTaskEngine:
 
     def _enter_secure_mode(self, task: dict[str, Any], method: str) -> None:
         task["secure_mode"] = True
-        labels = {"takeover": "Simulated takeover (no audio)", "local_tts": "Local device voice", "risky": "Relay voice simulation"}
+        labels = {"takeover": "Simulated takeover (no audio)", "local_tts": "Local device voice", "risky": "PingMeWhen voice simulation"}
         self._append(task, "message", speaker="relay", text="One moment—Alex will handle the payment details through a protected channel.")
         self._append(task, "status", text=f"Secure mode active · {labels[method]} · cloud transcription paused")
         self._append(task, "secure_gap", text="Sensitive payment segment is neither transcribed nor logged.")
@@ -695,17 +695,17 @@ class DeterministicTaskEngine:
         task["secure_mode"] = True
         self._append(task, "message", speaker="representative", company=task["selected_insurer"], text="Please provide the card number first.")
         self._append(task, "message", speaker="relay", text="One moment while Alex provides only the card number through the local secure voice channel.")
-        self._append(task, "status", text="Relay audio paused · waiting for local device voice: card number")
-        self._append(task, "secure_gap", text="Card number is handled locally and is not sent to Relay’s server, model, transcript, or log.")
+        self._append(task, "status", text="PingMeWhen audio paused · waiting for local device voice: card number")
+        self._append(task, "secure_gap", text="Card number is handled locally and is not sent to PingMeWhen’s server, model, transcript, or log.")
         task["stage"] = "secure_card_number"
         task["prompt"] = self._secure_field_prompt("card_number")
 
     def _handle_local_tts_field(self, task: dict[str, Any], value: str) -> None:
         if value != "sent":
-            raise InvalidAction("The local voice channel must signal completion before Relay resumes.")
+            raise InvalidAction("The local voice channel must signal completion before PingMeWhen resumes.")
         completed_stage = task["stage"]
         task["secure_mode"] = False
-        self._append(task, "status", text="Local device voice completed · Relay returned to the line")
+        self._append(task, "status", text="Local device voice completed · PingMeWhen returned to the line")
         self._append(task, "message", speaker="relay", text="Thanks. Please continue.")
 
         if completed_stage == "secure_card_number":
@@ -720,13 +720,13 @@ class DeterministicTaskEngine:
         self._append(task, "message", speaker="representative", company=task["selected_insurer"], text="The sandbox payment was accepted. The sample policy is active immediately.")
         self._append(task, "message", speaker="relay", text="Thank you. I’ve captured the non-sensitive confirmation for Alex.")
         task["phase"] = "planning"
-        self._append(task, "message", speaker="relay_private", text=f"The simulated purchase with {task['selected_insurer']} is complete. No payment fields entered Relay’s context, transcript, or logs.")
+        self._append(task, "message", speaker="relay_private", text=f"The simulated purchase with {task['selected_insurer']} is complete. No payment fields entered PingMeWhen’s context, transcript, or logs.")
         self._append(task, "status", text="Task complete · simulated confirmation captured")
         task.update(phase="complete", stage="complete", status="complete", prompt=None)
 
     def _begin_next_secure_field(self, task: dict[str, Any], field: str, spoken_label: str) -> None:
         self._append(task, "message", speaker="relay", text=f"One moment while Alex provides only the {spoken_label} through the local secure voice channel.")
-        self._append(task, "status", text=f"Relay audio paused · waiting for local device voice: {spoken_label}")
+        self._append(task, "status", text=f"PingMeWhen audio paused · waiting for local device voice: {spoken_label}")
         self._append(task, "secure_gap", text=f"The {spoken_label} is handled locally and is not transcribed or logged.")
         task["secure_mode"] = True
         task["stage"] = f"secure_{field}"
@@ -736,7 +736,7 @@ class DeterministicTaskEngine:
         if value != "complete":
             raise InvalidAction("Complete the simulated secure segment to continue.")
         task["secure_mode"] = False
-        self._append(task, "status", text="Secure mode ended · Relay reconnected · transcription resumed")
+        self._append(task, "status", text="Secure mode ended · PingMeWhen reconnected · transcription resumed")
         self._append(task, "message", speaker="representative", company=task["selected_insurer"], text="The sandbox payment was accepted. The sample policy is active immediately.")
         self._append(task, "message", speaker="relay", text="Thank you. I’ve captured the non-sensitive confirmation for Alex.")
         task["phase"] = "planning"
@@ -768,14 +768,14 @@ class DeterministicTaskEngine:
         task["prompt"] = {
             "kind": "approval",
             "question": "This deterministic preview only pauses the script; it does not connect your microphone. Resume when ready.",
-            "options": [{"value": "resume", "label": "Resume simulated Relay"}],
+            "options": [{"value": "resume", "label": "Resume simulated PingMeWhen"}],
         }
 
     def _handle_resume(self, task: dict[str, Any], value: str) -> None:
         if value != "resume":
-            raise InvalidAction("Return control to Relay to continue.")
-        self._append(task, "message", speaker="user_private", text="Relay, you can continue.")
-        self._append(task, "status", text="Relay resumed the simulated call")
+            raise InvalidAction("Return control to PingMeWhen to continue.")
+        self._append(task, "message", speaker="user_private", text="PingMeWhen, you can continue.")
+        self._append(task, "status", text="PingMeWhen resumed the simulated call")
         resume = task.pop("_resume")
         task["stage"] = resume["stage"]
         task["prompt"] = resume["prompt"]
@@ -827,7 +827,7 @@ class DeterministicTaskEngine:
             self._append(
                 task,
                 "comparison",
-                text=f"{len(task['quotes'])} simulated quotes collected. Relay has not ranked or recommended them.",
+                text=f"{len(task['quotes'])} simulated quotes collected. PingMeWhen has not ranked or recommended them.",
             )
             task["prompt"] = {
                 "kind": "insurer_selection",
@@ -857,7 +857,7 @@ class DeterministicTaskEngine:
             "options": [
                 {"value": "takeover", "label": "Simulate takeover · no audio"},
                 {"value": "local_tts", "label": "Use local device voice"},
-                {"value": "risky", "label": "Let Relay speak it · risky"},
+                {"value": "risky", "label": "Let PingMeWhen speak it · risky"},
             ],
         }
 

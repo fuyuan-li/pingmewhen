@@ -45,7 +45,7 @@ class AgenticTaskEngine:
     def create(self, goal: str, contexts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         cleaned_goal = goal.strip()
         if not cleaned_goal:
-            raise InvalidAction("Describe what Relay should accomplish.")
+            raise InvalidAction("Describe what PingMeWhen should accomplish.")
         task = {
             "id": uuid4().hex,
             "goal": cleaned_goal,
@@ -113,11 +113,11 @@ class AgenticTaskEngine:
                     raise InvalidAction("This approved plan is no longer editable.")
                 if task["phase"] == "calling":
                     if task.get("secure_mode"):
-                        raise InvalidAction("Relay is paused during the protected exchange. Do not type sensitive data here.")
+                        raise InvalidAction("PingMeWhen is paused during the protected exchange. Do not type sensitive data here.")
                     self._append(task, "message", speaker="user_private", text=instruction)
                     if task.get("call_state") == "WAITING_FOR_USER":
                         task.update(call_state="CONNECTED", stage="calling", status="running", prompt=None)
-                        self._append(task, "status", text="User answer delivered · Relay returned to the conversation")
+                        self._append(task, "status", text="User answer delivered · PingMeWhen returned to the conversation")
                     else:
                         self._append(task, "status", text="Private instruction sent to the active call")
                     self._store.save("production", task)
@@ -217,7 +217,7 @@ class AgenticTaskEngine:
             return
         self._append(task, "message", speaker="relay_private", text=turn.message)
         task.update(status="waiting_for_user", stage="collecting_context")
-        question = turn.questions[0] if turn.questions else "What information should Relay use to continue planning?"
+        question = turn.questions[0] if turn.questions else "What information should PingMeWhen use to continue planning?"
         task["prompt"] = user_input_prompt(question)
 
     def _present_plan(self, task: dict[str, Any], turn: PlanningTurn) -> None:
@@ -235,7 +235,7 @@ class AgenticTaskEngine:
         task.update(status="waiting_for_user", stage="plan_review")
         task["prompt"] = {
             "kind": "approval",
-            "question": "Approve this plan, hold to revise it, or decline. Relay will not execute an external action without approval.",
+            "question": "Approve this plan, hold to revise it, or decline. PingMeWhen will not execute an external action without approval.",
             "options": [
                 {"value": "approve", "label": "Approve plan"},
                 {"value": "hold", "label": "Hold · revise"},
@@ -245,7 +245,7 @@ class AgenticTaskEngine:
 
     def _answer(self, task: dict[str, Any], value: str) -> None:
         if task["stage"] != "plan_review":
-            raise InvalidAction("Relay is not waiting for an approval response.")
+            raise InvalidAction("PingMeWhen is not waiting for an approval response.")
         if value == "hold":
             self._append(task, "message", speaker="user_private", text="Hold. I want to revise the plan.")
             self._append(task, "message", speaker="relay_private", text="Tell me what to change and I will prepare a revised plan.")
@@ -281,7 +281,7 @@ class AgenticTaskEngine:
             ):
                 reasons.append("official contact source URL is missing or invalid")
             elif contact_provided_by not in {"user", "research"}:
-                reasons.append("contact source must identify the user or Relay research")
+                reasons.append("contact source must identify the user or PingMeWhen research")
             if reasons:
                 identity = action.get("label") or action.get("target") or "Unnamed phone call"
                 target = action.get("target", "").strip()
@@ -323,7 +323,7 @@ class AgenticTaskEngine:
         with self._lock:
             task = self._require(task_id)
             if task.get("stage") != "execution_ready" or task.get("current_call"):
-                raise InvalidAction("Relay is not ready to establish the call connection.")
+                raise InvalidAction("PingMeWhen is not ready to establish the call connection.")
             task.update(phase="planning", stage="connection_starting", status="running", prompt=None)
             self._append(task, "status", text="Checking secure call tunnel reachability…")
             self._store.save("production", task)
@@ -333,7 +333,7 @@ class AgenticTaskEngine:
         with self._lock:
             task = self._require(task_id)
             if task.get("stage") != "connection_starting":
-                raise InvalidAction("Relay is not checking the call tunnel.")
+                raise InvalidAction("PingMeWhen is not checking the call tunnel.")
             self._append(
                 task,
                 "status",
@@ -350,7 +350,7 @@ class AgenticTaskEngine:
         with self._lock:
             task = self._require(task_id)
             if task.get("stage") != "connection_starting":
-                raise InvalidAction("Relay is not ready to start the approved call.")
+                raise InvalidAction("PingMeWhen is not ready to start the approved call.")
             pending = next((item for item in task.get("execution_queue", []) if item["status"] == "pending"), None)
             target = (pending or {}).get("action", {}).get("target", "the approved destination")
             self._append(task, "status", text=f"Calling {target} through the secure call tunnel…")
@@ -431,11 +431,11 @@ class AgenticTaskEngine:
             task["prompt"] = {
                 "kind": "takeover_required",
                 "question": (
-                    "You must take over now — click Take over and type a non-sensitive response. Relay will not "
+                    "You must take over now — click Take over and type a non-sensitive response. PingMeWhen will not "
                     "repeat the protected value, and cloud transcription is paused."
                     if repeated
                     else (
-                        "You must take over now — click Take over to type this yourself. Relay and cloud "
+                        "You must take over now — click Take over to type this yourself. PingMeWhen and cloud "
                         "transcription are paused for this protected exchange."
                     )
                 ),
@@ -467,7 +467,7 @@ class AgenticTaskEngine:
                 takeover_sensitive=bool(sensitive or task.get("takeover_sensitive")),
                 prompt=task.get("prompt") if sensitive else None,
             )
-            self._append(task, "status", text="Typed takeover started · Relay is silent")
+            self._append(task, "status", text="Typed takeover started · PingMeWhen is silent")
             self._store.save("production", task)
             snapshot = self._snapshot(task)
         self._events.append(
@@ -512,7 +512,7 @@ class AgenticTaskEngine:
             if task.get("secure_mode"):
                 raise InvalidAction("Normal user input is unavailable during a protected exchange.")
             if not cleaned_question or input_kind != "text" or not isinstance(blocking, bool):
-                raise InvalidAction("Relay requested unsupported user input.")
+                raise InvalidAction("PingMeWhen requested unsupported user input.")
             task.update(call_state="WAITING_FOR_USER", stage="waiting_for_user", status="waiting_for_user")
             task["prompt"] = user_input_prompt(cleaned_question, blocking=blocking)
             if interaction_id:
@@ -527,7 +527,7 @@ class AgenticTaskEngine:
                     }
                 )
             self._append(task, "message", speaker="relay_private", text=cleaned_question)
-            self._append(task, "status", text="Relay is waiting for your answer")
+            self._append(task, "status", text="PingMeWhen is waiting for your answer")
             self._store.save("production", task)
             return self._snapshot(task)
 
@@ -547,7 +547,7 @@ class AgenticTaskEngine:
             if task["phase"] != "calling" or not task.get("current_call"):
                 raise InvalidAction("Private call messages require an active call.")
             if task.get("secure_mode"):
-                raise InvalidAction("Relay is paused during the protected exchange. Do not type sensitive data here.")
+                raise InvalidAction("PingMeWhen is paused during the protected exchange. Do not type sensitive data here.")
             self._append(task, "message", speaker="user_private", text=cleaned, channel="private")
             if context_update is not None:
                 task.setdefault("context_updates", []).append(deepcopy(context_update))
@@ -573,7 +573,7 @@ class AgenticTaskEngine:
                 self._append(
                     task,
                     "status",
-                    text="Your answer was added to Relay's confirmed call context",
+                    text="Your answer was added to PingMeWhen's confirmed call context",
                     channel="private",
                 )
             elif disposition == "private_meta":
@@ -582,7 +582,7 @@ class AgenticTaskEngine:
                 self._append(
                     task,
                     "status",
-                    text="Private direction added to Relay's confirmed call context",
+                    text="Private direction added to PingMeWhen's confirmed call context",
                     channel="private",
                 )
             self._store.save("production", task)
@@ -607,9 +607,9 @@ class AgenticTaskEngine:
             self._append(task, "message", speaker="user_private", text=cleaned, channel="private")
             prompt = task.get("prompt") or {}
             pending_question = str(prompt.get("question", "")).strip()
-            retry_text = "Relay could not apply that answer. Please send it again."
+            retry_text = "PingMeWhen could not apply that answer. Please send it again."
             if task.get("call_state") == "WAITING_FOR_USER" and pending_question:
-                retry_text = f"Relay could not apply that answer. Please try again: {pending_question}"
+                retry_text = f"PingMeWhen could not apply that answer. Please try again: {pending_question}"
             self._append(task, "message", speaker="relay_private", text=retry_text, channel="private")
             self._append(task, "status", text="Answer not applied · the call remains active", channel="private")
             self._store.save("production", task)
@@ -646,7 +646,7 @@ class AgenticTaskEngine:
         with self._lock:
             task = self._require(task_id)
             if task.get("call_state") != "HUMAN_TAKEOVER" or not task.get("takeover_active"):
-                raise InvalidAction("Relay can resume only after human takeover.")
+                raise InvalidAction("PingMeWhen can resume only after human takeover.")
             sensitive = bool(task.get("takeover_sensitive"))
             completed_field = task.get("secure_expected_field")
             if context_update is not None and not sensitive:
@@ -665,7 +665,7 @@ class AgenticTaskEngine:
                 status="running",
                 prompt=None,
             )
-            self._append(task, "status", text="Human takeover ended · Relay returned to the active call")
+            self._append(task, "status", text="Human takeover ended · PingMeWhen returned to the active call")
             self._store.save("production", task)
             snapshot = self._snapshot(task)
         self._events.append("call.takeover_ended", {"task_id": task_id, "sensitive": sensitive})
@@ -695,9 +695,9 @@ class AgenticTaskEngine:
             )
             if not successful:
                 if status == "completed" and ended_while_waiting:
-                    reason = "The call ended while Relay was waiting for your answer"
+                    reason = "The call ended while PingMeWhen was waiting for your answer"
                 elif status == "completed" and not connected:
-                    reason = "Relay never connected to the call audio"
+                    reason = "PingMeWhen never connected to the call audio"
                 else:
                     reason = f"Twilio ended the call with status {status}"
                 self._append(task, "status", text=f"Call with {item['action']['target']} failed · {reason}")
@@ -706,11 +706,11 @@ class AgenticTaskEngine:
                     "message",
                     speaker="relay_private",
                     text=(
-                        "The phone call ended before Relay completed the conversation. Review the retained transcript "
+                        "The phone call ended before PingMeWhen completed the conversation. Review the retained transcript "
                         "and call status before deciding whether to retry."
                         if connected
                         else (
-                            "The phone call ended before Relay completed a conversation. No conversation transcript "
+                            "The phone call ended before PingMeWhen completed a conversation. No conversation transcript "
                             "was captured. Check the call connection error before retrying."
                         )
                     ),
@@ -718,7 +718,7 @@ class AgenticTaskEngine:
                 task.update(phase="planning", stage="execution_failed", status="waiting_for_user")
                 task["prompt"] = {
                     "kind": "text_reply",
-                    "question": "Review the connection failure, revise the plan, or ask Relay to retry.",
+                    "question": "Review the connection failure, revise the plan, or ask PingMeWhen to retry.",
                     "options": [],
                 }
                 self._store.save("production", task)
@@ -758,11 +758,11 @@ class AgenticTaskEngine:
                     outcome="Call completed",
                     highlights=representative_turns[-5:],
                     confirmed=confirmed_updates[-5:],
-                    next_step="Review the outcome, ask a follow-up, or tell Relay what to do next.",
+                    next_step="Review the outcome, ask a follow-up, or tell PingMeWhen what to do next.",
                 )
                 task["prompt"] = {
                     "kind": "text_reply",
-                    "question": "Ask a follow-up or give Relay the next instruction.",
+                    "question": "Ask a follow-up or give PingMeWhen the next instruction.",
                     "options": [],
                     "input_kind": "text",
                     "placeholder": "Ask about the call or give the next instruction…",

@@ -43,13 +43,13 @@ class ContextStore:
                 extracted = "\n\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
                 pages = len(reader.pages)
             except Exception as error:
-                raise InvalidContext("Relay could not read that PDF.") from error
+                raise InvalidContext("PingMeWhen could not read that PDF.") from error
         elif suffix in TEXT_EXTENSIONS:
             extracted = content.decode("utf-8", errors="replace").strip()
             pages = 1
         else:
             raise InvalidContext(
-                "Relay accepts PDF or text files (.pdf, .txt, .md, .csv). "
+                "PingMeWhen accepts PDF or text files (.pdf, .txt, .md, .csv). "
                 "Word documents and images aren't supported yet."
             )
 

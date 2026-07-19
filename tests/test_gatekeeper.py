@@ -78,7 +78,7 @@ def test_gatekeeper_schema_surfaces_material_offer_for_explicit_user_decision():
         representative_update=(
             "Alex offered internet service for $100 per month if Jack enrolls with a contract device."
         ),
-        question_to_user="Do you want Relay to accept, counter, or decline?",
+        question_to_user="Do you want PingMeWhen to accept, counter, or decline?",
     )
     request = gatekeeper_request(
         "I can do $100, but only if you enroll with a contract device.",
@@ -128,7 +128,7 @@ def test_gatekeeper_routes_private_meta_without_speaker_update_and_answers_with_
             if "Who are you?" in content:
                 route = PrivateMessageRoute(
                     disposition="private_meta",
-                    private_reply="I am Relay, your private call assistant.",
+                    private_reply="I am PingMeWhen, your private call assistant.",
                 )
             else:
                 route = PrivateMessageRoute(
@@ -312,7 +312,7 @@ def test_gatekeeper_keeps_private_meta_isolated_when_model_returns_an_update():
                         kind="fact",
                         key="private_message",
                         value="Who are you?",
-                        summary="The represented person asked who Relay is.",
+                        summary="The represented person asked who PingMeWhen is.",
                     ),
                 )
             )
@@ -369,7 +369,7 @@ def test_gatekeeper_request_carries_an_explicit_identity_block():
 
     content = request.messages()[1]["content"]
     assert "Represented user (whose authority you protect; private questions go to them): Ryan" in content
-    assert "Representative (who said the LATEST UTTERANCE below; Relay called them): Alex / Verizon" in content
+    assert "Representative (who said the LATEST UTTERANCE below; PingMeWhen called them): Alex / Verizon" in content
     assert "LATEST REPRESENTATIVE UTTERANCE (said by Alex / Verizon)" in content
 
 
@@ -394,4 +394,4 @@ def test_private_message_request_carries_an_explicit_identity_block():
 
     content = request.messages()[1]["content"]
     assert "Represented user (the PRIVATE DASHBOARD MESSAGE below is FROM this person): Ryan" in content
-    assert "Representative (Relay called them; they never send dashboard messages): Alex / Verizon" in content
+    assert "Representative (PingMeWhen called them; they never send dashboard messages): Alex / Verizon" in content
