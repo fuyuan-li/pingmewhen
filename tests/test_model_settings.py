@@ -18,7 +18,6 @@ class FakeOpenAIPlanner:
 
 
 def configure_runtime(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACtest")
     monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")

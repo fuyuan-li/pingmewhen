@@ -141,7 +141,6 @@ def test_end_call_hangs_up_the_twilio_call(tmp_path):
 
 
 def test_production_runtime_starts_tunnel_at_application_start_and_checks_health_on_approval(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     launches = []
     terminations = []
@@ -255,7 +254,6 @@ def test_session_tunnel_lease_reuses_one_tunnel_across_calls(tmp_path):
 
 
 def test_inconclusive_tunnel_health_check_is_logged_but_call_is_still_attempted(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     launches = []
     calls = FakeCalls()
@@ -316,7 +314,6 @@ def test_task_identity_is_attached_to_per_call_webhooks(tmp_path):
 
 
 def test_approved_agentic_plan_places_the_verified_call(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     calls = FakeCalls()
     tunnel = TunnelManager(
@@ -350,7 +347,6 @@ def test_approved_agentic_plan_places_the_verified_call(monkeypatch, tmp_path):
 
 
 def test_live_instruction_reports_when_realtime_injection_fails(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     monkeypatch.setattr(RealtimeSessionHub, "inject", lambda self, task_id, text: async_false())
     calls = FakeCalls()
@@ -401,7 +397,6 @@ async def async_injection_failure():
 
 
 def test_live_instruction_failure_is_nonfatal_and_visible_in_private_workspace(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     monkeypatch.setattr(RealtimeSessionHub, "inject", lambda self, task_id, text: async_injection_failure())
     calls = FakeCalls()
@@ -447,7 +442,6 @@ def test_live_instruction_failure_is_nonfatal_and_visible_in_private_workspace(m
 
 
 def test_terminal_status_callback_revokes_the_call_capabilities(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     calls = FakeCalls()
     capabilities = CallCapabilityStore()
@@ -488,7 +482,6 @@ def test_terminal_status_callback_revokes_the_call_capabilities(monkeypatch, tmp
 
 
 def capability_client(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     tunnel = TunnelManager(
         8765,

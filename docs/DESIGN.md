@@ -3,7 +3,7 @@
 ## Architecture
 
 ```text
-relay CLI
+pingmewhen CLI
    |
    v
 Local FastAPI service ------ local JSONL events/transcripts
@@ -29,7 +29,7 @@ dashboard -> macOS on-device TTS or user takeover -> call
 cloud AI disconnected; transcript paused
 ```
 
-The local service owns user state, task state, presentation, approvals, durable logs, and provider credential use. PingMeWhen is single-tenant by installation: there is no hosted PingMeWhen backend, shared account system, or maintainer credential boundary. Deterministic demo mode uses neither provider.
+The local service owns user state, task state, presentation, approvals, durable logs, and provider credential use. PingMeWhen is single-tenant by installation: there is no hosted PingMeWhen backend, shared account system, or maintainer credential boundary.
 
 Standard mode resolves `OPENAI_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` from the environment first, then from an owner-only local credential file. The dashboard presents first-run setup only for missing values. The browser sends setup values only to the localhost service; it never calls OpenAI or Twilio directly.
 
@@ -37,17 +37,16 @@ The production HTTPS tunnel is session-long. Standard PingMeWhen starts `pycloud
 
 Every approved call receives separate random capability tokens for its voice, status, media, and browser-listen endpoints. Voice and status capabilities travel in callback query strings; the media capability travels in the WebSocket path because Twilio Media Streams do not support query strings. The listen capability is distinct from the Twilio media capability and is returned only to the same-origin localhost dashboard for the active task. PingMeWhen binds each capability to the approved task, queue action, Twilio Account SID, and Call SID, and revokes all four at terminal call status. Missing or incorrect capabilities are rejected. When `X-Twilio-Signature` is present, PingMeWhen also validates it with the Twilio SDK, exact public URL, submitted form parameters, and local Auth Token; an invalid provided signature is rejected. A missing signature is accepted only when the scoped capability and call identity match. Capability tokens are redacted from event and server access logs.
 
-Standard `relay` uses the Responses API with a Pydantic Structured Output schema for private planning. The model may ask for missing context, use hosted web search for current official contacts, and propose typed actions, but application code owns approval transitions and execution permissions. A phone action is executable only with an E.164 number whose source is classified: researched contacts require an official HTTP(S) source URL, while a number directly supplied by the user is trusted as user-sourced and requires no artificial URL. After approval, application code queues those calls, gives each call a new Realtime session, passes Twilio's PCMU audio in both directions, persists completed transcript turns, and advances the queue. `relay demo` selects the deterministic insurance engine instead. Both engines persist complete namespaced task snapshots in SQLite.
+`pingmewhen` uses the Responses API with a Pydantic Structured Output schema for private planning. The model may ask for missing context, use hosted web search for current official contacts, and propose typed actions, but application code owns approval transitions and execution permissions. A phone action is executable only with an E.164 number whose source is classified: researched contacts require an official HTTP(S) source URL, while a number directly supplied by the user is trusted as user-sourced and requires no artificial URL. After approval, application code queues those calls, gives each call a new Realtime session, passes Twilio's PCMU audio in both directions, persists completed transcript turns, and advances the queue. The single production namespace persists complete task snapshots in SQLite.
 
 ## Components
 
 ### CLI
 
-- Distribution name: `relay-agent`
+- Distribution name: `pingmewhen`
 - Python import package: `relay_agent`
-- Executable: `relay`
-- `relay` opens the standard dashboard.
-- `relay demo` opens the single demo workflow.
+- Executable: `pingmewhen`
+- `pingmewhen` opens the dashboard; `relay` remains a legacy alias.
 
 ### Local API
 
@@ -94,21 +93,19 @@ Task memory persists across the complete goal, but representative conversation c
 
 Production call-time reasoning is split between two roles with the backend as control plane and shared-state owner. Speaker is the sole Realtime audio model and the only model Twilio hears. It receives representative audio, approved original context, and typed confirmed context updates; it never receives raw dashboard messages. Gatekeeper is a text-only component that applies a generic user-authority rule to completed representative transcripts and routes private workspace messages. A conservative deterministic filter treats exact short acknowledgements as safe without a model call. Every other turn first receives a `continue` or `consult_user` classification. Any new user-owned fact, preference, judgment, permission, correction, commitment, consequential choice, or uncertainty consults the user. Every proposed continuation then passes through a separate veto-only authority classifier; either classifier failing or returning malformed output fails closed to consultation. Gatekeeper receives only the approved call purpose, target, concrete known facts, relevant document context, and confirmed updates—not raw private planning history. Server VAD remains enabled with automatic response creation disabled, so only the backend can send `response.create`. A budget, preference, or goal constrains behavior but never authorizes a decision. Each consultation receives a durable interaction ID, faithful representative update, reason, and private question. The interaction remains pending until the user explicitly resolves it and the matching typed context item and Speaker response complete. Consultations produce one brief hold line and transition the task to `WAITING_FOR_USER` while representative audio remains transcribed; constrained keep-alives may play periodically. Routing or delivery failures do not terminate the call: PingMeWhen preserves the prompt and requests a retry. Static Speaker identity, role, goal, and boundaries are sent once when Realtime connects. The separately requested first response is an ordinary interruptible turn containing the concise disclosure; the static instructions contain no opening-completion obligation, so barge-in never causes a restart. Response request, creation, and completion diagnostics carry non-content-bearing purpose and correlation IDs. Speaker has no private-input tool.
 
-The deterministic simulator keeps future turns in a backend queue. The UI requests one turn at a time. A user barge-in is placed at the front of that queue as a private user message, a contextually reformulated PingMeWhen utterance, and a simulated representative response. The pending script then resumes.
-
 ### Typed takeover media path
 
 Production P0 takeover is type-to-speak, not browser microphone audio. The localhost backend cancels and gates Speaker output, pauses Gatekeeper decisions, synthesizes the user's text with macOS AVSpeechSynthesizer, converts it to PCMU, and publishes it directly into the existing Twilio Media Stream. The typed text is not submitted to Speaker as a conversation message.
 
 During ordinary typed takeover, representative audio continues to reach Realtime transcription so the user can read the Call Console, but the backend never requests a Speaker response. On handback, PingMeWhen appends one sanitized backend-confirmed continuity item and explicitly resumes Speaker without another introduction. During protected takeover, both Realtime audio directions and content logging remain gated. Handback reveals only whether local speech successfully played and the requested field type; it never includes the protected value. If no local speech played, Speaker is explicitly told not to imply that the field was supplied.
 
-The dashboard marks takeover as a distinct local interaction mode: the Private Workspace changes to a dark, glass-accented surface and the external Call Console is visually de-emphasized. Protected inputs are schema-driven. Dates use native date or month controls; card, CVV, and SSN fields use masked numeric inputs with persistent format and length hints. Ordinary Gatekeeper questions use the same structured prompt vocabulary, with deterministic yes/no quick replies and free-text fallback when applicable.
+The dashboard marks takeover as a distinct local interaction mode: the Private Workspace changes to a dark, glass-accented surface and the external Call Console is visually de-emphasized. Protected inputs are schema-driven. Dates use native date or month controls; card, CVV, and SSN fields use masked numeric inputs with persistent format and length hints. Ordinary Gatekeeper questions use the same structured prompt vocabulary, with rule-based yes/no quick replies and free-text fallback when applicable.
 
-The deterministic preview does not connect phone audio. Browser microphone/conference takeover remains a future extension and is not part of P0.
+Browser microphone/conference takeover remains a future extension and is not part of P0.
 
 ### Task orchestrator
 
-The orchestrator owns the goal and may schedule zero, one, or several calls. The insurance demo is a task recipe, not a special product mode in the core domain.
+The orchestrator owns the goal and may schedule zero, one, or several approved calls.
 
 The production execution slice supports approved phone-call actions. Approval is durably recorded, and application code refuses to dial non-E.164 targets or researched contacts without an official source URL. User-provided contacts are explicitly marked as such and do not require a URL. Non-phone actions remain planning artifacts and are not executed. This prevents the planning model from turning an unimplemented action into a fake success.
 
@@ -179,23 +176,21 @@ Secure-mode invariants:
 3. Sensitive form values remain in local process memory only.
 4. Values are cleared after use.
 5. The user can take over at any time.
-6. The deterministic demo accepts fake values only; production accepts locally validated real card, expiration, CVV, full-SSN, last-four-SSN, and date-of-birth shapes.
+6. PingMeWhen accepts locally validated card, expiration, CVV, full-SSN, last-four-SSN, and date-of-birth shapes only for the protected local voice path.
 
-Payment is a field-by-field state machine, not one combined form: the representative asks for one field; PingMeWhen speaks a brief handoff line; the dashboard requires typed takeover; local TTS speaks only that field; and the user hands control back before the next field can be detected. The old production `SECURE_LOCAL` fake-value form and `/secure-fields` endpoint are deprecated. The deterministic browser preview retains fake values. Production validates the expected field shape locally, gates both Realtime directions, generates speech in memory with macOS AVSpeechSynthesizer, converts it to PCMU, publishes it only to the representative leg, waits for Twilio's playback mark, and clears the value without logging or cloud submission.
+Payment is a field-by-field state machine, not one combined form: the representative asks for one field; PingMeWhen speaks a brief handoff line; the dashboard requires typed takeover; local TTS speaks only that field; and the user hands control back before the next field can be detected. PingMeWhen validates the expected field shape locally, gates both Realtime directions, generates speech in memory with macOS AVSpeechSynthesizer, converts it to PCMU, publishes it only to the representative leg, waits for Twilio's playback mark, and clears the value without logging or cloud submission.
 
-The simulated representative will not intentionally repeat fake card data. In production, a repeated protected-field request keeps the Realtime gate closed and transitions the durable call state to `HUMAN_TAKEOVER` rather than speaking the value again.
+A repeated protected-field request keeps the Realtime gate closed and transitions the durable call state to `HUMAN_TAKEOVER` rather than speaking the value again.
 
 ## Authentication and model access
 
-Codex is used as PingMeWhen's repository-scale engineering agent, guided by `AGENTS.md`, the PRD, this design, and the implementation plan. It implements, reviews, and verifies the cross-cutting product slice. GPT-5.6 has a distinct runtime role: standard `relay` uses it through the Responses API and Pydantic Structured Outputs for private planning, while application code owns approval and execution permissions.
+Codex is used as PingMeWhen's repository-scale engineering agent, guided by `AGENTS.md`, the PRD, this design, and the implementation plan. The user-selected planning model runs through the Responses API with Pydantic Structured Outputs, while application code owns approval and execution permissions.
 
-ChatGPT/Codex login authorizes Codex workloads; it cannot be treated as authorization for arbitrary PingMeWhen API calls. Standard `relay` therefore uses the local user's OpenAI API key. The key remains in the local backend process during API requests and is never returned by an API response or written to an event log.
+ChatGPT/Codex login authorizes Codex workloads; it cannot be treated as authorization for arbitrary PingMeWhen API calls. PingMeWhen therefore uses the local user's OpenAI API key. The key remains in the local backend process during API requests and is never returned by an API response or written to an event log.
 
 Twilio REST calls use Account SID + Auth Token Basic Auth. The same Auth Token is required by Twilio's webhook signature algorithm, so PingMeWhen neither requires nor prompts for an API Key SID/Secret.
 
 Credentials entered in first-run setup are written to `~/.relay/credentials.json` by default with mode `0600`; setting `RELAY_DATA_DIR` relocates the file with the rest of PingMeWhen's local state. Environment variables take precedence over stored values. There is no per-user encryption or tenant partition because the process and file are owned by one local operating-system user.
-
-Deterministic `relay demo` bypasses provider setup. It remains the zero-credential judge path.
 
 If OpenAI publishes an official third-party ChatGPT authentication and Realtime entitlement flow, it can replace local API-key entry later. Do not implement undocumented token reuse.
 
@@ -232,7 +227,3 @@ Required event families:
 - `latency.*`
 
 The log writer recursively redacts known sensitive keys. Secure mode additionally blocks all content-bearing transcript events.
-
-## Simulator
-
-The simulator is a real conversational endpoint backed by scenario state, not a fixed transcript animation. Three insurer profiles vary rates, questions, and follow-ups. Sanitized observations from disclosed/consented research calls may inform synthetic fixtures, but raw third-party conversations and PII are not shipped.

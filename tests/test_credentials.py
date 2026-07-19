@@ -25,7 +25,6 @@ def test_credential_store_persists_reloads_and_prefers_environment(tmp_path):
 
 
 def test_dashboard_onboarding_saves_missing_credentials_without_returning_secrets(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     for name in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "OPENAI_API_KEY"):
         monkeypatch.delenv(name, raising=False)
@@ -62,7 +61,6 @@ def test_dashboard_onboarding_saves_missing_credentials_without_returning_secret
 
 
 def test_onboarding_does_not_copy_environment_credentials_into_local_file(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path / "runtime"))
     monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACenvironment")
     monkeypatch.setenv("TWILIO_AUTH_TOKEN", "environment-token")

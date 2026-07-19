@@ -18,18 +18,20 @@ These are the product's highlights, ranked. See [`docs/HIGHLIGHTS.md`](docs/HIGH
 
 ## Install and run
 
-From source with [uv](https://docs.astral.sh/uv/):
+On macOS, install PingMeWhen and verify its on-device speech path with one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fuyuan-li/relay/main/install.sh | sh
+pingmewhen
+```
+
+The installer adds `uv` when needed, installs PingMeWhen in an isolated tool environment, and silently verifies the same built-in macOS speech engine used for protected type-to-speak. There is no separate TTS model download. See [`docs/INSTALL.md`](docs/INSTALL.md) for details, updates, uninstalling, and source-development instructions.
+
+From a local checkout:
 
 ```bash
 uv sync --dev
-uv run pingmewhen          # standard mode (uses your credentials)
-uv run pingmewhen demo     # fully simulated demo, no credentials needed
-```
-
-To install it as a command-line tool:
-
-```bash
-uv tool install .          # then run `pingmewhen` or `pingmewhen demo` from anywhere
+uv run pingmewhen
 ```
 
 Standard mode opens a first-run setup screen when any required credential is missing:
@@ -41,7 +43,7 @@ Standard mode opens a first-run setup screen when any required credential is mis
 
 Environment variables take precedence, so a local `.env` works too. Otherwise the dashboard stores credentials in an owner-only local file. PingMeWhen's maintainers never receive them and pay none of your provider costs.
 
-The dashboard's **Models** control configures three roles independently: planning (`gpt-5.4-mini` default), Realtime voice (`gpt-realtime-2.1-mini` default), and transcription (`gpt-4o-mini-transcribe` default). Choices are stored locally. By default the dashboard runs at `http://127.0.0.1:8765`; set `RELAY_DATA_DIR` to relocate local data or `RELAY_PORT` to change the port.
+The dashboard's **Models** control configures four roles independently: planning, Gatekeeper authority routing, Realtime voice, and transcription. Choices are stored locally. By default the dashboard runs at `http://127.0.0.1:8765`; set `RELAY_DATA_DIR` to relocate local data or `RELAY_PORT` to change the port.
 
 Production calls start a `pycloudflared` tunnel alongside the local server so Twilio can reach the voice, status, and media webhooks over HTTPS/WSS. Each call gets separate random, call-bound capability tokens that are revoked when the call ends and redacted from logs; a supplied Twilio signature is also validated locally. Audio stays PCMU end to end between Twilio Media Streams and OpenAI Realtime.
 
@@ -62,8 +64,8 @@ Codex is central to the engineering workflow, but it is not an audio transport o
 - You select outcomes and approve consequential actions; a budget or preference never authorizes a decision on its own.
 - Sensitive fields (card number, CVV, SSN) are handled locally: the cloud model is removed from the media path, transcription is paused, and the value you type is synthesized to speech on-device and injected only into the representative's call leg. It is never sent to the model or written to logs.
 - Human takeover is text-to-speech today (you type; local voice speaks). Live browser-microphone takeover is not connected yet and is not represented as available.
-- Attached context (PDF or text) is stored locally. Standard planning sends bounded extracted text to the configured model; the simulated demo does not.
-- The `pingmewhen demo` workflow is fully simulated and uses only fake data.
+- Attached context (PDF or text) is stored locally. Planning sends bounded extracted text to the configured model.
+- PingMeWhen has one real-call product path; it does not ship a deterministic scenario or fake call mode.
 
 ## Repository map
 

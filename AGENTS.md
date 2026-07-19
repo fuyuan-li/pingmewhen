@@ -2,69 +2,52 @@
 
 ## Product
 
-PingMeWhen is a local-first, human-supervised task agent that can use phone calls as an action channel.
-
-Canonical description:
+PingMeWhen is a local-first, human-supervised task agent that can use real phone calls as an action channel.
 
 > Give PingMeWhen a goal and the relevant context. It handles the phone calls, keeps you informed visually, and brings you in only when your knowledge, approval, or voice is needed.
 
-The renters-insurance workflow is the hackathon demo, not the product boundary.
+There is one real product path. `pingmewhen` starts the localhost dashboard; the legacy `relay` executable remains an alias. There is no deterministic demo mode or simulated insurer workflow.
 
-## P0 scope
+## Product boundaries
 
-- `relay` starts the local backend and opens the localhost dashboard.
-- `relay demo` runs the single simulated renters-insurance workflow.
-- The dashboard accepts a goal and supporting context.
-- Calls appear as a chat: representative speech on the left, PingMeWhen speech on the right, and private user-to-PingMeWhen instructions in a distinct right-side style.
-- A persistent text box lets the user steer PingMeWhen at any time.
-- PingMeWhen renders structured quick replies and context-sensitive inputs using prebuilt components, including yes/no buttons, date/month pickers, and masked numeric identifiers.
-- Consequential actions require explicit approval.
-- A permanent keyboard Take Over control lets the user speak to the representative by typing through local macOS TTS. It does not use a browser microphone.
-- Secure mode mutes/disconnects the cloud AI and pauses transcription. Each requested payment, SSN, or date-of-birth field forces a typed takeover and local-TTS cycle before PingMeWhen can resume; the user types the real value themselves and it never reaches the cloud model.
-- Save structured event logs and transcripts under the machine-local `~/.relay/` directory by default. `RELAY_DATA_DIR` may override this root. Never log secure-mode values, card data, full SSNs, secrets, or auth tokens.
-- The demo uses a simulated insurer and fake payment data.
+- The user supplies their own OpenAI API key and Twilio Account SID, Auth Token, and voice-capable phone number.
+- There is no hosted backend, shared account system, multi-tenant state, or maintainer-funded provider usage.
+- The dashboard accepts a goal and PDF context, supports private plan revision, and starts no call without explicit approval.
+- Speaker is the only live audio model. Gatekeeper checks representative turns and private messages for missing facts, sensitive requests, offers, approvals, and decisions that must return to the user.
+- Budgets, preferences, and goals constrain behavior but never authorize a consequential decision.
+- Private user text never enters Speaker verbatim. The backend sends only confirmed, typed context updates.
+- Calls disclose that PingMeWhen is an AI speaking on behalf of the named user.
+- The Call Console shows live transcripts, supports receive-only browser monitoring, and provides keyboard type-to-speak takeover. No browser microphone is connected.
+- Protected payment, SSN, and date-of-birth exchanges gate both cloud audio directions and content logging. The value is rendered through macOS on-device speech and sent only to Twilio.
+- Store state, credentials, logs, transcripts, and optional debug traces under `~/.relay/` by default. `RELAY_DATA_DIR` may override the root.
 
-## Implemented now
+## Implementation
 
-- Standard `relay` uses an OpenAI Responses API planner with Pydantic Structured Outputs. It can clarify a general goal, incorporate extracted PDF text, render a structured action plan, and enforce application-owned approve/hold/decline boundaries.
-- Standard `relay` is a bring-your-own-key local process. First-run dashboard setup collects the user's `OPENAI_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` only when they are absent from the environment, then saves them in an owner-only machine-local file. ChatGPT login does not supply API access.
-- There is no hosted PingMeWhen backend, shared account system, or multi-tenant state. Every install uses only that user's credentials, SQLite data, event logs, and session-long local tunnel.
-- Approved production plans can execute phone-call actions only when the planner has collected the caller's preferred display name and supplies a valid E.164 number, concrete known facts, and honest contact provenance; researched contacts require a source URL, while user-provided contacts do not. Speaker is the only live audio model and sees representative audio plus approved context. A separate low-latency text Gatekeeper applies a generic user-authority rule to every nontrivial representative turn and routes every private dashboard message. It returns only `continue` or `consult_user`; any missing fact, preference, judgment, permission, correction, commitment, consequential choice, or uncertainty consults the user. A second veto-only authority check reviews every proposed continuation, and either classifier failing causes consultation. The backend alone creates Speaker responses. Budgets, preferences, and goals constrain behavior but never authorize decisions. Consultations receive durable interaction IDs that must be explicitly resolved before Speaker receives a typed decision update. Exact short acknowledgements bypass model classification deterministically. Raw private text never enters Speaker's conversation: the backend appends only a typed, confirmed context item, waits for its conversation-item acknowledgment, and then permits `response.create`; it never replaces the static call instructions mid-call. A pending question remains active until the matching Speaker response completes. Routing or delivery failures stay nonfatal, preserve the active call and prompt, and ask the user to retry. Private/meta messages receive a reply only in the Private Workspace. While `WAITING_FOR_USER`, representative audio continues to be transcribed; normal Speaker output pauses, but the backend may trigger a constrained one-line keep-alive at intervals. Calls return to the Private Workspace after the queue finishes.
-- Standard PingMeWhen starts one background `pycloudflared` tunnel at application startup and keeps that session lease until shutdown. After plan approval and before each call attempt, the Private Workspace shows a real public `/api/health` reachability check, logs whether it succeeded or was inconclusive, and then attempts the approved Twilio call in either case. Health confirmation is a reachability result, not a claim of end-to-end encryption. Per-call webhook URLs stream bidirectional PCMU audio through Twilio Media Streams and OpenAI Realtime. Every call gets separate high-entropy voice, status, media, and browser-listen capability tokens bound to its approved task, Twilio Account SID, and Call SID. A missing Twilio signature is tolerated only with the correct scoped capability; a present invalid signature is rejected. Capabilities are revoked at terminal call status and never logged.
-- Production typed takeover uses `HUMAN_TAKEOVER` for both general and protected exchanges. General takeover cancels Speaker output and pauses Gatekeeper while representative audio continues to be transcribed; user text is synthesized with macOS AVSpeechSynthesizer and injected as PCMU only into Twilio. Protected requests force a prominent takeover warning, gate both Realtime audio directions, and suppress transcript content; the typed value is spoken by local TTS directly into the Twilio call leg and never logged or sent to the cloud model. Protected handback tells Speaker only whether local speech actually played and which requested field type was supplied, never its value; a zero-speech handback must not imply that the field was provided.
-- Full task snapshots persist in machine-local SQLite at `~/.relay/state/relay.db` and reload after restart. Redacted append-only events remain in `~/.relay/logs/`.
-- Setting `RELAY_DEBUG_CALL_CONTEXT=1` writes private per-call Speaker and Gatekeeper payloads under `~/.relay/debug/calls/` (or `RELAY_DATA_DIR`) with owner-only permissions. This debug trace is off by default and is separate from the redacted event log.
-- The deterministic preview is runnable end to end: validated address/PDF clarification, editable planning, explicit start approval, paced synthetic quote calls with a fresh introduction for each representative, interruptible barge-in, an animated Private Workspace and Call Console, per-call transcript tabs with a vertical history bookmark, factual comparison back in planning, later approval gates, simulated takeover/resume, field-by-field secure payment simulation, and local JSONL logs.
-- Production takeover is real type-to-speak through the existing Twilio media stream. It does not connect browser microphone audio; the deterministic preview remains simulated.
-- Browser speech in the deterministic preview plays on the user device. Production secure speech is generated by the localhost macOS backend and injected only into the Twilio call leg.
-- Production execution currently supports approved outbound phone actions, general typed takeover, and protected typed takeover with real sensitive values (the user types the actual card, SSN, or date-of-birth value, spoken to the representative by local TTS only, never seen by the cloud model or logged). Browser microphone takeover, automatic structured extraction/comparison, retries, and non-phone tools do not work yet. Do not imply otherwise.
-- During takeover, the Private Workspace uses a visually distinct dark local-voice mode and the Call Console is de-emphasized. Completed production calls return to a dedicated post-call summary card without plan-approval controls.
-- The Call Console has an off-by-default, receive-only Listen control. It monitors the representative and PingMeWhen through a best-effort browser audio tap; it never captures a microphone or sends browser audio into the call. Protected-mode audio is excluded from the monitor.
-
-## Explicit non-goals
-
-- No Piper, voice-model downloads, or cross-platform local TTS in P0.
-- No real insurance recommendation, ranking, solicitation, binding, or commission.
-- No additional CLI commands beyond `relay` and `relay demo`.
-- No hosted multi-tenant service, user accounts, shared credential vault, tenant partitioning, or maintainer-funded API usage.
-- Do not present PingMeWhen as merely a calling agent.
-- Do not claim ChatGPT/Codex login authorizes PingMeWhen API calls. Standard mode uses local BYOK credentials; deterministic demo mode uses no provider credentials.
+- `agentic_engine.py` owns the durable task and approval state machine.
+- `planner.py` uses Responses API Structured Outputs for private planning and sourced contact research.
+- `realtime_bridge.py` connects Twilio PCMU Media Streams to OpenAI Realtime and owns Speaker gating, takeover, secure mode, and the read-only listener tap.
+- `gatekeeper.py` performs text-only authority routing and private-message classification.
+- `local_tts.py` uses macOS `AVSpeechSynthesizer`; there are no downloaded or bundled voice models.
+- `task_store.py`, `context_store.py`, `credentials.py`, and `event_log.py` use single-user machine-local storage.
+- Standard startup creates a background `pycloudflared` tunnel. Before dialing, PingMeWhen reports a public health probe but continues on an inconclusive result.
+- Each call uses separate revocable voice, status, media, and browser-listen capabilities. Never log or expose them in task state.
 
 ## Engineering rules
 
 - Read `docs/PRD.md`, `docs/DESIGN.md`, and `docs/IMPLEMENTATION_PLAN.md` before changing scope or architecture.
-- Keep model output structured. The model emits UI schemas; it never emits executable frontend code.
-- Treat user messages as private instructions unless the call agent deliberately reformulates them for the representative.
-- Disclose that PingMeWhen is an AI at the beginning of a call.
-- Prefer the smallest end-to-end implementation that advances the demo.
-- Add tests for state transitions, redaction, approvals, and simulator behavior.
-- Never log or expose OpenAI API keys, Twilio Auth Tokens, or call capability tokens in task state. Require a scoped per-call capability on every Twilio endpoint. The localhost dashboard may request only the active call's browser-listen capability, which must remain separate from Twilio's media capability and be redacted from access logs. Validate a Twilio signature with the official SDK helper whenever the header is present, and reject it if invalid.
+- Keep model output structured. Models emit data schemas, never executable frontend code.
+- Treat redaction in `event_log.py` and secure-mode transcript suppression as security boundaries.
+- Never log card data, CVVs, full SSNs, passwords, OpenAI API keys, Twilio Auth Tokens, or capability tokens.
+- Use Twilio's official signature validator whenever a signature is present; reject an invalid signature.
+- Keep the browser listener receive-only and best-effort. It must never backpressure the phone path or receive protected audio.
+- Add tests for state transitions, approval boundaries, redaction, telephony authentication, and failure recovery.
+- Do not claim ChatGPT or Codex login authorizes PingMeWhen API calls.
 
 ## Verification
 
 ```bash
 uv sync --dev
 uv run pytest
-uv run relay
-uv run relay demo
+uv run pingmewhen --check-install
+uv run pingmewhen
 ```

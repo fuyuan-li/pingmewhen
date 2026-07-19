@@ -38,6 +38,7 @@
       .settings-field select { width: 100%; padding: 11px 38px 11px 12px; border: 1px solid #cbd1da; border-radius: 11px; color: #17191c; background: white; outline: none; }
       .settings-field select:focus { border-color: #16a06b; box-shadow: 0 0 0 3px rgba(22, 160, 107, .12); }
       .settings-help { display: block; margin-top: 5px; color: #7a818c; font-size: 11px; }
+      .settings-role { margin-left: 5px; color: #8a919b; font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; }
       .settings-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 22px; }
       .secondary { padding: 10px 14px; border: 1px solid #cbd1da; border-radius: 10px; color: #4f5660; background: white; font-weight: 700; }
       #landing { position: relative; }
@@ -172,11 +173,9 @@
       .status { color: #626a75; background: #e9ecf0; }
       .notice { color: #755515; background: #fff4d7; }
       .secure-gap { padding: 18px; border: 1px dashed #8c929b; color: #4f5660; background: #eef0f3; font-weight: 700; }
-      .comparison { margin: 20px auto; overflow-x: auto; border: 1px solid #dce0e6; border-radius: 14px; background: white; }
       .plan-card { max-width: 760px; margin: 18px auto; overflow: hidden; border: 1px solid #dce0e6; border-radius: 14px; background: white; }
       .plan-head { padding: 13px 15px; background: #f0f1ff; color: #3540a1; font-size: 13px; font-weight: 800; }
       .plan-body { padding: 14px 15px; }
-      .plan-address { margin-bottom: 10px; color: #4f5660; font-size: 12px; }
       .plan-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 45%); gap: 12px; padding: 9px 0; border-top: 1px solid #eceef2; font-size: 12px; }
       .plan-phone { min-width: 0; overflow-wrap: anywhere; color: #68707b; font-variant-numeric: tabular-nums; text-align: right; }
       .plan-questions { margin: 10px 0 0; padding-left: 18px; color: #4f5660; font-size: 12px; }
@@ -189,10 +188,6 @@
       .call-summary-section strong { display: block; margin-bottom: 5px; color: #1d332a; }
       .call-summary-list { margin: 0; padding-left: 18px; }
       .agent-plan-target { color: #68707b; font-size: 11px; }
-      .comparison-caption { padding: 13px 14px; color: #4d5560; font-size: 12px; font-weight: 700; }
-      table { width: 100%; border-collapse: collapse; min-width: 700px; font-size: 12px; }
-      th, td { padding: 11px 13px; border-top: 1px solid #e8eaee; text-align: left; }
-      th { color: #68707b; background: #fafbfc; }
       .composer { padding: 14px 18px 18px; border-top: 1px solid #e1e4e9; background: white; }
       .prompt { margin-bottom: 12px; padding: 13px; border-radius: 13px; background: #f3f4f7; }
       .prompt-question { margin-bottom: 10px; font-size: 13px; font-weight: 700; }
@@ -208,8 +203,6 @@
       .attach-inline { display: none; align-items: center; justify-content: center; flex: 0 0 auto; width: 42px; margin: 0; border: 1px solid #d5d9e0; border-radius: 12px; color: #4f5660; background: #fff; cursor: pointer; transition: border-color .16s ease, color .16s ease, background .16s ease; }
       .attach-inline:hover { border-color: #84cbad; color: #0d6f4e; background: #f7f8ff; }
       .instruction-row .task-context-input { position: absolute; width: 1px; min-width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; }
-      .secure-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 10px 0; }
-      .secure-form input { min-width: 0; padding: 10px; border: 1px solid #cbd1da; border-radius: 9px; }
       .masked-field { display: flex; gap: 8px; align-items: stretch; margin: 10px 0; }
       .masked-field input { flex: 1 1 auto; min-width: 0; padding: 11px 12px; border: 1px solid #cbd1da; border-radius: 10px; font: 600 16px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .38em; }
       .masked-field input[type="date"], .masked-field input[type="month"] { letter-spacing: normal; font-family: inherit; }
@@ -232,7 +225,6 @@
         .workspace.calling-active .calling-board,
         .workspace.call-history-open .calling-board { flex: 1 1 auto; width: 100%; height: auto; margin: 10px 0 0; }
         .bubble { max-width: 88%; }
-        .secure-form { grid-template-columns: 1fr; }
         .setup-grid { grid-template-columns: 1fr; }
         .setup-actions { align-items: stretch; flex-direction: column; }
       }
@@ -251,28 +243,28 @@
       <div id="model-settings" class="settings-backdrop" role="dialog" aria-modal="true" aria-labelledby="model-settings-title">
         <section class="settings-panel">
           <h2 id="model-settings-title">Model settings</h2>
-          <p class="settings-copy">Choose each model independently. Selections are saved only on this machine and apply to new planning turns and new calls.</p>
+          <p class="settings-copy">PingMeWhen uses four models for four different jobs. If you are unsure, keep the defaults. Selections stay on this machine and apply to new planning turns and calls.</p>
           <div id="model-settings-error" class="error"></div>
           <div class="settings-fields">
             <div class="settings-field">
-              <label for="planning-model">Planning</label>
+              <label for="planning-model">Plan and research your task <span class="settings-role">Planner</span></label>
               <select id="planning-model"></select>
-              <span class="settings-help">Private task reasoning, structured plans, and web research.</span>
+              <span class="settings-help">Turns your goal and documents into a private, editable action plan and researches current contact details when needed.</span>
             </div>
             <div class="settings-field">
-              <label for="gatekeeper-model">Gatekeeper</label>
+              <label for="gatekeeper-model">Know when to bring you in <span class="settings-role">Gatekeeper</span></label>
               <select id="gatekeeper-model"></select>
-              <span class="settings-help">Fast text-only check before PingMeWhen answers each representative turn.</span>
+              <span class="settings-help">Checks each representative turn for missing personal facts, sensitive requests, offers, approvals, or decisions that must be routed to you.</span>
             </div>
             <div class="settings-field">
-              <label for="realtime-model">Realtime voice</label>
+              <label for="realtime-model">Speak on the live call <span class="settings-role">Speaker</span></label>
               <select id="realtime-model"></select>
-              <span class="settings-help">Live speech-to-speech conversation during phone calls.</span>
+              <span class="settings-help">Produces PingMeWhen’s voice and carries the natural back-and-forth conversation with the representative.</span>
             </div>
             <div class="settings-field">
-              <label for="transcription-model">Transcription</label>
+              <label for="transcription-model">Write the live transcript <span class="settings-role">Transcriber</span></label>
               <select id="transcription-model"></select>
-              <span class="settings-help">Representative speech-to-text inside the live session.</span>
+              <span class="settings-help">Converts the representative’s speech into the text you read in the Call Console and the Gatekeeper evaluates.</span>
             </div>
           </div>
           <div class="settings-actions">
@@ -408,10 +400,8 @@
       const callViews = new Map();
       let selectedCallId = null;
       let callHistoryOpen = false;
-      let advanceTimer = null;
       let refreshTimer = null;
       let actionInFlight = false;
-      let runtimeMode = 'standard';
       let currentModelSettings = null;
       let composerModeKey = '';
       let listenSocket = null;
@@ -442,15 +432,10 @@
 
       async function loadRuntime() {
         const runtime = await fetch('/api/runtime').then(readResponse);
-        runtimeMode = runtime.mode;
         const settingsButton = document.querySelector('#model-settings-open');
-        settingsButton.style.display = runtime.mode === 'demo' ? 'none' : 'block';
-        if (runtime.mode !== 'demo') {
-          renderModelSettings(await fetch('/api/model-settings').then(readResponse));
-        }
-        document.querySelector('#mode').textContent = runtime.mode === 'demo'
-          ? 'Simulated insurance demo'
-          : `Agentic production preview · ${runtime.planner_model}`;
+        settingsButton.style.display = 'block';
+        renderModelSettings(await fetch('/api/model-settings').then(readResponse));
+        document.querySelector('#mode').textContent = `Live agent · ${runtime.planner_model}`;
         setup.style.display = runtime.setup_required ? 'block' : 'none';
         landing.style.display = runtime.setup_required ? 'none' : 'block';
         document.querySelectorAll('[data-credential]').forEach(field => {
@@ -458,80 +443,9 @@
         });
       }
 
-      function mountTakeoverPreview() {
-        setup.style.display = 'none';
-        landing.style.display = 'none';
-        workspace.style.display = 'block';
-        runtimeMode = 'standard';
-        document.querySelector('#model-settings-open').style.display = 'none';
-        document.querySelector('#mode').textContent = 'Takeover UI preview';
-        const callingBoard = document.querySelector('#calling-board');
-        if (callingBoard) callingBoard.style.display = 'none';
-        window.sendTakeoverText = value => setPreviewStatus('Spoken locally to the representative → ' + JSON.stringify(value));
-
-        const timeline = document.querySelector('#planning-timeline');
-        timeline.innerHTML = '';
-        const bar = document.createElement('div');
-        bar.style.cssText = 'display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;';
-        const status = document.createElement('div');
-        status.style.cssText = 'font-size:13px; color:var(--text-secondary,#5a616c); min-height:20px;';
-        function setPreviewStatus(text) { status.textContent = text; }
-
-        const fields = [
-          ['Date of birth', 'date_of_birth'],
-          ['Expiration', 'expiration'],
-          ['Card number', 'card_number'],
-          ['CVV', 'cvv'],
-          ['SSN', 'full_ssn'],
-          ['SSN last 4', 'ssn_last_four'],
-          ['General text', '__general__'],
-        ];
-        const promptBox = document.querySelector('#planning-prompt');
-        function showField(field) {
-          setPreviewStatus('');
-          promptBox.style.display = 'block';
-          promptBox.innerHTML = '';
-          planningInstruction.disabled = field !== '__general__';
-          const q = document.createElement('div');
-          q.className = 'prompt-question';
-          if (field === '__general__') {
-            q.textContent = 'General takeover — type anything below; it is spoken to the representative.';
-            promptBox.appendChild(q);
-            planningInstruction.placeholder = 'Type what you want to say to the representative…';
-            planningInstruction.focus();
-            return;
-          }
-          q.textContent = 'Take over: enter the ' + field.replace(/_/g, ' ');
-          promptBox.appendChild(q);
-          renderTakeoverFieldInput(promptBox, field);
-        }
-        fields.forEach(([label, field]) => {
-          const button = document.createElement('button');
-          button.className = 'choice';
-          button.textContent = label;
-          button.onclick = () => showField(field);
-          bar.appendChild(button);
-        });
-        const dark = document.createElement('button');
-        dark.className = 'choice';
-        dark.textContent = 'Toggle private (dark) mode';
-        dark.onclick = () => {
-          const on = document.body.classList.toggle('private-takeover');
-          workspace.classList.toggle('takeover-active', on);
-        };
-        bar.appendChild(dark);
-        timeline.append(bar, status);
-        showField('card_number');
-      }
-
-      if (new URLSearchParams(location.search).get('preview') === 'takeover') {
-        // Defer to the next tick so the field-rendering consts declared later in this script are initialized.
-        setTimeout(mountTakeoverPreview, 0);
-      } else {
-        loadRuntime().catch(() => {
-          document.querySelector('#mode').textContent = 'Runtime unavailable';
-        });
-      }
+      loadRuntime().catch(() => {
+        document.querySelector('#mode').textContent = 'Runtime unavailable';
+      });
 
       document.querySelector('#model-settings-open').addEventListener('click', () => {
         if (currentModelSettings) renderModelSettings(currentModelSettings);
@@ -660,10 +574,6 @@
         if (event.key === 'Enter') sendInstruction('planning');
       });
       document.querySelector('#takeover').addEventListener('click', () => {
-        if (runtimeMode === 'demo') {
-          act('takeover');
-          return;
-        }
         if (task?.takeover_active) resumeTakeover();
         else beginTakeover();
       });
@@ -698,7 +608,6 @@
         const file = taskContextFile.files[0];
         if (!task || !file || actionInFlight) return;
         actionInFlight = true;
-        clearTimeout(advanceTimer);
         setControlsDisabled(true);
         try {
           const form = new FormData();
@@ -721,7 +630,7 @@
         const value = input.value.trim();
         if (!value) return;
         input.value = '';
-        if (runtimeMode !== 'demo' && task?.takeover_active) {
+        if (task?.takeover_active) {
           await sendTakeoverText(value);
           return;
         }
@@ -774,9 +683,8 @@
       async function act(action, value = '', optimistic = null) {
         if (!task || actionInFlight) return;
         actionInFlight = true;
-        clearTimeout(advanceTimer);
-        const userAction = action !== 'advance';
-        const connectionProgress = runtimeMode !== 'demo' && action === 'answer' && value === 'approve'
+        const userAction = true;
+        const connectionProgress = action === 'answer' && value === 'approve'
           ? appendConnectionProgress()
           : null;
         if (userAction) setControlsDisabled(true);
@@ -891,10 +799,9 @@
           return event.phase === 'calling' && !['user_private', 'relay_private'].includes(event.speaker);
         }), activePhase);
 
-        const demoSecurePrompt = runtimeMode === 'demo' && activePhase === 'calling' && task.secure_mode;
-        renderPrompt(demoSecurePrompt ? null : task.prompt, planningPrompt);
-        renderPrompt(demoSecurePrompt ? task.prompt : null, callingPrompt);
-        configureComposer(demoSecurePrompt ? null : task.prompt, activePhase);
+        renderPrompt(task.prompt, planningPrompt);
+        renderPrompt(null, callingPrompt);
+        configureComposer(task.prompt, activePhase);
         planningPrompt.classList.toggle(
           'takeover-warning',
           Boolean(task.stage === 'takeover_required' || task.takeover_sensitive)
@@ -903,18 +810,16 @@
         takeover.style.display = activePhase === 'calling' ? 'block' : 'none';
         takeover.classList.toggle('active', Boolean(task.takeover_active));
         takeover.classList.toggle('required', task.stage === 'takeover_required');
-        takeover.textContent = runtimeMode === 'demo'
-          ? 'Simulate takeover · no audio'
-          : task.takeover_active
-            ? 'You’re speaking · tap to hand back to PingMeWhen'
-            : 'Take over & speak by typing';
-        takeover.disabled = task.status === 'complete' || !task.current_call || (runtimeMode === 'demo' && task.stage === 'takeover');
+        takeover.textContent = task.takeover_active
+          ? 'You’re speaking · tap to hand back to PingMeWhen'
+          : 'Take over & speak by typing';
+        takeover.disabled = task.status === 'complete' || !task.current_call;
         const listen = document.querySelector('#listen');
-        listen.style.display = activePhase === 'calling' && runtimeMode !== 'demo' ? 'block' : 'none';
+        listen.style.display = activePhase === 'calling' ? 'block' : 'none';
         listen.disabled = activePhase !== 'calling' || !task.current_call;
         if (activePhase !== 'calling' && listenWanted) stopListening(false);
         const hangup = document.querySelector('#hangup');
-        hangup.style.display = activePhase === 'calling' && runtimeMode !== 'demo' && task.status !== 'complete' ? 'block' : 'none';
+        hangup.style.display = activePhase === 'calling' && task.status !== 'complete' ? 'block' : 'none';
         hangup.disabled = task.status === 'complete' || !task.current_call;
         const sensitiveFieldEntry = Boolean(
           task.takeover_active
@@ -935,9 +840,6 @@
         if (!task.prompt?.placeholder && (!task.takeover_active || sensitiveFieldEntry)) planningInstruction.placeholder = defaultPlaceholder;
         document.querySelector('#planning-send').disabled = task.status === 'complete' || sensitiveFieldEntry || (task.secure_mode && !task.takeover_active);
         document.querySelector('#task-attach-label').style.display = activePhase === 'planning' && task.status !== 'complete' ? 'inline-flex' : 'none';
-        if (task.auto_advance) {
-          advanceTimer = setTimeout(() => act('advance'), 850);
-        }
         const connectionPending = task.stage === 'connection_starting';
         if ((task.phase === 'calling' || connectionPending) && task.status !== 'complete') {
           refreshTimer = setTimeout(refreshTask, connectionPending ? 250 : 750);
@@ -996,11 +898,10 @@
         let current = null;
         events.forEach(event => {
           if (event.type === 'status' && event.text.startsWith('Calling ')) {
-            const application = event.text.includes('continuing simulated application');
             const name = event.company || `External call ${groups.length + 1}`;
             current = {
               id: `call-${event.id}`,
-              label: `${groups.length + 1} · ${name}${application ? ' · application' : ''}`,
+              label: `${groups.length + 1} · ${name}`,
               events: [],
             };
             groups.push(current);
@@ -1043,12 +944,6 @@
           bubble.className = `bubble ${event.speaker}`;
           bubble.textContent = event.text;
           wrapper.append(speaker, bubble);
-        } else if (event.type === 'comparison') {
-          wrapper.className = 'comparison';
-          wrapper.innerHTML = comparisonMarkup(event.text, task.quotes);
-        } else if (event.type === 'plan') {
-          wrapper.className = 'plan-card';
-          wrapper.innerHTML = planMarkup(event);
         } else if (event.type === 'agent_plan') {
           wrapper.className = 'plan-card';
           wrapper.innerHTML = agentPlanMarkup(event);
@@ -1062,17 +957,6 @@
           wrapper.appendChild(block);
         }
         return wrapper;
-      }
-
-      function planMarkup(event) {
-        const questions = event.questions?.length
-          ? `<ul class="plan-questions">${event.questions.map(question => `<li>${escapeHtml(question)}</li>`).join('')}</ul>`
-          : '<div class="hint">Standardized premium, limits, deductible, and loss-of-use questions.</div>';
-        return `<div class="plan-head">${escapeHtml(event.text)}</div><div class="plan-body">
-          <div class="plan-address"><strong>Property:</strong> ${escapeHtml(event.address)}</div>
-          ${event.carriers.map(carrier => `<div class="plan-row"><strong>${escapeHtml(carrier.insurer)}</strong><span class="plan-phone">${escapeHtml(carrier.phone)} · simulated</span></div>`).join('')}
-          ${questions}
-        </div>`;
       }
 
       function agentPlanMarkup(event) {
@@ -1089,14 +973,6 @@
         return `<div class="plan-head">${escapeHtml(event.text)}</div><div class="plan-body">
           <div class="agent-plan-summary">${escapeHtml(event.summary)}</div>${actions}${assumptions}${questions}
         </div>`;
-      }
-
-      function comparisonMarkup(caption, quotes) {
-        const money = value => value;
-        return `<div class="comparison-caption">${escapeHtml(caption)}</div><table>
-          <thead><tr><th>Insurer</th><th>Monthly</th><th>Property</th><th>Liability</th><th>Deductible</th><th>Loss of use</th></tr></thead>
-          <tbody>${quotes.map(q => `<tr><td><strong>${escapeHtml(q.insurer)}</strong></td><td>${money(q.monthly_premium)}</td><td>${money(q.personal_property)}</td><td>${money(q.liability)}</td><td>${money(q.deductible)}</td><td>${money(q.loss_of_use)}</td></tr>`).join('')}</tbody>
-        </table>`;
       }
 
       function callSummaryMarkup(event) {
@@ -1368,55 +1244,8 @@
         question.textContent = prompt.question;
         promptBox.appendChild(question);
 
-        if (prompt.kind === 'secure_field') {
-          const warning = document.createElement('div');
-          warning.className = 'hint';
-          warning.textContent = 'Fake data only. This value remains in this browser and the preview plays it on this device.';
-          const form = document.createElement('div');
-          form.className = 'secure-form';
-          const field = document.createElement('input');
-          field.id = `local-${prompt.field}`;
-          field.autocomplete = 'off';
-          field.inputMode = prompt.input_mode || 'numeric';
-          field.placeholder = prompt.placeholder;
-          field.setAttribute('aria-label', prompt.label);
-          form.appendChild(field);
-          const speak = document.createElement('button');
-          speak.className = 'choice';
-          speak.textContent = `Simulate ${prompt.label} via local TTS · device audio`;
-          speak.onclick = () => {
-            const value = field.value.trim();
-            if (!value) return showError(`Enter a fake ${prompt.label.toLowerCase()} first.`);
-            if (!window.speechSynthesis) return showError('Local browser speech is unavailable. Use Take Over instead.');
-            const digits = value.replace(/\D/g, '');
-            if (!digits) return showError(`Enter a valid fake ${prompt.label.toLowerCase()}.`);
-            let spokenValue = digits.split('').join(' ');
-            if (prompt.field === 'expiration' && digits.length >= 4) {
-              spokenValue = `${digits.slice(0, 2).split('').join(' ')}, ${digits.slice(2).split('').join(' ')}`;
-            }
-            speak.disabled = true;
-            field.disabled = true;
-            const utterance = new SpeechSynthesisUtterance(spokenValue);
-            utterance.onend = () => {
-              field.value = '';
-              act('answer', 'sent');
-            };
-            utterance.onerror = () => {
-              speak.disabled = false;
-              field.disabled = false;
-              showError('Local speech is unavailable in this browser. Use the silent state-transition fallback or Take Over.');
-              speak.textContent = 'Advance silent handoff · no audio';
-              speak.onclick = () => act('answer', 'sent');
-            };
-            window.speechSynthesis.cancel();
-            window.speechSynthesis.speak(utterance);
-          };
-          promptBox.append(warning, form, speak);
-        }
-
         if (
           prompt.kind === 'takeover_required'
-          && runtimeMode !== 'demo'
           && task?.takeover_active
           && task?.secure_expected_field
           && task.secure_expected_field !== 'verification_request'
@@ -1443,7 +1272,7 @@
         }
         document.querySelectorAll('.choice').forEach(control => control.disabled = false);
         document.querySelector('#planning-send').disabled = task?.status === 'complete' || (task?.secure_mode && !task?.takeover_active);
-        document.querySelector('#takeover').disabled = task?.status === 'complete' || workflowPhase !== 'calling' || (runtimeMode === 'demo' && task?.stage === 'takeover');
+        document.querySelector('#takeover').disabled = task?.status === 'complete' || workflowPhase !== 'calling';
       }
 
       async function resumeTakeover() {

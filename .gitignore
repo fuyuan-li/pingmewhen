@@ -13,5 +13,4 @@ build/
 dist/
 node_modules/
 CLAUDE.md
-demo/
 docs/pitch-idea.md

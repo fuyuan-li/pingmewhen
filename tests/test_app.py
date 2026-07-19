@@ -9,60 +9,16 @@ from relay_agent.context_store import ContextStore
 from relay_agent.event_log import EventLog
 
 
-def test_task_api_reaches_comparison(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RELAY_MODE", "demo")
-    client = TestClient(create_app())
-
-    created = client.post("/api/tasks", json={"goal": "Gather three quotes."})
-    assert created.status_code == 200
-    task = created.json()
-
-    planned = client.post(
-        f"/api/tasks/{task['id']}/actions",
-        json={"action": "instruction", "value": "123 Demo Street"},
-    )
-    assert planned.status_code == 200
-    task = planned.json()
-    task = client.post(
-        f"/api/tasks/{task['id']}/actions",
-        json={"action": "answer", "value": "approve"},
-    ).json()
-    while task["auto_advance"]:
-        task = client.post(
-            f"/api/tasks/{task['id']}/actions",
-            json={"action": "advance", "value": ""},
-        ).json()
-    assert task["stage"] == "claims_history"
-
-    task = client.post(
-        f"/api/tasks/{task['id']}/actions",
-        json={"action": "answer", "value": "no"},
-    ).json()
-    while task["auto_advance"]:
-        task = client.post(
-            f"/api/tasks/{task['id']}/actions",
-            json={"action": "advance", "value": ""},
-        ).json()
-
-    assert task["stage"] == "select_insurer"
-    assert len(task["quotes"]) == 3
-
-
-def test_api_rejects_empty_goal(monkeypatch, tmp_path):
-    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RELAY_MODE", "demo")
-    client = TestClient(create_app())
-
-    response = client.post("/api/tasks", json={"goal": "   "})
-
-    assert response.status_code == 422
-    assert "Describe" in response.json()["detail"]
+def configure_credentials(monkeypatch):
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACtest")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("TWILIO_FROM_NUMBER", "+12025550123")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
 
 def test_pdf_context_upload_is_stored_locally(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RELAY_MODE", "demo")
+    configure_credentials(monkeypatch)
     client = TestClient(create_app())
     buffer = BytesIO()
     writer = PdfWriter()
@@ -95,7 +51,7 @@ def test_default_home_root_is_shared_by_logs_state_and_contexts(monkeypatch, tmp
     unrelated_cwd = tmp_path / "unrelated-project"
     unrelated_cwd.mkdir()
     monkeypatch.delenv("RELAY_DATA_DIR", raising=False)
-    monkeypatch.setenv("RELAY_MODE", "demo")
+    configure_credentials(monkeypatch)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.chdir(unrelated_cwd)
     client = TestClient(create_app())
@@ -138,8 +94,11 @@ def test_dashboard_keeps_private_speakers_left_and_restores_failed_text():
     assert 'id="listen"' in source
     assert "/listen-capability" in source
     assert "decodeMuLaw" in source
-    assert "mountTakeoverPreview" in source
-    assert "preview') === 'takeover'" in source
+    assert "Know when to bring you in" in source
+    assert "missing personal facts, sensitive requests, offers, approvals, or decisions" in source
+    assert "four models for four different jobs" in source
+    assert "previewMode" not in source
+    assert "runtime.mode === 'demo'" not in source
     assert "playMuLawFrame" in source
     assert ".send(" not in source[source.index("async function startListening"):source.index("function stopListening")]
     assert "/secure-fields" not in source

@@ -29,7 +29,7 @@ from relay_agent.model_settings import (
 )
 from relay_agent.planner import OpenAIPlanner, Planner, PlannerError, UnavailablePlanner
 from relay_agent.realtime_bridge import RealtimeSessionHub
-from relay_agent.task_engine import DeterministicTaskEngine, InvalidAction, TaskNotFound
+from relay_agent.task_errors import InvalidAction, TaskNotFound
 from relay_agent.task_store import SQLiteTaskStore
 from relay_agent.telephony import TERMINAL_CALL_STATUSES, TelephonyService, validate_twilio_signature
 from relay_agent.tunnel import TunnelManager, public_health_ready
@@ -78,7 +78,6 @@ def create_app(
     tunnel_readiness_checker: Callable[[str], bool] | None = None,
     connection_status_delay: float = 0.45,
 ) -> FastAPI:
-    mode = os.environ.get("RELAY_MODE", "standard")
     events = EventLog()
     contexts = ContextStore(events)
     store = SQLiteTaskStore(default_data_dir() / "state" / "relay.db")
@@ -97,9 +96,7 @@ def create_app(
 
     active_planner = configured_planner()
 
-    def build_engine() -> DeterministicTaskEngine | AgenticTaskEngine:
-        if mode == "demo":
-            return DeterministicTaskEngine(events, store, namespace="demo")
+    def build_engine() -> AgenticTaskEngine:
         return AgenticTaskEngine(events, active_planner, store, contexts.read_text)
 
     engine = build_engine()
@@ -142,7 +139,7 @@ def create_app(
     )
 
     def setup_required() -> bool:
-        return mode != "demo" and not resolved_credentials().complete
+        return not resolved_credentials().complete
 
     async def validated_twilio_parameters(
         request: Request,
@@ -209,8 +206,6 @@ def create_app(
         return parameters, capability
 
     async def execute_next_call(task_id: str, connection_status_started: bool = False) -> dict:
-        if not isinstance(engine, AgenticTaskEngine):
-            return engine.get(task_id)
         pending = engine.next_phone_action(task_id)
         if pending is None:
             return engine.get(task_id)
@@ -256,17 +251,16 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        events.append("runtime.started", {"mode": mode})
-        warmup_task = None
-        if mode != "demo":
-            async def warm_tunnel() -> None:
-                try:
-                    public_url = await asyncio.to_thread(tunnel.acquire)
-                    events.append("tunnel.started", {"public_url": public_url, "port": port})
-                except Exception as error:
-                    events.append("tunnel.failed", {"reason": type(error).__name__, "port": port})
+        events.append("runtime.started", {"mode": "standard"})
 
-            warmup_task = asyncio.create_task(warm_tunnel())
+        async def warm_tunnel() -> None:
+            try:
+                public_url = await asyncio.to_thread(tunnel.acquire)
+                events.append("tunnel.started", {"public_url": public_url, "port": port})
+            except Exception as error:
+                events.append("tunnel.failed", {"reason": type(error).__name__, "port": port})
+
+        warmup_task = asyncio.create_task(warm_tunnel())
         try:
             yield
         finally:
@@ -274,37 +268,37 @@ def create_app(
                 execution_task.cancel()
             if execution_tasks:
                 await asyncio.gather(*execution_tasks, return_exceptions=True)
-            if warmup_task is not None and not warmup_task.done():
+            if not warmup_task.done():
                 warmup_task.cancel()
                 await asyncio.gather(warmup_task, return_exceptions=True)
             tunnel.stop()
-            events.append("runtime.stopped", {"mode": mode})
+            events.append("runtime.stopped", {"mode": "standard"})
 
     app = FastAPI(title="PingMeWhen", version="0.1.0", lifespan=lifespan)
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "mode": mode}
+        return {"status": "ok", "mode": "standard"}
 
     @app.get("/api/runtime")
     async def runtime() -> dict:
         current_credentials = resolved_credentials()
         selected_models = model_settings.load()
         return {
-            "mode": mode,
+            "mode": "standard",
             "event_log": str(events.path),
             "state_db": str(store.path),
-            "workflow": "deterministic-insurance-preview" if mode == "demo" else "agentic-private-planning",
-            "planner_ready": True if mode == "demo" else active_planner.ready,
-            "planner_model": "deterministic" if mode == "demo" else active_planner.model,
-            "gatekeeper_model": "deterministic" if mode == "demo" else selected_models.gatekeeper_model,
-            "realtime_model": "deterministic" if mode == "demo" else selected_models.realtime_model,
-            "transcription_model": "deterministic" if mode == "demo" else selected_models.transcription_model,
+            "workflow": "agentic-private-planning",
+            "planner_ready": active_planner.ready,
+            "planner_model": active_planner.model,
+            "gatekeeper_model": selected_models.gatekeeper_model,
+            "realtime_model": selected_models.realtime_model,
+            "transcription_model": selected_models.transcription_model,
             "setup_required": setup_required(),
-            "missing_credentials": [] if mode == "demo" else current_credentials.missing,
-            "credential_source": "not required" if mode == "demo" else "local environment or machine-only file",
-            "tunnel_active": False if mode == "demo" else tunnel.active,
-            "tunnel_public_url": "" if mode == "demo" else tunnel.public_url,
+            "missing_credentials": current_credentials.missing,
+            "credential_source": "local environment or machine-only file",
+            "tunnel_active": tunnel.active,
+            "tunnel_public_url": tunnel.public_url,
         }
 
     @app.get("/api/model-settings")
@@ -419,8 +413,6 @@ def create_app(
 
     @app.get("/api/tasks/{task_id}/listen-capability")
     async def listen_capability(task_id: str) -> dict[str, str]:
-        if not isinstance(engine, AgenticTaskEngine):
-            raise HTTPException(status_code=409, detail="Live call monitoring is available only during a production call.")
         try:
             task = engine.get(task_id)
         except TaskNotFound as error:
@@ -436,7 +428,7 @@ def create_app(
     async def act_on_task(task_id: str, request: TaskActionRequest) -> dict:
         try:
             was_calling = engine.get(task_id)["phase"] == "calling"
-            if was_calling and request.action == "hangup" and isinstance(engine, AgenticTaskEngine):
+            if was_calling and request.action == "hangup":
                 call_sid = engine.call_sid_for(task_id)
                 if not call_sid:
                     raise InvalidAction("There is no active call to hang up.")
@@ -455,7 +447,7 @@ def create_app(
                 snapshot = engine.hang_up_call_by_user(task_id)
                 telephony.capabilities.revoke(call_sid)
                 return snapshot
-            if was_calling and request.action == "instruction" and isinstance(engine, AgenticTaskEngine):
+            if was_calling and request.action == "instruction":
                 instruction = request.value.strip()
                 if not instruction:
                     raise InvalidAction("Type a message before sending it.")
@@ -487,7 +479,7 @@ def create_app(
                     delivery.interaction_id,
                 )
             task = engine.act(task_id, request.action, request.value)
-            if isinstance(engine, AgenticTaskEngine) and task["stage"] == "execution_ready":
+            if task["stage"] == "execution_ready":
                 checking = engine.mark_connection_starting(task_id)
                 execution_task = asyncio.create_task(execute_next_call(task_id, connection_status_started=True))
                 execution_tasks.add(execution_task)
@@ -505,8 +497,6 @@ def create_app(
 
     @app.post("/api/tasks/{task_id}/takeover")
     async def begin_takeover(task_id: str) -> dict:
-        if not isinstance(engine, AgenticTaskEngine):
-            raise HTTPException(status_code=409, detail="Typed takeover is available only during a production call.")
         try:
             task = engine.get(task_id)
             sensitive = bool(task.get("takeover_sensitive"))
@@ -521,9 +511,6 @@ def create_app(
 
     @app.post("/api/tasks/{task_id}/takeover-say")
     async def takeover_say(task_id: str, request: TakeoverSayRequest) -> dict:
-        if not isinstance(engine, AgenticTaskEngine):
-            request.text = ""
-            raise HTTPException(status_code=409, detail="Typed takeover is available only during a production call.")
         try:
             task = engine.get(task_id)
             text = request.text.strip()
@@ -557,8 +544,6 @@ def create_app(
 
     @app.post("/api/tasks/{task_id}/resume-takeover")
     async def resume_takeover(task_id: str) -> dict:
-        if not isinstance(engine, AgenticTaskEngine):
-            raise HTTPException(status_code=409, detail="Real call takeover resume is available only in production.")
         try:
             task = engine.get(task_id)
             if task.get("call_state") != "HUMAN_TAKEOVER" or not task.get("takeover_active"):
@@ -596,7 +581,7 @@ def create_app(
             task_id = capability.task_id
             call_sid = parameters.get("CallSid", "")
             try:
-                if task_id and call_sid and isinstance(engine, AgenticTaskEngine):
+                if task_id and call_sid:
                     active = engine.get(task_id).get("current_call") or {}
                     if active.get("call_sid") == call_sid:
                         finished = engine.finish_call(task_id, call_sid, parameters["CallStatus"].lower())

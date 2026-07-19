@@ -163,7 +163,7 @@ def test_transcripts_are_classified():
     assert requested_sensitive_field("What are the last four digits of your SSN?") == "ssn_last_four"
     assert requested_sensitive_field("What is your date of birth?") == "date_of_birth"
     # A bare SSN / social-security request (no "full" or "number") and a "CCV" misspelling must still be caught,
-    # so the deterministic takeover triggers instead of looping through the Gatekeeper.
+    # so protected takeover triggers instead of looping through the Gatekeeper.
     assert requested_sensitive_field("Ok, what's your SSN?") == "full_ssn"
     assert requested_sensitive_field("I need your social security to verify identity.") == "full_ssn"
     assert requested_sensitive_field("What is the CCV?") == "cvv"
@@ -380,7 +380,7 @@ def test_live_instruction_is_reformulated_into_session_context_before_response(t
     assert not any(event.get("type") == "session.update" for event in realtime.sent)
     context_text = realtime.sent[0]["item"]["content"][0]["text"]
     assert "Ask about a discount." in context_text
-    assert "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND" in context_text
+    assert "CONFIRMED CONTEXT UPDATE FROM PINGMEWHEN BACKEND" in context_text
     assert len(realtime.sent[0]["item"]["id"]) == 32
     response_instruction = realtime.sent[-1]["response"]["instructions"]
     assert "CONFIRMED CONTEXT UPDATE conversation item" in response_instruction

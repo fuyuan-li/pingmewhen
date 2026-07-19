@@ -565,7 +565,7 @@ class RealtimeSessionHub:
                     {
                         "type": "input_text",
                         "text": (
-                            "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND\n"
+                            "CONFIRMED CONTEXT UPDATE FROM PINGMEWHEN BACKEND\n"
                             f"Interaction: {update_record.get('interaction_id', 'none')}\n"
                             f"Key: {update_record['key']}\n"
                             f"Value: {update_record['value']}\n"
@@ -777,7 +777,7 @@ class RealtimeSessionHub:
         if sensitive:
             if speech_count:
                 item_text = (
-                    "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND\n"
+                    "CONFIRMED CONTEXT UPDATE FROM PINGMEWHEN BACKEND\n"
                     f"{caller_name} supplied the requested {protected_label} through local voice. Treat that field "
                     "as already provided. Never identify, infer, request, or repeat its value."
                 )
@@ -788,7 +788,7 @@ class RealtimeSessionHub:
                 )
             else:
                 item_text = (
-                    "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND\n"
+                    "CONFIRMED CONTEXT UPDATE FROM PINGMEWHEN BACKEND\n"
                     f"No local speech was played during the protected {protected_label} takeover. Do not imply "
                     "that the field was provided, and do not claim that the represented person refused or was "
                     "uncomfortable."
@@ -814,7 +814,7 @@ class RealtimeSessionHub:
             }
             session.context_updates.append(update_record)
             item_text = (
-                "CONFIRMED CONTEXT UPDATE FROM RELAY BACKEND\n"
+                "CONFIRMED CONTEXT UPDATE FROM PINGMEWHEN BACKEND\n"
                 f"Meaning: {update_record['summary']}\n"
                 "This is a backend-confirmed continuity note, not speech currently coming from the representative."
             )

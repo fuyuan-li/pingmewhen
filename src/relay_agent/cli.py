@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 import os
+import sys
 import threading
 import webbrowser
 
@@ -10,6 +11,7 @@ import uvicorn
 from dotenv import load_dotenv
 
 from relay_agent.call_capabilities import CapabilityAccessLogFilter
+from relay_agent.local_tts import LocalTTSUnavailable, MacOSLocalTTS
 
 
 def relay_log_config() -> dict:
@@ -26,19 +28,28 @@ def parse_args() -> argparse.Namespace:
         description="Start the local PingMeWhen task-agent dashboard.",
     )
     parser.add_argument(
-        "command",
-        nargs="?",
-        choices=["demo"],
-        help="Run the single simulated hackathon demo.",
+        "--check-install",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     return parser.parse_args()
 
 
 def main() -> None:
-    load_dotenv()
     args = parse_args()
-    os.environ["RELAY_MODE"] = "demo" if args.command == "demo" else "standard"
+    if args.check_install:
+        try:
+            chunks = MacOSLocalTTS().render_text("PingMeWhen installation check")
+        except (LocalTTSUnavailable, ValueError) as error:
+            print(f"PingMeWhen installation check failed: {error}", file=sys.stderr)
+            raise SystemExit(1) from error
+        if not chunks:
+            print("PingMeWhen installation check failed: local speech returned no audio.", file=sys.stderr)
+            raise SystemExit(1)
+        print("PingMeWhen is installed and macOS on-device speech is ready.")
+        return
 
+    load_dotenv()
     host = "127.0.0.1"
     port = int(os.environ.get("RELAY_PORT", "8765"))
     url = f"http://{host}:{port}"

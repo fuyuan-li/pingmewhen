@@ -20,16 +20,6 @@ class LocalTTSRenderer(Protocol):
     def render_sensitive(self, field: str, value: str) -> list[str]: ...
 
 
-FAKE_SENSITIVE_VALUES = {
-    "card_number": "4242424242424242",
-    "expiration": "1234",
-    "cvv": "123",
-    "full_ssn": "000000000",
-    "ssn_last_four": "0000",
-    "date_of_birth": "20000101",
-}
-
-
 def sensitive_input_spec(field: str) -> dict[str, str | int]:
     return {
         "card_number": {
@@ -69,10 +59,6 @@ def sensitive_input_spec(field: str) -> dict[str, str | int]:
             "max_length": 10,
         },
     }.get(field, {"input_kind": "text", "placeholder": "Type a non-sensitive response", "hint": ""})
-
-
-def is_allowed_fake_value(field: str, value: str) -> bool:
-    return "".join(character for character in value if character.isdigit()) == FAKE_SENSITIVE_VALUES.get(field)
 
 
 def is_valid_sensitive_value(field: str, value: str) -> bool:
@@ -123,7 +109,7 @@ def spoken_sensitive_value(field: str, value: str) -> str:
         raise ValueError("Enter a valid date of birth.")
     digits = "".join(character for character in value if character.isdigit())
     if not digits:
-        raise ValueError("Enter a valid fake value.")
+        raise ValueError("Enter a valid protected value.")
     if field == "expiration" and len(digits) >= 4:
         if re.fullmatch(r"\d{4}-\d{2}", value.strip()):
             digits = f"{value.strip()[-2:]}{value.strip()[:4]}"

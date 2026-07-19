@@ -13,7 +13,7 @@ from relay_agent.interaction_prompts import user_input_prompt
 from relay_agent.local_tts import sensitive_input_spec
 from relay_agent.names import normalize_display_name
 from relay_agent.planner import Planner, PlannerError, PlanningTurn
-from relay_agent.task_engine import InvalidAction, TaskNotFound
+from relay_agent.task_errors import InvalidAction, TaskNotFound
 from relay_agent.task_store import SQLiteTaskStore
 
 
@@ -55,10 +55,8 @@ class AgenticTaskEngine:
             "stage": "agent_planning",
             "created_at": datetime.now(UTC).isoformat(),
             "events": [],
-            "quotes": [],
             "prompt": None,
             "secure_mode": False,
-            "auto_advance": False,
             "approved_plan": None,
             "execution_queue": [],
             "current_call": None,
@@ -153,7 +151,7 @@ class AgenticTaskEngine:
                 {
                     "role": "developer",
                     "content": (
-                        "RELAY TASK STATE: The caller display name is already confirmed as "
+                        "PINGMEWHEN TASK STATE: The caller display name is already confirmed as "
                         f"{json.dumps(caller_name)}. Preserve it and do not ask for it again."
                     ),
                 }

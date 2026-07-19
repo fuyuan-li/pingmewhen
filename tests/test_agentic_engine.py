@@ -5,7 +5,7 @@ from relay_agent.agentic_engine import AgenticTaskEngine
 from relay_agent.app import create_app
 from relay_agent.event_log import EventLog
 from relay_agent.planner import PlanAction, PlannerError, PlanningTurn, UnavailablePlanner
-from relay_agent.task_engine import InvalidAction
+from relay_agent.task_errors import InvalidAction
 from relay_agent.task_store import SQLiteTaskStore
 
 
@@ -843,7 +843,6 @@ def test_resume_from_takeover_rejects_any_other_call_state(tmp_path):
 
 def test_production_app_reports_planner_and_persists_state(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACtest")
     monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("TWILIO_FROM_NUMBER", "+12025550123")
@@ -862,7 +861,6 @@ def test_production_app_reports_planner_and_persists_state(monkeypatch, tmp_path
 
 def test_production_app_returns_clear_error_without_backend_credential(monkeypatch, tmp_path):
     monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RELAY_MODE", "standard")
     monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACtest")
     monkeypatch.setenv("TWILIO_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("TWILIO_FROM_NUMBER", "+12025550123")
