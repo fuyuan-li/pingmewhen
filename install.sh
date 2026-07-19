@@ -2,7 +2,7 @@
 
 set -eu
 
-PACKAGE_SOURCE=${PINGMEWHEN_PACKAGE_SOURCE:-git+https://github.com/fuyuan-li/relay.git}
+PACKAGE_SOURCE=${PINGMEWHEN_PACKAGE_SOURCE:-git+https://github.com/fuyuan-li/pingmewhen.git}
 
 if [ "$(uname -s)" != "Darwin" ]; then
   printf '%s\n' "PingMeWhen currently requires macOS for protected on-device speech."

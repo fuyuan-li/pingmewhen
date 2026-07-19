@@ -5,7 +5,7 @@ PingMeWhen is currently supported on macOS because protected type-to-speak uses 
 ## One-line install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fuyuan-li/relay/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/fuyuan-li/pingmewhen/main/install.sh | sh
 ```
 
 The installer:
@@ -50,6 +50,6 @@ uv run pingmewhen
 ## Update or uninstall
 
 ```bash
-uv tool install --force git+https://github.com/fuyuan-li/relay.git
+uv tool install --force git+https://github.com/fuyuan-li/pingmewhen.git
 uv tool uninstall pingmewhen
 ```

@@ -21,7 +21,7 @@ These are the product's highlights, ranked. See [`docs/HIGHLIGHTS.md`](docs/HIGH
 On macOS, install PingMeWhen and verify its on-device speech path with one command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fuyuan-li/relay/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/fuyuan-li/pingmewhen/main/install.sh | sh
 pingmewhen
 ```
 

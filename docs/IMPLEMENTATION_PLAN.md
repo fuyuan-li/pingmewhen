@@ -1,5 +1,7 @@
 # PingMeWhen implementation plan
 
+Status: finalized for the `v0.1.0` real-call release.
+
 ## Completed foundation
 
 - [x] Package the localhost FastAPI service and `pingmewhen` executable.
@@ -31,8 +33,9 @@
 - [x] Add a one-line curl installer that installs uv and PingMeWhen.
 - [x] Verify the exact macOS on-device speech path after installation.
 - [x] Document first-run credential requirements and local ownership.
-- [ ] Publish a tagged release and verify installation on a clean Mac user account.
-- [ ] Rename the GitHub repository from `relay` to `pingmewhen` when desired and update installer URLs.
+- [x] Verify an isolated wheel installation, CLI startup, and local TTS check on macOS.
+- [x] Publish the tagged `v0.1.0` GitHub release with wheel and source-distribution assets.
+- [x] Rename the GitHub repository from `relay` to `pingmewhen` and update installer URLs.
 
 ## Deferred
 
