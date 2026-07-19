@@ -102,3 +102,24 @@ def test_dashboard_keeps_private_speakers_left_and_restores_failed_text():
     assert "playMuLawFrame" in source
     assert ".send(" not in source[source.index("async function startListening"):source.index("function stopListening")]
     assert "/secure-fields" not in source
+
+
+def test_developer_previews_are_separate_from_the_production_dashboard(monkeypatch, tmp_path):
+    monkeypatch.setenv("RELAY_DATA_DIR", str(tmp_path))
+    configure_credentials(monkeypatch)
+    client = TestClient(create_app())
+
+    gallery = client.get("/previews")
+    takeover = client.get("/previews/takeover")
+    onboarding = client.get("/previews/onboarding")
+
+    assert gallery.status_code == 200
+    assert '/previews/takeover' in gallery.text
+    assert '/previews/onboarding' in gallery.text
+    assert takeover.status_code == 200
+    assert 'Takeover mode preview' in takeover.text
+    assert 'Nothing was sent or saved.' in takeover.text
+    assert onboarding.status_code == 200
+    assert 'CredentialStore onboarding preview' in onboarding.text
+    assert 'This preview never submits or stores what you type.' in onboarding.text
+    assert '/previews/' not in client.get("/").text

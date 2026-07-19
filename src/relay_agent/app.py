@@ -668,4 +668,20 @@ def create_app(
     async def dashboard() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
+    @app.get("/previews")
+    async def preview_gallery() -> FileResponse:
+        return FileResponse(STATIC_DIR / "previews" / "index.html")
+
+    @app.get("/previews/takeover")
+    async def takeover_preview() -> FileResponse:
+        return FileResponse(STATIC_DIR / "previews" / "takeover.html")
+
+    @app.get("/previews/onboarding")
+    async def onboarding_preview() -> FileResponse:
+        return FileResponse(STATIC_DIR / "previews" / "onboarding.html")
+
+    @app.get("/previews/preview.css")
+    async def preview_styles() -> FileResponse:
+        return FileResponse(STATIC_DIR / "previews" / "preview.css", media_type="text/css")
+
     return app

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PingMeWhen · Onboarding preview</title>
+    <link rel="stylesheet" href="/previews/preview.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/">PingMeWhen</a>
+        <a class="back" href="/previews">← All previews</a>
+      </header>
+      <section class="preview-toolbar">
+        <strong>CredentialStore onboarding preview</strong>
+        <div class="toolbar-controls">
+          <label class="muted" for="missing-state">Missing values</label>
+          <select id="missing-state">
+            <option value="all">All credentials</option>
+            <option value="openai">OpenAI API key only</option>
+            <option value="twilio_auth">Twilio Auth Token only</option>
+            <option value="twilio">All Twilio credentials</option>
+          </select>
+        </div>
+      </section>
+      <section class="setup-wrap">
+        <section class="panel setup-panel">
+          <div class="setup-kicker"><span>1</span> First-run setup</div>
+          <h1>Connect your own calling accounts.</h1>
+          <p class="setup-copy">PingMeWhen runs locally and uses your OpenAI and Twilio credentials. Enter only the values that are missing from this machine.</p>
+          <form id="preview-form">
+            <div class="setup-grid">
+              <div class="setup-field" data-field="openai">
+                <label for="openai-key">OpenAI API key <span class="required-mark">Missing</span></label>
+                <input id="openai-key" type="password" autocomplete="off" placeholder="sk-…" />
+                <div class="field-help">Used for private planning, Gatekeeper, and live Speaker sessions.</div>
+              </div>
+              <div class="setup-field" data-field="twilio-sid">
+                <label for="twilio-sid">Twilio Account SID <span class="required-mark">Missing</span></label>
+                <input id="twilio-sid" type="text" autocomplete="off" placeholder="AC…" />
+                <div class="field-help">Identifies the Twilio account that places calls.</div>
+              </div>
+              <div class="setup-field" data-field="twilio-auth">
+                <label for="twilio-auth">Twilio Auth Token <span class="required-mark">Missing</span></label>
+                <input id="twilio-auth" type="password" autocomplete="off" placeholder="Enter Auth Token" />
+                <div class="field-help">Kept masked and never returned to the dashboard.</div>
+              </div>
+              <div class="setup-field" data-field="twilio-number">
+                <label for="twilio-number">Twilio phone number <span class="required-mark">Missing</span></label>
+                <input id="twilio-number" type="tel" autocomplete="off" placeholder="+1 202 555 0123" />
+                <div class="field-help">Must be a voice-capable Twilio number in E.164 format.</div>
+              </div>
+            </div>
+            <div class="privacy-note">
+              <div class="lock" aria-hidden="true">⌁</div>
+              <div><strong>Stored only on this machine</strong>Environment variables take precedence. Saved values use owner-only file permissions under <code>~/.relay/</code>.</div>
+            </div>
+            <div class="setup-actions">
+              <span class="setup-note">This preview never submits or stores what you type.</span>
+              <button class="primary" type="submit">Save and continue</button>
+            </div>
+            <div id="setup-status" class="setup-status" role="status">Preview complete — no credentials were saved.</div>
+          </form>
+        </section>
+      </section>
+    </main>
+    <script>
+      const fieldGroups = {
+        all: ['openai', 'twilio-sid', 'twilio-auth', 'twilio-number'],
+        openai: ['openai'],
+        twilio_auth: ['twilio-auth'],
+        twilio: ['twilio-sid', 'twilio-auth', 'twilio-number'],
+      };
+      const selector = document.querySelector('#missing-state');
+      const status = document.querySelector('#setup-status');
+
+      function renderMissingState() {
+        const visible = new Set(fieldGroups[selector.value]);
+        document.querySelectorAll('[data-field]').forEach(field => {
+          field.classList.toggle('hidden', !visible.has(field.dataset.field));
+        });
+        status.classList.remove('visible');
+      }
+
+      selector.addEventListener('change', renderMissingState);
+      document.querySelector('#preview-form').addEventListener('submit', event => {
+        event.preventDefault();
+        status.classList.add('visible');
+      });
+      renderMissingState();
+    </script>
+  </body>
+</html>

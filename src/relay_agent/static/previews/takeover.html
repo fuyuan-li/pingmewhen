@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PingMeWhen · Takeover preview</title>
+    <link rel="stylesheet" href="/previews/preview.css" />
+  </head>
+  <body class="takeover-page">
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/">PingMeWhen</a>
+        <a class="back" href="/previews">← All previews</a>
+      </header>
+      <section class="preview-toolbar">
+        <strong>Takeover mode preview</strong>
+        <div class="toolbar-controls">
+          <label class="muted" for="takeover-state">Input state</label>
+          <select id="takeover-state">
+            <option value="general">General text</option>
+            <option value="date_of_birth">Date of birth</option>
+            <option value="expiration">Card expiration</option>
+            <option value="card_number" selected>Card number</option>
+            <option value="cvv">CVV</option>
+            <option value="full_ssn">Full SSN</option>
+            <option value="ssn_last_four">SSN last four</option>
+          </select>
+          <button id="reset-preview" class="toolbar-button" type="button">Reset</button>
+        </div>
+      </section>
+      <section class="workspace">
+        <section class="board">
+          <header class="board-header">
+            <div class="board-title">
+              <strong>Private Workspace <span class="mode-label">Private local voice</span></strong>
+              <span>Get a lower renewal price without changing coverage</span>
+            </div>
+          </header>
+          <div class="timeline">
+            <div class="message">
+              <div class="speaker">PingMeWhen · private</div>
+              <div class="bubble">The representative needs a detail that should stay off the cloud. I paused the AI and opened local voice takeover.</div>
+            </div>
+            <div class="event-line">Human takeover started · Speaker and Gatekeeper paused</div>
+            <div class="message right">
+              <div class="speaker">You · private</div>
+              <div class="bubble">I’ll provide this directly.</div>
+            </div>
+          </div>
+          <footer class="composer">
+            <div id="takeover-prompt" class="prompt"></div>
+            <button class="takeover-bar" type="button">Return control to PingMeWhen</button>
+            <div id="general-row" class="text-row" hidden>
+              <input id="general-text" type="text" placeholder="Type what you want to say…" />
+              <button id="general-send" type="button" aria-label="Speak text">↑</button>
+            </div>
+            <div id="takeover-status" class="status-line" aria-live="polite"></div>
+          </footer>
+        </section>
+        <section class="board call-board" aria-label="De-emphasized external call console">
+          <header class="board-header">
+            <div class="board-title">
+              <strong>Call Console <span class="live">Live</span></strong>
+              <span>External voice transcript</span>
+            </div>
+            <button class="listen" type="button" disabled>Listen paused</button>
+          </header>
+          <div class="timeline">
+            <div class="message">
+              <div class="speaker">Representative</div>
+              <div class="bubble">I can finish the application. May I have the card number for the first payment?</div>
+            </div>
+            <div class="message right">
+              <div class="speaker">PingMeWhen</div>
+              <div class="bubble">I’m bringing the customer in to provide that securely.</div>
+            </div>
+            <div class="secure-gap">Protected exchange in progress<br />Cloud audio and transcript logging paused</div>
+          </div>
+          <footer class="composer"><div class="protected-hint">The browser listener is receive-only and never receives protected audio.</div></footer>
+        </section>
+      </section>
+    </main>
+    <script>
+      const definitions = {
+        general: {question: 'General takeover — type anything below; macOS local voice speaks it to the representative.'},
+        date_of_birth: {question: 'Take over: enter your date of birth', type: 'date', label: 'Date of birth'},
+        expiration: {question: 'Take over: enter the card expiration month', type: 'month', label: 'Expiration month'},
+        card_number: {question: 'Take over: enter the card number', type: 'password', inputMode: 'numeric', maxLength: 19, label: 'Card number'},
+        cvv: {question: 'Take over: enter the security code', type: 'password', inputMode: 'numeric', maxLength: 4, label: 'CVV'},
+        full_ssn: {question: 'Take over: enter the Social Security number', type: 'password', inputMode: 'numeric', maxLength: 9, label: 'Full SSN'},
+        ssn_last_four: {question: 'Take over: enter the last four digits of the SSN', type: 'password', inputMode: 'numeric', maxLength: 4, label: 'SSN last four'},
+      };
+      const selector = document.querySelector('#takeover-state');
+      const prompt = document.querySelector('#takeover-prompt');
+      const generalRow = document.querySelector('#general-row');
+      const status = document.querySelector('#takeover-status');
+
+      function speakPreview(label) {
+        status.textContent = `${label} would be spoken locally. Nothing was sent or saved.`;
+      }
+
+      function renderState() {
+        const key = selector.value;
+        const definition = definitions[key];
+        status.textContent = '';
+        generalRow.hidden = key !== 'general';
+        prompt.replaceChildren();
+        const title = document.createElement('div');
+        title.className = 'prompt-question';
+        title.textContent = definition.question;
+        prompt.appendChild(title);
+        if (key !== 'general') {
+          const row = document.createElement('div');
+          row.className = 'field-row';
+          const input = document.createElement('input');
+          input.type = definition.type;
+          input.inputMode = definition.inputMode || 'text';
+          input.maxLength = definition.maxLength || 1000;
+          input.autocomplete = 'off';
+          input.placeholder = `Enter ${definition.label.toLowerCase()}`;
+          if (definition.type === 'password') input.classList.add('masked');
+          if (definition.inputMode === 'numeric') input.addEventListener('input', () => {
+            input.value = input.value.replace(/\D/g, '').slice(0, definition.maxLength);
+          });
+          const button = document.createElement('button');
+          button.className = 'speak';
+          button.type = 'button';
+          button.textContent = 'Speak locally';
+          button.addEventListener('click', () => speakPreview(definition.label));
+          row.append(input, button);
+          prompt.appendChild(row);
+        }
+        const hint = document.createElement('div');
+        hint.className = 'protected-hint';
+        hint.textContent = key === 'general'
+          ? 'Typed takeover text bypasses Speaker and is rendered through macOS speech.'
+          : 'Typed here, spoken by local voice only — never sent to the AI or logged.';
+        prompt.appendChild(hint);
+      }
+
+      selector.addEventListener('change', renderState);
+      document.querySelector('#reset-preview').addEventListener('click', () => { selector.value = 'card_number'; renderState(); });
+      document.querySelector('#general-send').addEventListener('click', () => {
+        if (document.querySelector('#general-text').value.trim()) speakPreview('Typed message');
+      });
+      renderState();
+    </script>
+  </body>
+</html>
