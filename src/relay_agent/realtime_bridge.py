@@ -694,6 +694,7 @@ class RealtimeSessionHub:
                     await session.twilio.send_json(
                         {"event": "media", "streamSid": session.stream_sid, "media": {"payload": payload}}
                     )
+                    self._fan_out_listener_audio(session, "relay", payload)
                 await session.twilio.send_json(
                     {"event": "mark", "streamSid": session.stream_sid, "mark": {"name": mark_name}}
                 )
