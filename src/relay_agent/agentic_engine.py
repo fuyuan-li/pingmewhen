@@ -731,7 +731,7 @@ class AgenticTaskEngine:
                 completed_targets = [
                     entry["action"]["target"]
                     for entry in task.get("execution_queue", [])
-                    if entry.get("status") == "completed"
+                    if entry.get("status") == "complete"
                 ]
                 representative_turns = [
                     event["text"]
