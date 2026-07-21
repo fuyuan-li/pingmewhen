@@ -680,21 +680,43 @@ class RealtimeSessionHub:
             session.response_complete.set()
             self._events.append("realtime.response_cancel_timeout", {"task_id": session.task_id})
 
-    async def _play_local_tts(self, session: ActiveRealtimeSession, chunks: list[str], mark_prefix: str) -> None:
+    async def _play_local_tts(
+        self, session: ActiveRealtimeSession, chunks: list[str], mark_prefix: str, task_id: str = ""
+    ) -> None:
         if not chunks:
             raise RuntimeError("Local speech returned no audio.")
         mark_name = f"{mark_prefix}-{uuid4().hex}"
         completion = asyncio.Event()
         session.mark_events[mark_name] = completion
         try:
-            for payload in chunks:
+            try:
+                for payload in chunks:
+                    await session.twilio.send_json(
+                        {"event": "media", "streamSid": session.stream_sid, "media": {"payload": payload}}
+                    )
                 await session.twilio.send_json(
-                    {"event": "media", "streamSid": session.stream_sid, "media": {"payload": payload}}
+                    {"event": "mark", "streamSid": session.stream_sid, "mark": {"name": mark_name}}
                 )
-            await session.twilio.send_json(
-                {"event": "mark", "streamSid": session.stream_sid, "mark": {"name": mark_name}}
-            )
-            await asyncio.wait_for(completion.wait(), timeout=self._playback_timeout)
+            except (WebSocketDisconnect, RuntimeError, OSError) as error:
+                raise RuntimeError("The call disconnected while PingMeWhen was speaking.") from error
+            # Poll instead of a single long wait_for so a call that disconnects while we're
+            # waiting for the playback-complete mark is detected within one poll interval,
+            # not only after the full timeout elapses. Skipped when the caller has no task_id
+            # to check liveness against (e.g. tests exercising playback in isolation).
+            deadline = monotonic() + self._playback_timeout
+            poll_interval = min(0.5, self._playback_timeout)
+            while monotonic() < deadline:
+                if completion.is_set():
+                    return
+                if task_id:
+                    async with self._lock:
+                        still_connected = self._sessions.get(task_id) is session
+                    if not still_connected:
+                        raise RuntimeError("The call disconnected while PingMeWhen was speaking.")
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(completion.wait(), timeout=poll_interval)
+            if not completion.is_set():
+                raise TimeoutError("Timed out waiting for the call to confirm local speech playback.")
         finally:
             session.mark_events.pop(mark_name, None)
             chunks.clear()
@@ -721,13 +743,13 @@ class RealtimeSessionHub:
                     renderer = getattr(self._tts_renderer, "render_sensitive", None)
                     chunks = renderer(field_name, cleaned) if renderer else self._tts_renderer.render(field_name, cleaned)
                 cleaned = ""
-                await self._play_local_tts(session, chunks, "secure-takeover")
+                await self._play_local_tts(session, chunks, "secure-takeover", task_id)
             else:
                 renderer = getattr(self._tts_renderer, "render_text", None)
                 if renderer is None:
                     raise RuntimeError("The configured local voice cannot speak arbitrary text.")
                 chunks = renderer(cleaned)
-                await self._play_local_tts(session, chunks, "typed-takeover")
+                await self._play_local_tts(session, chunks, "typed-takeover", task_id)
                 session.takeover_exchange.append({"speaker": "user", "text": cleaned})
                 cleaned = ""
             session.takeover_speech_count += 1
