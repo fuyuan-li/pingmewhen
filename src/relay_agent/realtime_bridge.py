@@ -690,11 +690,16 @@ class RealtimeSessionHub:
         session.mark_events[mark_name] = completion
         try:
             try:
-                for payload in chunks:
+                for index, payload in enumerate(chunks):
                     await session.twilio.send_json(
                         {"event": "media", "streamSid": session.stream_sid, "media": {"payload": payload}}
                     )
                     self._fan_out_listener_audio(session, "relay", payload)
+                    # Each chunk is 20ms of audio; pace sends to roughly real time so a
+                    # multi-second reply doesn't blow past the listener queue's capacity
+                    # before it can be drained.
+                    if index < len(chunks) - 1:
+                        await asyncio.sleep(0.02)
                 await session.twilio.send_json(
                     {"event": "mark", "streamSid": session.stream_sid, "mark": {"name": mark_name}}
                 )
