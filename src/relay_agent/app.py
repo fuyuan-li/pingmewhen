@@ -391,10 +391,10 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.post("/api/tasks/{task_id}/contexts")
-    async def attach_task_context(task_id: str, file: UploadFile = File(...)) -> dict:
+    async def attach_task_context(task_id: str, file: UploadFile = File(...), replan: bool = True) -> dict:
         try:
             metadata = contexts.save_pdf(file.filename or "context.pdf", await file.read())
-            return engine.attach_context(task_id, metadata)
+            return engine.attach_context(task_id, metadata, replan=replan)
         except TaskNotFound as error:
             raise HTTPException(status_code=404, detail="Task not found.") from error
         except InvalidContext as error:

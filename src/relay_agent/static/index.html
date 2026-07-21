@@ -616,10 +616,11 @@
         actionInFlight = true;
         setControlsDisabled(true);
         try {
-          for (const file of files) {
+          for (let i = 0; i < files.length; i++) {
+            const isLast = i === files.length - 1;
             const form = new FormData();
-            form.append('file', file);
-            const response = await fetch(`/api/tasks/${task.id}/contexts`, {method: 'POST', body: form});
+            form.append('file', files[i]);
+            const response = await fetch(`/api/tasks/${task.id}/contexts?replan=${isLast}`, {method: 'POST', body: form});
             task = await readResponse(response);
             renderTask();
           }

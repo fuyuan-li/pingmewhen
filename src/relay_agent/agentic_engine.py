@@ -81,7 +81,7 @@ class AgenticTaskEngine:
             task = self._require(task_id)
             return self._snapshot(task)
 
-    def attach_context(self, task_id: str, context: dict[str, Any]) -> dict[str, Any]:
+    def attach_context(self, task_id: str, context: dict[str, Any], replan: bool = True) -> dict[str, Any]:
         with self._lock:
             task = self._require(task_id)
             if task["status"] == "complete" or task["stage"] == "execution_ready":
@@ -89,12 +89,13 @@ class AgenticTaskEngine:
             before = deepcopy(task)
             task["contexts"].append(deepcopy(context))
             self._append(task, "status", text=f"Local PDF context attached · {context['filename']}")
-            try:
-                self._run_planner(task)
-            except PlannerError:
-                task.clear()
-                task.update(before)
-                raise
+            if replan:
+                try:
+                    self._run_planner(task)
+                except PlannerError:
+                    task.clear()
+                    task.update(before)
+                    raise
             self._store.save("production", task)
             snapshot = self._snapshot(task)
         self._events.append("task.context_attached", {"task_id": task_id, **context})
