@@ -870,6 +870,10 @@ class RealtimeSessionHub:
         try:
             if self._session_update_timeout > 0:
                 await asyncio.wait_for(session.context_item_ack.wait(), timeout=self._session_update_timeout)
+        except TimeoutError:
+            # Best-effort: the Speaker didn't acknowledge the continuity note in time, but the
+            # user must still be able to leave takeover mode rather than getting stuck in it.
+            self._events.append("call.takeover_context_ack_timeout", {"task_id": task_id})
         finally:
             session.pending_context_item_id = ""
         session.expected_field = None
