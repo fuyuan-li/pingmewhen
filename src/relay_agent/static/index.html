@@ -325,8 +325,8 @@
             <label class="attach-plus" for="context-file" title="Attach a context file" aria-label="Attach a context file">
               <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             </label>
-            <input id="context-file" type="file" accept=".pdf,.txt,.md,.markdown,.csv,.tsv,.log,.text" />
-            <span id="file-name" class="file-name">Optional · PDF or text file, up to 10 MB</span>
+            <input id="context-file" type="file" multiple accept=".pdf,.txt,.md,.markdown,.csv,.tsv,.log,.text" />
+            <span id="file-name" class="file-name">Optional · PDF or text files, up to 10 MB each</span>
             <button id="start" class="primary" disabled>Start task</button>
           </div>
         </section>
@@ -348,7 +348,7 @@
                 <label id="task-attach-label" class="attach-inline" for="task-context-file" title="Attach a context file" aria-label="Attach a context file">
                   <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                 </label>
-                <input id="task-context-file" class="task-context-input" type="file" accept=".pdf,.txt,.md,.markdown,.csv,.tsv,.log,.text" />
+                <input id="task-context-file" class="task-context-input" type="file" multiple accept=".pdf,.txt,.md,.markdown,.csv,.tsv,.log,.text" />
                 <input id="planning-instruction" type="text" placeholder="Reply to PingMeWhen or revise the plan…" />
                 <button id="planning-send" class="send">Send</button>
               </div>
@@ -523,7 +523,13 @@
         startButton.disabled = !goalInput.value.trim();
       });
       contextFile.addEventListener('change', () => {
-        document.querySelector('#file-name').textContent = contextFile.files[0]?.name || 'Optional · PDF or text file, up to 10 MB';
+        const files = contextFile.files;
+        const label = files.length === 0
+          ? 'Optional · PDF or text files, up to 10 MB each'
+          : files.length === 1
+            ? files[0].name
+            : `${files.length} files selected`;
+        document.querySelector('#file-name').textContent = label;
       });
 
       startButton.addEventListener('click', async () => {
@@ -540,9 +546,9 @@
         optimisticStart.pending.textContent = 'PingMeWhen is researching your goal and preparing its first response';
         try {
           const contexts = [];
-          if (contextFile.files[0]) {
+          for (const file of contextFile.files) {
             const form = new FormData();
-            form.append('file', contextFile.files[0]);
+            form.append('file', file);
             const upload = await fetch('/api/contexts', {method: 'POST', body: form});
             contexts.push(await readResponse(upload));
           }
@@ -605,16 +611,18 @@
       }
 
       async function attachTaskContext() {
-        const file = taskContextFile.files[0];
-        if (!task || !file || actionInFlight) return;
+        const files = Array.from(taskContextFile.files);
+        if (!task || files.length === 0 || actionInFlight) return;
         actionInFlight = true;
         setControlsDisabled(true);
         try {
-          const form = new FormData();
-          form.append('file', file);
-          const response = await fetch(`/api/tasks/${task.id}/contexts`, {method: 'POST', body: form});
-          task = await readResponse(response);
-          renderTask();
+          for (const file of files) {
+            const form = new FormData();
+            form.append('file', file);
+            const response = await fetch(`/api/tasks/${task.id}/contexts`, {method: 'POST', body: form});
+            task = await readResponse(response);
+            renderTask();
+          }
         } catch (error) {
           showError(error.message);
         } finally {
