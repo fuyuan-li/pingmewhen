@@ -74,7 +74,7 @@ Models reason and communicate; application code owns plan approval, dialing, sta
 
 ### 4. Shaping the submission with GPT-5.6
 
-Finally, we used GPT-5.6 to synthesize the PRD, architecture notes, implementation evidence, and demo narrative into the hackathon write-up. It helped us compare every claim against the shipped product, avoid overstating unfinished capabilities, and sharpen the positioning from a generic “AI that makes calls” into **“the AI that knows when to hand control back to a human.”** The team reviewed and revised the resulting copy against the code and real-call workflow before submission.
+Finally, we used GPT-5.6 to help organize and challenge our submission narrative. It helped us compare claims against the PRD, architecture notes, implementation evidence, and real-call workflow, avoid overstating unfinished capabilities, and test whether our positioning clearly expressed what made the product different. The team rewrote the final copy, verified every technical claim against the code, and made the final editorial decisions—including sharpening the story from a generic “AI that makes calls” into **“the AI that knows when to hand control back to a human.”**
 
 Codex is central to the engineering workflow, but it is not an audio transport or a substitute credential for the Realtime API. PingMeWhen's runtime uses the local user's OpenAI API key.
 
